@@ -48,10 +48,17 @@ export class BitcoinRpcClient {
 
       return response.data.result;
     } catch (error: any) {
-      if (error.response && error.response.data && error.response.data.error) {
-        throw new Error(JSON.stringify(error.response.data.error));
+      console.error(`RPC call failed for method: ${method}`, error.message);
+      // If RPC fails, attempt fallback with bitcoin-cli
+      try {
+        const cliCommand = `${method} ${params.map((p) => JSON.stringify(p)).join(" ")}`;
+        const result = this.executeCliCommand(cliCommand, wallet);
+        return JSON.parse(result) as T;
+      } catch (cliError: any) {
+        throw new Error(
+          `Fallback bitcoin-cli command failed: ${cliError.message}`,
+        );
       }
-      throw error;
     }
   }
 
@@ -74,4 +81,7 @@ export class BitcoinRpcClient {
       throw new Error(`Error executing bitcoin-cli command: ${error.message}`);
     }
   }
+
+  // Wallet-related methods\
+  async listWallts();
 }
