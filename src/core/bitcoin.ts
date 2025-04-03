@@ -403,4 +403,14 @@ export class BitcoinRpcClient {
   async getBlock(blockhash: string, verbosity = 1): Promise<any> {
     return this.callRpc("getblock", [blockhash, verbosity]);
   }
+
+  // Utility methods
+  isWalletAddressNotFoundError(error: any): boolean {
+    return (
+      error.response &&
+      error.response.data &&
+      error.response.data.error &&
+      error.response.data.error.code === -4
+    );
+  }
 }
