@@ -1,0 +1,41 @@
+{
+  "name": "regtest_package",
+  "version": "1.0.0",
+  "description": "A terminal-based utility for managing Caravan multisig wallets in regtest mode. This tool simplifies development and testing with Caravan by providing an easy-to-use interface",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Legend101Zz/CaravanX.git"
+  },
+  "keywords": [
+    "bitcoin",
+    "regtest",
+    "multisig",
+    "psbt",
+    "caravan",
+    "bitcoin-core",
+    "wallet",
+    "blockchain",
+    "btc",
+    "cli",
+    "crypto",
+    "developer-tools",
+    "testing",
+    "psbt-signing",
+    "utxo",
+    "xpub",
+    "transactions",
+    "mining",
+    "script",
+    "automation"
+  ],
+  "author": "Mrigesh Thakur",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Legend101Zz/CaravanX/issues"
+  },
+  "homepage": "https://github.com/Legend101Zz/CaravanX#readme"
+}
