@@ -27,4 +27,37 @@ export class CaravanService {
     fs.ensureDirSync(this.caravanDir);
     fs.ensureDirSync(this.keysDir);
   }
+
+  /**
+   * List all Caravan wallet configurations
+   */
+  async listCaravanWallets(): Promise<CaravanWalletConfig[]> {
+    try {
+      const files = await fs.readdir(this.caravanDir);
+      const jsonFiles = files.filter((file) => file.endsWith(".json"));
+
+      const configs: CaravanWalletConfig[] = [];
+
+      for (const file of jsonFiles) {
+        try {
+          const configPath = path.join(this.caravanDir, file);
+          const config = await fs.readJson(configPath);
+
+          if (config.name && config.quorum && config.extendedPublicKeys) {
+            configs.push({
+              ...config,
+              filename: file,
+            });
+          }
+        } catch (error) {
+          console.error(`Error reading ${file}:`, error);
+        }
+      }
+
+      return configs;
+    } catch (error) {
+      console.error("Error listing Caravan wallet configs:", error);
+      return [];
+    }
+  }
 }
