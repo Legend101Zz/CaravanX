@@ -60,4 +60,12 @@ export class CaravanService {
       return [];
     }
   }
+
+  /**
+   * Get a specific Caravan wallet by name
+   */
+  async getCaravanWallet(name: string): Promise<CaravanWalletConfig | null> {
+    const wallets = await this.listCaravanWallets();
+    return wallets.find((wallet) => wallet.name === name) || null;
+  }
 }
