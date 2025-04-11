@@ -53,4 +53,35 @@ export class ConfigManager {
       console.error("Error saving configuration:", error);
     }
   }
+
+  /**
+   * Get the current configuration
+   */
+  getConfig(): AppConfig {
+    return this.config;
+  }
+
+  /**
+   * Update Bitcoin RPC configuration
+   */
+  updateBitcoinConfig(bitcoinConfig: Partial<AppConfig["bitcoin"]>): void {
+    this.config.bitcoin = { ...this.config.bitcoin, ...bitcoinConfig };
+    this.saveConfig();
+  }
+
+  /**
+   * Update application directories
+   */
+  updateDirectories(
+    dirs: Partial<Pick<AppConfig, "appDir" | "caravanDir" | "keysDir">>,
+  ): void {
+    this.config = { ...this.config, ...dirs };
+
+    // Make sure the directories exist
+    if (dirs.appDir) fs.ensureDirSync(dirs.appDir);
+    if (dirs.caravanDir) fs.ensureDirSync(dirs.caravanDir);
+    if (dirs.keysDir) fs.ensureDirSync(dirs.keysDir);
+
+    this.saveConfig();
+  }
 }
