@@ -79,4 +79,44 @@ export class CaravanService {
     await fs.writeJson(configPath, config, { spaces: 2 });
     return filename;
   }
+
+  /**
+   * Create a new Caravan wallet configuration
+   */
+  async createCaravanWalletConfig({
+    name,
+    addressType,
+    network,
+    requiredSigners,
+    totalSigners,
+    extendedPublicKeys,
+    startingAddressIndex = 0,
+  }: {
+    name: string;
+    addressType: AddressType;
+    network: Network;
+    requiredSigners: number;
+    totalSigners: number;
+    extendedPublicKeys: ExtendedPublicKey[];
+    startingAddressIndex?: number;
+  }): Promise<CaravanWalletConfig> {
+    // Generate UUID for the wallet (optional but useful for consistent wallet identification)
+    const uuid = crypto.randomBytes(16).toString("hex");
+
+    const config: CaravanWalletConfig = {
+      name,
+      addressType,
+      network,
+      quorum: {
+        requiredSigners,
+        totalSigners,
+      },
+      extendedPublicKeys,
+      startingAddressIndex,
+      uuid,
+    };
+
+    await this.saveCaravanWalletConfig(config);
+    return config;
+  }
 }
