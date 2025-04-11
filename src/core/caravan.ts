@@ -68,4 +68,15 @@ export class CaravanService {
     const wallets = await this.listCaravanWallets();
     return wallets.find((wallet) => wallet.name === name) || null;
   }
+
+  /**
+   * Save a Caravan wallet configuration
+   */
+  async saveCaravanWalletConfig(config: CaravanWalletConfig): Promise<string> {
+    const filename = `${config.name.replace(/[^a-zA-Z0-9]/g, "_")}.json`;
+    const configPath = path.join(this.caravanDir, filename);
+
+    await fs.writeJson(configPath, config, { spaces: 2 });
+    return filename;
+  }
 }
