@@ -76,4 +76,16 @@ export class TransactionService {
       throw error;
     }
   }
+
+  /**
+   * Broadcast a finalized transaction to the network
+   */
+  async broadcastTransaction(txHex: string): Promise<string> {
+    try {
+      return await this.rpc.sendRawTransaction(txHex);
+    } catch (error) {
+      console.error("Error broadcasting transaction:", error);
+      throw error;
+    }
+  }
 }
