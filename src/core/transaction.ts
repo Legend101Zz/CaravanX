@@ -106,7 +106,7 @@ export class TransactionService {
       const keyPair = ECPair.fromWIF(privateKeyWIF, this.network);
 
       // Get public key from private key for logging
-      const pubkey = keyPair.publicKey.toString("hex");
+      const pubkey = Buffer.from(keyPair.publicKey).toString("hex");
       console.log(`Using key with public key: ${pubkey.substring(0, 8)}...`);
 
       // Try to sign each input
@@ -120,7 +120,7 @@ export class TransactionService {
           psbt.signInput(i, keyPair);
           signedAny = true;
           console.log(`Successfully signed input ${i}`);
-        } catch (error) {
+        } catch (error: any) {
           console.error(`Could not sign input ${i}: ${error.message}`);
         }
       }
