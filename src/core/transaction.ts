@@ -23,4 +23,20 @@ export class TransactionService {
       ? bitcoin.networks.regtest
       : bitcoin.networks.testnet;
   }
+
+  /**
+   * Create a new PSBT from a wallet
+   */
+  async createPSBT(
+    wallet: string,
+    outputs: Record<string, number>[],
+  ): Promise<string> {
+    try {
+      const result = await this.rpc.createPSBT(wallet, outputs);
+      return result.psbt;
+    } catch (error) {
+      console.error(`Error creating PSBT in wallet "${wallet}":`, error);
+      throw error;
+    }
+  }
 }
