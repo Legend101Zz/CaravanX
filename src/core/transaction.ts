@@ -135,4 +135,61 @@ export class TransactionService {
       throw error;
     }
   }
+
+  /**
+   * Extract signatures from a PSBT for Caravan
+   */
+  async extractSignaturesForCaravan(
+    psbtBase64: string,
+    privateKeyWIF: string,
+  ): Promise<any> {
+    try {
+      // Parse the PSBT
+      const psbt = bitcoin.Psbt.fromBase64(psbtBase64, {
+        network: this.network,
+      });
+
+      // Import the private key
+      const keyPair = ECPair.fromWIF(privateKeyWIF, this.network);
+
+      // Get public key from private key
+      const pubkey = Buffer.from(keyPair.publicKey).toString("hex");
+
+      // Try to sign each input and extract signatures
+      const inputCount = psbt.data.inputs.length;
+      const signatures = [];
+
+      for (let i = 0; i < inputCount; i++) {
+        try {
+          // First try to sign the input
+          psbt.signInput(i, keyPair);
+
+          // Then extract the signature
+          const input = psbt.data.inputs[i];
+          const sigObj = input.partialSig?.find(
+            (sig) => Buffer.from(sig.pubkey).toString("hex") === pubkey,
+          );
+
+          if (sigObj) {
+            const sigHex = sigObj.signature.toString("hex");
+            signatures.push(sigHex);
+          } else {
+            signatures.push(null);
+          }
+        } catch (error) {
+          signatures.push(null);
+        }
+      }
+
+      // Return in Caravan-compatible format
+      return {
+        base64: psbt.toBase64(),
+        signatures,
+        signingPubKey: pubkey,
+      };
+    } catch (error) {
+      console.error("Error extracting signatures for Caravan:", error);
+      throw error;
+    }
+  }
 }
