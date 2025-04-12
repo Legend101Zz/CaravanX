@@ -1,10 +1,10 @@
-//@ts-nocheck
 import { BitcoinRpcClient } from "./rpc";
 import { UTXO } from "../types/bitcoin";
 import * as bitcoin from "bitcoinjs-lib";
 import { ECPairFactory } from "ecpair";
 import * as ecc from "tiny-secp256k1";
 import * as bip32 from "bip32";
+import chalk from "chalk";
 
 // Initialize libraries
 bitcoin.initEccLib(ecc);
@@ -43,7 +43,51 @@ export class BitcoinService {
     } = options;
 
     try {
-      return await this.rpc.createWallet(name, disablePrivateKeys, blank);
+      console.log(chalk.cyan(`Creating wallet "${name}" with options:`));
+      console.log(`- disablePrivateKeys: ${disablePrivateKeys}`);
+      console.log(`- blank: ${blank}`);
+      console.log(`- descriptorWallet: ${descriptorWallet}`);
+
+      // Try the direct RPC call first with a more compatible format
+      try {
+        return await this.rpc.callRpc("createwallet", [
+          name, // wallet_name
+          disablePrivateKeys, // disable_private_keys
+          blank, // blank
+          "", // passphrase
+          false, // avoid_reuse
+          descriptorWallet, // descriptors
+          true, // load_on_startup
+        ]);
+      } catch (error: any) {
+        // If the above fails, try with named parameters
+        if (
+          error.message.includes("unknown named parameter") ||
+          error.message.includes("incorrect number of parameters")
+        ) {
+          console.log(
+            chalk.yellow("Trying alternative wallet creation method..."),
+          );
+
+          // Create params object for named parameters
+          const params: any = {
+            wallet_name: name,
+            disable_private_keys: disablePrivateKeys,
+            blank: blank,
+          };
+
+          // Only add descriptors if needed (for compatibility with older versions)
+          if (descriptorWallet) {
+            params.descriptors = true;
+          }
+
+          return await this.rpc.callRpc("createwallet", [params]);
+        } else {
+          // Last resort: try the core createWallet method with fewer parameters
+          console.log(chalk.yellow("Trying simplified wallet creation..."));
+          return await this.rpc.createWallet(name, disablePrivateKeys, blank);
+        }
+      }
     } catch (error) {
       console.error(`Error creating wallet ${name}:`, error);
       throw error;
@@ -212,6 +256,7 @@ export class BitcoinService {
 
       // Extract seed or private key info from the wallet dump
       // This is simplified and would need more robust error handling in practice
+      // @ts-ignore
       const seed = Buffer.from(seedHex, "hex");
       const node = BIP32.fromSeed(seed, this.network);
 
@@ -222,6 +267,7 @@ export class BitcoinService {
       const xpub = derivedNode.neutered().toBase58();
 
       // Get the root fingerprint
+      // @ts-ignore
       const rootFingerprint = node.fingerprint.toString("hex");
 
       return { xpub, path, rootFingerprint };
@@ -238,6 +284,7 @@ export class BitcoinService {
           [`wpkh(${path})`],
           wallet,
         );
+        // @ts-ignore
         return { xpub: result.descriptor, path };
       } catch (fallbackError) {
         console.error("Fallback also failed:", fallbackError);
@@ -286,7 +333,9 @@ export class BitcoinService {
       wallet: walletName,
       xpub: xpubInfo.xpub,
       path: xpubInfo.path,
+      // @ts-ignore
       rootFingerprint: xpubInfo.rootFingerprint,
+      // @ts-ignore
       wif,
     };
   }

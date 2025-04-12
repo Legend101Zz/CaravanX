@@ -2,6 +2,7 @@ import axios, { AxiosRequestConfig } from "axios";
 import * as fs from "fs-extra";
 import { execSync } from "child_process";
 import { BitcoinRpcConfig } from "../types/config";
+import chalk from "chalk";
 
 /**
  * Client for communicating with the Bitcoin Core via RPC
@@ -269,7 +270,21 @@ export class BitcoinRpcClient {
    * @see https://developer.bitcoin.org/reference/rpc/importdescriptors.html
    */
   async importDescriptors(wallet: string, descriptors: any[]): Promise<any> {
-    return this.callRpc("importdescriptors", [descriptors], wallet);
+    try {
+      return await this.callRpc("importdescriptors", [descriptors], wallet);
+    } catch (error: any) {
+      if (error.message.includes("Method not found")) {
+        console.error(
+          chalk.yellow(
+            "importdescriptors method not supported. Your Bitcoin Core may be outdated.",
+          ),
+        );
+        throw new Error(
+          "importdescriptors method not supported. Please upgrade your Bitcoin Core to use multisig wallets.",
+        );
+      }
+      throw error;
+    }
   }
 
   // ========== Transaction-related methods ===========

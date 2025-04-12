@@ -154,12 +154,12 @@ export class MultisigCommands {
 
       // Map of address types to BIP paths and descriptor types
       const formatInfo = {
-        [AddressType.P2WSH]: { path: "84'/1'/0'", descriptorPrefix: "wpkh" },
+        [AddressType.P2WSH]: { path: "84h/1h/0h", descriptorPrefix: "wpkh" },
         [AddressType.P2SH_P2WSH]: {
-          path: "49'/1'/0'",
+          path: "49h/1h/0h",
           descriptorPrefix: "sh(wpkh",
         },
-        [AddressType.P2SH]: { path: "44'/1'/0'", descriptorPrefix: "pkh" },
+        [AddressType.P2SH]: { path: "44h/1h/0h", descriptorPrefix: "pkh" },
       };
 
       // The BIP path to use based on address type
@@ -178,16 +178,20 @@ export class MultisigCommands {
           );
 
           try {
-            // Create wallet without descriptor option as it may not be supported in all versions
+            // Create wallet WITH descriptor support
             await this.bitcoinService.createWallet(signerName, {
               disablePrivateKeys: false,
               blank: false,
-              descriptorWallet: false, // Use legacy wallet format for compatibility
+              descriptorWallet: true,
             });
 
             console.log(
               chalk.green(`Wallet "${signerName}" created successfully!`),
             );
+
+            // Give the wallet some time to initialize
+            console.log(chalk.cyan("Initializing wallet descriptors..."));
+            await new Promise((resolve) => setTimeout(resolve, 1000));
 
             // Get descriptors from the wallet
             const descriptors = await this.getWalletDescriptors(signerName);
@@ -201,13 +205,28 @@ export class MultisigCommands {
             // Find the appropriate descriptor based on the address type
             const desiredDescType = formatInfo[addressType].descriptorPrefix;
             let matchingDesc = null;
-
+            console.log(
+              chalk.cyan(
+                `Looking for descriptor: ${desiredDescType} with path: ${bipPath}`,
+              ),
+            );
             for (const desc of descriptors) {
-              if (
-                desc.desc.startsWith(desiredDescType) &&
-                desc.desc.includes(bipPath) &&
-                !desc.internal
-              ) {
+              // Log each descriptor for debugging
+              console.log(chalk.yellow(`Checking descriptor: ${desc.desc}`));
+
+              // Try different matching strategies
+              const startsWithPrefix = desc.desc.startsWith(desiredDescType);
+              const includesPath = desc.desc.includes(bipPath);
+              const isExternal = !desc.internal;
+
+              console.log(
+                `- Starts with prefix ${desiredDescType}: ${startsWithPrefix}`,
+              );
+              console.log(`- Includes path ${bipPath}: ${includesPath}`);
+              console.log(`- Is external address chain: ${isExternal}`);
+
+              if (startsWithPrefix && includesPath && isExternal) {
+                console.log(chalk.green(`Found exact match!`));
                 matchingDesc = desc;
                 break;
               }
@@ -453,13 +472,97 @@ export class MultisigCommands {
     walletName: string,
   ): Promise<any[] | null> {
     try {
-      const result: any = await this.bitcoinService.rpc.callRpc(
-        "listdescriptors",
-        [],
-        walletName,
+      // Try listdescriptors first (Bitcoin Core v0.21+)
+      try {
+        const result: any = await this.bitcoinService.rpc.callRpc(
+          "listdescriptors",
+          [],
+          walletName,
+        );
+        if (result && result.descriptors && result.descriptors.length > 0) {
+          return result.descriptors;
+        }
+      } catch (error: any) {
+        console.log(
+          chalk.yellow(`listdescriptors not supported: ${error.message}`),
+        );
+        // Continue with alternative methods
+      }
+
+      // Alternative: try to get a descriptor from getaddressinfo
+      try {
+        console.log(
+          chalk.cyan(`Trying alternative method to get descriptors...`),
+        );
+
+        // Get an address from the wallet
+        const address = await this.bitcoinService.getNewAddress(walletName);
+        console.log(chalk.green(`Generated address: ${address}`));
+
+        // Get address info
+        const addressInfo = await this.bitcoinService.getAddressInfo(
+          walletName,
+          address,
+        );
+
+        if (addressInfo && addressInfo.desc) {
+          // Create a descriptor-like object manually
+          const isChange = false; // Assuming newly generated address is not change
+
+          // Try to extract derivation path
+          let path = "0"; // Default external chain
+          if (addressInfo.hdkeypath) {
+            const pathMatch = addressInfo.hdkeypath.match(
+              /m\/.*\/([0-9]+)\/[0-9]+$/,
+            );
+            if (pathMatch) {
+              path = pathMatch[1];
+            }
+          }
+
+          const descriptor = {
+            desc: addressInfo.desc,
+            timestamp: Math.floor(Date.now() / 1000),
+            active: true,
+            internal: path === "1",
+            range: [0, 1000],
+            next: 0,
+          };
+
+          console.log(
+            chalk.green(
+              `Created descriptor from address info: ${JSON.stringify(descriptor)}`,
+            ),
+          );
+          return [descriptor];
+        }
+      } catch (error) {
+        console.error(chalk.red(`Error getting address info: ${error}`));
+      }
+
+      // Last resort: try to create a dummy descriptor
+      console.log(
+        chalk.yellow(`Could not get descriptors, creating dummy descriptor`),
       );
 
-      return result.descriptors;
+      // Map address types to BIP paths
+      const addressTypeMap = {
+        [AddressType.P2WSH]: "84'/1'/0'",
+        [AddressType.P2SH_P2WSH]: "49'/1'/0'",
+        [AddressType.P2SH]: "44'/1'/0'",
+      };
+
+      // Create a dummy descriptor that will be replaced with manual input
+      return [
+        {
+          desc: `dummy_descriptor_for_${walletName}`,
+          timestamp: Math.floor(Date.now() / 1000),
+          active: true,
+          internal: false,
+          range: [0, 1000],
+          next: 0,
+        },
+      ];
     } catch (error) {
       console.error(
         chalk.red(`Error getting descriptors for ${walletName}:`),
