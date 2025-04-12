@@ -3,6 +3,21 @@ import chalk from "chalk";
 import { CaravanRegtestManager } from "../index";
 import figlet from "figlet";
 import * as fs from "fs-extra";
+import ora from "ora";
+
+// Define a consistent color scheme
+const colors = {
+  primary: chalk.hex("#F7931A"), // Bitcoin orange
+  secondary: chalk.hex("#1C2C5B"), // Dark blue
+  accent: chalk.hex("#00ACED"), // Light blue
+  success: chalk.hex("#28a745"), // Green
+  warning: chalk.hex("#ffc107"), // Yellow
+  error: chalk.hex("#dc3545"), // Red
+  info: chalk.hex("#17a2b8"), // Teal
+  muted: chalk.hex("#6c757d"), // Gray
+  header: chalk.bold.hex("#F7931A"), // Bold orange for headers
+  commandName: chalk.bold.hex("#1C2C5B"), // Bold dark blue for command names
+};
 
 /**
  * Main menu interface
@@ -10,99 +25,279 @@ import * as fs from "fs-extra";
 export class MainMenu {
   private app: CaravanRegtestManager;
 
+  // Menu categories
+  private readonly mainMenuCategories = [
+    { name: colors.header("🏦 Bitcoin Wallets"), value: "bitcoin-wallets" },
+    { name: colors.header("🔐 Caravan Multisig"), value: "caravan-multisig" },
+    { name: colors.header("💸 Transactions"), value: "transactions" },
+    { name: colors.header("⚙️ System"), value: "system" },
+    { name: colors.header("❓ Help"), value: "help" },
+    { name: colors.header("🚪 Exit"), value: "exit" },
+  ];
+
+  // Submenu items
+  private readonly subMenus = {
+    "bitcoin-wallets": [
+      { name: colors.commandName("List all wallets"), value: "list-wallets" },
+      { name: colors.commandName("Create new wallet"), value: "create-wallet" },
+      {
+        name: colors.commandName("Create wallet with private key"),
+        value: "create-key-wallet",
+      },
+      {
+        name: colors.commandName("View wallet details"),
+        value: "wallet-details",
+      },
+      {
+        name: colors.commandName("Send funds between wallets"),
+        value: "send-funds",
+      },
+      {
+        name: colors.commandName("Fund wallet with regtest coins"),
+        value: "fund-wallet",
+      },
+      { name: colors.muted("Back to main menu"), value: "back" },
+    ],
+    "caravan-multisig": [
+      {
+        name: colors.commandName("List Caravan wallets"),
+        value: "list-caravan",
+      },
+      {
+        name: colors.commandName("Create new Caravan multisig wallet"),
+        value: "create-caravan",
+      },
+      {
+        name: colors.commandName("View Caravan wallet details"),
+        value: "caravan-details",
+      },
+      {
+        name: colors.commandName("Create watch-only wallet for Caravan"),
+        value: "create-watch",
+      },
+      {
+        name: colors.commandName("Configure private keys for Caravan wallet"),
+        value: "configure-keys",
+      },
+      {
+        name: colors.commandName("Fund Caravan multisig wallet"),
+        value: "fund-caravan",
+      },
+      { name: colors.muted("Back to main menu"), value: "back" },
+    ],
+    transactions: [
+      { name: colors.commandName("Create new PSBT"), value: "create-psbt" },
+      {
+        name: colors.commandName("Sign PSBT with wallet"),
+        value: "sign-psbt-wallet",
+      },
+      {
+        name: colors.commandName("Sign PSBT with private key"),
+        value: "sign-psbt-key",
+      },
+      {
+        name: colors.commandName("Analyze and decode PSBT"),
+        value: "analyze-psbt",
+      },
+      {
+        name: colors.commandName("Finalize and broadcast PSBT"),
+        value: "finalize-psbt",
+      },
+      { name: colors.muted("Back to main menu"), value: "back" },
+    ],
+    system: [
+      {
+        name: colors.commandName("Mining and block generation"),
+        value: "mining",
+      },
+      { name: colors.commandName("Export data"), value: "export" },
+      { name: colors.commandName("Import data"), value: "import" },
+      { name: colors.commandName("Settings"), value: "settings" },
+      { name: colors.muted("Back to main menu"), value: "back" },
+    ],
+  };
+
   constructor(app: CaravanRegtestManager) {
     this.app = app;
   }
 
   /**
-   * Display the ASCII art banner
+   * Display the Caravan logo
    */
-  private displayBanner(): void {
-    const bannerText = figlet.textSync("Caravan Regtest", {
-      font: "Standard",
-      horizontalLayout: "default",
-      verticalLayout: "default",
-    });
+  private displayLogo(): void {
+    const caravanLogo = `
+    ${colors.primary("   ______                                    ")}
+    ${colors.primary("  / ____/___ __________ __   _____ ____     ")}
+    ${colors.primary(" / /   / __ \`/ ___/ __ \`/ | / / _ \\/ __ \\   ")}
+    ${colors.primary("/ /___/ /_/ / /  / /_/ /| |/ / /_/ / / / /   ")}
+    ${colors.primary("\\____/\\__,_/_/   \\__,_/ |___/\\__,_/_/ /_/    ")}
 
-    console.log(chalk.cyan(bannerText));
+    ${colors.accent("========== R E G T E S T   M O D E ==========")}
+    `;
+
+    console.log(caravanLogo);
     console.log(
-      chalk.yellow("A terminal-based utility for Caravan in regtest mode\n"),
+      colors.muted("A terminal-based utility for Caravan in regtest mode\n"),
     );
+  }
+
+  /**
+   * Execute an async task with a loading spinner
+   */
+  private async withSpinner<T>(
+    message: string,
+    task: () => Promise<T>,
+  ): Promise<T> {
+    const spinner = ora({
+      text: message,
+      color: "yellow",
+    }).start();
+
+    try {
+      const result = await task();
+      spinner.succeed(colors.success(message + " - Complete"));
+      return result;
+    } catch (error) {
+      spinner.fail(colors.error(message + " - Failed"));
+      throw error;
+    }
+  }
+
+  /**
+   * Handle paginated output display
+   */
+  private async displayPaginatedOutput(
+    text: string,
+    pageSize: number = 15,
+  ): Promise<void> {
+    const lines = text.split("\n");
+    const pages = [];
+
+    for (let i = 0; i < lines.length; i += pageSize) {
+      pages.push(lines.slice(i, i + pageSize).join("\n"));
+    }
+
+    if (pages.length <= 1) {
+      console.log(text);
+      return;
+    }
+
+    let currentPage = 0;
+
+    while (currentPage < pages.length) {
+      console.clear();
+      console.log(pages[currentPage]);
+      console.log(colors.muted(`\nPage ${currentPage + 1}/${pages.length}`));
+
+      if (currentPage < pages.length - 1) {
+        const action = await select({
+          message: "Navigation:",
+          choices: [
+            { name: "Next page", value: "next" },
+            {
+              name: "Previous page",
+              value: "prev",
+              disabled: currentPage === 0,
+            },
+            { name: "Exit", value: "exit" },
+          ],
+        });
+
+        if (action === "exit") break;
+        if (action === "next") currentPage++;
+        if (action === "prev") currentPage--;
+      } else {
+        await input({ message: "Press Enter to continue..." });
+        break;
+      }
+    }
   }
 
   /**
    * Show the main menu and process user selection
    */
   async showMainMenu(): Promise<void> {
-    const choices = [
-      { name: chalk.cyan(" === Bitcoin Wallets === "), disabled: true },
-      { name: "List all wallets", value: "list-wallets" },
-      { name: "Create new wallet", value: "create-wallet" },
-      { name: "Create wallet with private key", value: "create-key-wallet" },
-      { name: "View wallet details", value: "wallet-details" },
-      { name: "Send funds between wallets", value: "send-funds" },
-      { name: "Fund wallet with regtest coins", value: "fund-wallet" },
+    let exit = false;
 
-      { name: chalk.cyan(" === Caravan Multisig === "), disabled: true },
-      { name: "List Caravan wallets", value: "list-caravan" },
-      { name: "Create new Caravan multisig wallet", value: "create-caravan" },
-      { name: "View Caravan wallet details", value: "caravan-details" },
-      { name: "Create watch-only wallet for Caravan", value: "create-watch" },
-      {
-        name: "Configure private keys for Caravan wallet",
-        value: "configure-keys",
-      },
-      { name: "Fund Caravan multisig wallet", value: "fund-caravan" },
-
-      { name: chalk.cyan(" === Transactions === "), disabled: true },
-      { name: "Create new PSBT", value: "create-psbt" },
-      { name: "Sign PSBT with wallet", value: "sign-psbt-wallet" },
-      { name: "Sign PSBT with private key", value: "sign-psbt-key" },
-      { name: "Analyze and decode PSBT", value: "analyze-psbt" },
-      { name: "Finalize and broadcast PSBT", value: "finalize-psbt" },
-
-      { name: chalk.cyan(" === System === "), disabled: true },
-      { name: "Mining and block generation", value: "mining" },
-      { name: "Export data", value: "export" },
-      { name: "Import data", value: "import" },
-      { name: "Settings", value: "settings" },
-      { name: "Help", value: "help" },
-      { name: "Exit", value: "exit" },
-    ];
-
-    while (true) {
+    while (!exit) {
       console.clear(); // Clear the console before displaying the menu
-      this.displayBanner();
+      this.displayLogo();
 
       try {
-        const action = await select({
+        const category = await select({
           message: "What would you like to do?",
-          pageSize: 20,
-          //@ts-ignore
-          choices,
+          pageSize: 10,
+          choices: this.mainMenuCategories,
         });
 
-        if (action === "exit") {
+        if (category === "exit") {
           console.log(
-            chalk.green(
-              "Thank you for using Caravan Regtest Manager. Goodbye!",
+            colors.success(
+              "\nThank you for using Caravan Regtest Manager. Goodbye!",
             ),
           );
           process.exit(0);
         }
 
-        await this.processAction(action!);
+        if (category === "help") {
+          await this.showHelp();
+          await input({ message: "Press Enter to continue..." });
+          continue;
+        }
 
-        // Wait for user to press Enter before showing the menu again
-        await input({
-          message: "Press Enter to continue...",
-        });
+        // Show submenu for selected category
+        await this.showSubMenu(category);
       } catch (error) {
-        console.error(chalk.red("Error:"), error);
-        await input({
-          message: "Press Enter to continue...",
-        });
+        console.error(colors.error("Error:"), error);
+        await input({ message: "Press Enter to continue..." });
       }
+    }
+  }
+
+  /**
+   * Show submenu for a selected category
+   */
+  private async showSubMenu(category: string): Promise<void> {
+    //@ts-ignore
+    const subMenu = this.subMenus[category];
+
+    if (!subMenu) return;
+
+    console.clear();
+    this.displayLogo();
+    console.log(
+      colors.header(`\n=== ${this.getCategoryTitle(category)} ===\n`),
+    );
+
+    const action = await select({
+      message: "Select an action:",
+      pageSize: 10,
+      choices: subMenu,
+    });
+
+    if (action === "back") return;
+    //@ts-ignore
+    await this.processAction(action);
+
+    // Wait for user to press Enter before showing the menu again
+    await input({ message: "Press Enter to continue..." });
+  }
+
+  /**
+   * Get readable title for a category
+   */
+  private getCategoryTitle(category: string): string {
+    switch (category) {
+      case "bitcoin-wallets":
+        return "Bitcoin Wallets";
+      case "caravan-multisig":
+        return "Caravan Multisig";
+      case "transactions":
+        return "Transactions";
+      case "system":
+        return "System";
+      default:
+        return category;
     }
   }
 
@@ -110,79 +305,88 @@ export class MainMenu {
    * Process the selected menu action
    */
   private async processAction(action: string): Promise<void> {
-    switch (action) {
-      // Bitcoin Wallets
-      case "list-wallets":
-        await this.app.walletCommands.listWallets();
-        break;
-      case "create-wallet":
-        await this.app.walletCommands.createWallet();
-        break;
-      case "create-key-wallet":
-        await this.app.walletCommands.createPrivateKeyWallet();
-        break;
-      case "wallet-details":
-        await this.app.walletCommands.showWalletDetails();
-        break;
-      case "send-funds":
-        await this.app.walletCommands.sendFunds();
-        break;
-      case "fund-wallet":
-        await this.app.walletCommands.fundWallet();
-        break;
+    try {
+      switch (action) {
+        // Bitcoin Wallets
+        case "list-wallets":
+          await this.withSpinner("Listing wallets", async () => {
+            const result = await this.app.walletCommands.listWallets();
+            return result;
+          });
+          break;
+        case "create-wallet":
+          await this.app.walletCommands.createWallet();
+          break;
+        case "create-key-wallet":
+          await this.app.walletCommands.createPrivateKeyWallet();
+          break;
+        case "wallet-details":
+          await this.app.walletCommands.showWalletDetails();
+          break;
+        case "send-funds":
+          await this.app.walletCommands.sendFunds();
+          break;
+        case "fund-wallet":
+          await this.app.walletCommands.fundWallet();
+          break;
 
-      // Caravan Multisig
-      case "list-caravan":
-        await this.app.multisigCommands.listCaravanWallets();
-        break;
-      case "create-caravan":
-        await this.app.multisigCommands.createCaravanWallet();
-        break;
-      case "caravan-details":
-        await this.app.multisigCommands.showCaravanWalletDetails();
-        break;
-      case "create-watch":
-        await this.app.multisigCommands.createWatchWallet();
-        break;
-      case "fund-caravan":
-        await this.app.multisigCommands.fundCaravanWallet();
-        break;
+        // Caravan Multisig
+        case "list-caravan":
+          await this.withSpinner("Listing Caravan wallets", async () => {
+            const result = await this.app.multisigCommands.listCaravanWallets();
+            return result;
+          });
+          break;
+        case "create-caravan":
+          await this.app.multisigCommands.createCaravanWallet();
+          break;
+        case "caravan-details":
+          await this.app.multisigCommands.showCaravanWalletDetails();
+          break;
+        case "create-watch":
+          await this.app.multisigCommands.createWatchWallet();
+          break;
+        case "fund-caravan":
+          await this.app.multisigCommands.fundCaravanWallet();
+          break;
 
-      // Transactions
-      case "create-psbt":
-        await this.app.transactionCommands.createPSBT();
-        break;
-      case "sign-psbt-wallet":
-        await this.app.transactionCommands.signPSBTWithWallet();
-        break;
-      case "sign-psbt-key":
-        await this.app.transactionCommands.signPSBTWithPrivateKey();
-        break;
-      case "analyze-psbt":
-        await this.app.transactionCommands.analyzePSBT();
-        break;
-      case "finalize-psbt":
-        await this.app.transactionCommands.finalizeAndBroadcastPSBT();
-        break;
+        // Transactions
+        case "create-psbt":
+          await this.app.transactionCommands.createPSBT();
+          break;
+        case "sign-psbt-wallet":
+          await this.app.transactionCommands.signPSBTWithWallet();
+          break;
+        case "sign-psbt-key":
+          await this.app.transactionCommands.signPSBTWithPrivateKey();
+          break;
+        case "analyze-psbt":
+          await this.app.transactionCommands.analyzePSBT();
+          break;
+        case "finalize-psbt":
+          await this.app.transactionCommands.finalizeAndBroadcastPSBT();
+          break;
 
-      // System
-      case "mining":
-        await this.miningMenu();
-        break;
-      case "export":
-        await this.exportMenu();
-        break;
-      case "import":
-        await this.importMenu();
-        break;
-      case "settings":
-        await this.settingsMenu();
-        break;
-      case "help":
-        await this.showHelp();
-        break;
-      default:
-        console.log(chalk.yellow(`Action '${action}' not implemented yet.`));
+        // System
+        case "mining":
+          await this.miningMenu();
+          break;
+        case "export":
+          await this.exportMenu();
+          break;
+        case "import":
+          await this.importMenu();
+          break;
+        case "settings":
+          await this.settingsMenu();
+          break;
+        default:
+          console.log(
+            colors.warning(`Action '${action}' not implemented yet.`),
+          );
+      }
+    } catch (error) {
+      console.error(colors.error("\nError executing command:"), error);
     }
   }
 
@@ -190,12 +394,22 @@ export class MainMenu {
    * Mining options menu
    */
   private async miningMenu(): Promise<void> {
+    console.clear();
+    this.displayLogo();
+    console.log(colors.header("\n=== Mining Options ===\n"));
+
     const action = await select({
-      message: "Mining Options:",
+      message: "Select mining action:",
       choices: [
-        { name: "Generate blocks to a wallet", value: "mine-to-wallet" },
-        { name: "Generate blocks to an address", value: "mine-to-address" },
-        { name: "Back to main menu", value: "back" },
+        {
+          name: colors.commandName("Generate blocks to a wallet"),
+          value: "mine-to-wallet",
+        },
+        {
+          name: colors.commandName("Generate blocks to an address"),
+          value: "mine-to-address",
+        },
+        { name: colors.muted("Back to main menu"), value: "back" },
       ],
     });
 
@@ -205,10 +419,14 @@ export class MainMenu {
 
     if (action === "mine-to-wallet") {
       // List wallets to select from
-      const wallets = await this.app.walletCommands.listWallets();
+      const wallets = await this.withSpinner("Loading wallets", async () => {
+        return await this.app.walletCommands.listWallets();
+      });
 
       if (wallets.length === 0) {
-        console.log(chalk.yellow("\nNo wallets found. Create a wallet first."));
+        console.log(
+          colors.warning("\nNo wallets found. Create a wallet first."),
+        );
         return;
       }
 
@@ -224,7 +442,12 @@ export class MainMenu {
           input! > 0 ? true : "Please enter a positive number",
       });
 
-      await this.app.walletCommands.fundWallet(wallet);
+      await this.withSpinner(
+        `Mining ${blocks} blocks to ${wallet}`,
+        async () => {
+          return await this.app.walletCommands.fundWallet(wallet);
+        },
+      );
     } else if (action === "mine-to-address") {
       const address = await input({
         message: "Enter destination address:",
@@ -240,26 +463,32 @@ export class MainMenu {
       });
 
       console.log(
-        chalk.cyan(`\nMining ${blocks} block(s) to address ${address}...`),
+        colors.info(`\nMining ${blocks} block(s) to address ${address}...`),
       );
 
       try {
-        // Access bitcoin service directly since it's not exposed through a command
-        const minedBlocks = await this.app.bitcoinService.generateToAddress(
-          blocks!,
-          address,
+        const minedBlocks = await this.withSpinner(
+          `Mining ${blocks} blocks`,
+          async () => {
+            return await this.app.bitcoinService.generateToAddress(
+              blocks!,
+              address,
+            );
+          },
         );
 
         console.log(
-          chalk.green(`\nSuccessfully mined ${minedBlocks.length} block(s)!`),
+          colors.success(
+            `\nSuccessfully mined ${minedBlocks.length} block(s)!`,
+          ),
         );
         console.log(
-          chalk.green(
+          colors.success(
             `Latest block hash: ${minedBlocks[minedBlocks.length - 1]}`,
           ),
         );
       } catch (error) {
-        console.error(chalk.red("\nError mining blocks:"), error);
+        console.error(colors.error("\nError mining blocks:"), error);
       }
     }
   }
@@ -268,15 +497,19 @@ export class MainMenu {
    * Export menu
    */
   private async exportMenu(): Promise<void> {
+    console.clear();
+    this.displayLogo();
+    console.log(colors.header("\n=== Export Options ===\n"));
+
     const action = await select({
-      message: "Export Options:",
+      message: "Select export option:",
       choices: [
         {
-          name: "Export Caravan wallet configuration",
+          name: colors.commandName("Export Caravan wallet configuration"),
           value: "export-caravan",
         },
-        { name: "Export key data", value: "export-keys" },
-        { name: "Back to main menu", value: "back" },
+        { name: colors.commandName("Export key data"), value: "export-keys" },
+        { name: colors.muted("Back to main menu"), value: "back" },
       ],
     });
 
@@ -285,10 +518,15 @@ export class MainMenu {
     }
 
     if (action === "export-caravan") {
-      const wallets = await this.app.multisigCommands.listCaravanWallets();
+      const wallets = await this.withSpinner(
+        "Loading Caravan wallets",
+        async () => {
+          return await this.app.multisigCommands.listCaravanWallets();
+        },
+      );
 
       if (wallets.length === 0) {
-        console.log(chalk.yellow("\nNo Caravan wallets found."));
+        console.log(colors.warning("\nNo Caravan wallets found."));
         return;
       }
 
@@ -304,10 +542,13 @@ export class MainMenu {
       });
 
       try {
-        await fs.writeJson(filename, selectedWallet, { spaces: 2 });
-        console.log(chalk.green(`\nCaravan wallet exported to ${filename}`));
+        await this.withSpinner(`Exporting wallet to ${filename}`, async () => {
+          await fs.writeJson(filename, selectedWallet, { spaces: 2 });
+          return true;
+        });
+        console.log(colors.success(`\nCaravan wallet exported to ${filename}`));
       } catch (error) {
-        console.error(chalk.red("\nError exporting wallet:"), error);
+        console.error(colors.error("\nError exporting wallet:"), error);
       }
     }
   }
@@ -316,15 +557,19 @@ export class MainMenu {
    * Import menu
    */
   private async importMenu(): Promise<void> {
+    console.clear();
+    this.displayLogo();
+    console.log(colors.header("\n=== Import Options ===\n"));
+
     const action = await select({
-      message: "Import Options:",
+      message: "Select import option:",
       choices: [
         {
-          name: "Import Caravan wallet configuration",
+          name: colors.commandName("Import Caravan wallet configuration"),
           value: "import-caravan",
         },
-        { name: "Import key data", value: "import-keys" },
-        { name: "Back to main menu", value: "back" },
+        { name: colors.commandName("Import key data"), value: "import-keys" },
+        { name: colors.muted("Back to main menu"), value: "back" },
       ],
     });
 
@@ -340,22 +585,33 @@ export class MainMenu {
       });
 
       try {
-        const config = await fs.readJson(filename);
+        const config = await this.withSpinner(
+          "Reading wallet configuration",
+          async () => {
+            return await fs.readJson(filename);
+          },
+        );
 
         if (!config.name || !config.quorum || !config.extendedPublicKeys) {
-          console.log(chalk.red("\nInvalid Caravan wallet configuration."));
+          console.log(colors.error("\nInvalid Caravan wallet configuration."));
           return;
         }
 
         console.log(
-          chalk.cyan(`\nImporting Caravan wallet "${config.name}"...`),
+          colors.info(`\nImporting Caravan wallet "${config.name}"...`),
         );
 
-        const savedFileName =
-          await this.app.caravanService.saveCaravanWalletConfig(config);
+        const savedFileName = await this.withSpinner(
+          "Saving wallet configuration",
+          async () => {
+            return await this.app.caravanService.saveCaravanWalletConfig(
+              config,
+            );
+          },
+        );
 
         console.log(
-          chalk.green(
+          colors.success(
             `\nCaravan wallet imported successfully as ${savedFileName}!`,
           ),
         );
@@ -370,7 +626,7 @@ export class MainMenu {
           await this.app.multisigCommands.createWatchWallet(config);
         }
       } catch (error) {
-        console.error(chalk.red("\nError importing Caravan wallet:"), error);
+        console.error(colors.error("\nError importing Caravan wallet:"), error);
       }
     } else if (action === "import-keys") {
       const filename = await input({
@@ -380,34 +636,39 @@ export class MainMenu {
       });
 
       try {
-        const keyData = await fs.readJson(filename);
+        const keyData = await this.withSpinner("Reading key data", async () => {
+          return await fs.readJson(filename);
+        });
 
         if (!keyData.caravanName || !keyData.keyData) {
-          console.log(chalk.red("\nInvalid key data file."));
+          console.log(colors.error("\nInvalid key data file."));
           return;
         }
 
         console.log(
-          chalk.cyan(
+          colors.info(
             `\nImporting key data for wallet "${keyData.caravanName}"...`,
           ),
         );
 
         // Check if the wallet exists
-        const wallets = await this.app.multisigCommands.listCaravanWallets();
+        const wallets = await this.withSpinner("Checking wallets", async () => {
+          return await this.app.multisigCommands.listCaravanWallets();
+        });
+
         const caravanWallet = wallets.find(
           (w) => w.name === keyData.caravanName,
         );
 
         if (!caravanWallet) {
           console.log(
-            chalk.yellow(`\nWallet "${keyData.caravanName}" not found.`),
+            colors.warning(`\nWallet "${keyData.caravanName}" not found.`),
           );
-          console.log(chalk.yellow("Import the wallet configuration first."));
+          console.log(colors.warning("Import the wallet configuration first."));
           return;
         }
       } catch (error) {
-        console.error(chalk.red("\nError importing key data:"), error);
+        console.error(colors.error("\nError importing key data:"), error);
       }
     }
   }
@@ -416,22 +677,28 @@ export class MainMenu {
    * Settings menu
    */
   private async settingsMenu(): Promise<void> {
-    console.log(chalk.cyan("\n=== Settings ==="));
+    console.clear();
+    this.displayLogo();
+    console.log(colors.header("\n=== Settings ===\n"));
 
     const action = await select({
       message: "Settings options:",
       choices: [
         {
-          name: "Update Bitcoin Core connection settings",
+          name: colors.commandName("Update Bitcoin Core connection settings"),
           value: "update-bitcoin",
         },
-        { name: "Change application directories", value: "update-dirs" },
-        { name: "View current configuration", value: "view-config" },
-        { name: "Back to main menu", value: "back" },
+        {
+          name: colors.commandName("Change application directories"),
+          value: "update-dirs",
+        },
+        {
+          name: colors.commandName("View current configuration"),
+          value: "view-config",
+        },
+        { name: colors.muted("Back to main menu"), value: "back" },
       ],
     });
-    // Simply display the current configuration for now
-    const config = this.app.configManager.getConfig();
 
     if (action === "back") return;
 
@@ -447,7 +714,7 @@ export class MainMenu {
   private async updateAppDirectories(): Promise<void> {
     const config = this.app.configManager.getConfig();
 
-    console.log(chalk.cyan("\n=== Update Application Directories ==="));
+    console.log(colors.header("\n=== Update Application Directories ===\n"));
 
     const appDir = await input({
       message: "Enter application directory:",
@@ -464,63 +731,93 @@ export class MainMenu {
       default: config.keysDir,
     });
 
-    await this.app.configManager.updateDirectories({
-      appDir,
-      caravanDir,
-      keysDir,
+    await this.withSpinner("Updating directories", async () => {
+      await this.app.configManager.updateDirectories({
+        appDir,
+        caravanDir,
+        keysDir,
+      });
+      return true;
     });
-    console.log(chalk.green("\nDirectories updated successfully!"));
+
+    console.log(colors.success("\nDirectories updated successfully!"));
   }
 
   private displayCurrentConfig(): void {
     const config = this.app.configManager.getConfig();
 
-    console.log(chalk.cyan("\nBitcoin RPC Settings:"));
-    console.log(`Protocol: ${config.bitcoin.protocol}`);
-    console.log(`Host: ${config.bitcoin.host}`);
-    console.log(`Port: ${config.bitcoin.port}`);
-    console.log(`User: ${config.bitcoin.user}`);
-    console.log(`Data Directory: ${config.bitcoin.dataDir}`);
+    console.clear();
+    this.displayLogo();
+    console.log(colors.header("\n=== Current Configuration ===\n"));
 
-    console.log(chalk.cyan("\nApplication Directories:"));
-    console.log(`App Directory: ${config.appDir}`);
-    console.log(`Caravan Directory: ${config.caravanDir}`);
-    console.log(`Keys Directory: ${config.keysDir}`);
+    console.log(colors.header("\nBitcoin RPC Settings:"));
+    console.log(colors.info(`Protocol: ${config.bitcoin.protocol}`));
+    console.log(colors.info(`Host: ${config.bitcoin.host}`));
+    console.log(colors.info(`Port: ${config.bitcoin.port}`));
+    console.log(colors.info(`User: ${config.bitcoin.user}`));
+    console.log(colors.info(`Data Directory: ${config.bitcoin.dataDir}`));
+
+    console.log(colors.header("\nApplication Directories:"));
+    console.log(colors.info(`App Directory: ${config.appDir}`));
+    console.log(colors.info(`Caravan Directory: ${config.caravanDir}`));
+    console.log(colors.info(`Keys Directory: ${config.keysDir}`));
   }
 
   /**
    * Show help information
    */
   private async showHelp(): Promise<void> {
-    console.log(chalk.cyan("\n=== Caravan Regtest Manager Help ==="));
+    console.clear();
+    this.displayLogo();
+    console.log(colors.header("\n=== Caravan Regtest Manager Help ===\n"));
 
-    console.log(chalk.yellow("\nBitcoin Wallets:"));
-    console.log("- Manage regular Bitcoin wallets in regtest mode");
-    console.log("- Create wallets, check balances, send funds");
-    console.log("- Fund wallets by mining new blocks");
-
-    console.log(chalk.yellow("\nCaravan Multisig:"));
-    console.log("- Create and manage Caravan multisig wallet configurations");
-    console.log("- Set up watch-only wallets for multisig addresses");
-    console.log("- Configure private keys for signing");
-
-    console.log(chalk.yellow("\nTransactions:"));
-    console.log("- Create, sign, and broadcast transactions");
-    console.log("- Work with PSBTs (Partially Signed Bitcoin Transactions)");
-    console.log("- Sign with wallets or individual private keys");
-
-    console.log(chalk.yellow("\nImportant Notes:"));
+    console.log(colors.header("\n🏦 Bitcoin Wallets:"));
     console.log(
-      "1. This tool is designed for regtest mode only (not for mainnet)",
+      colors.info("- Manage regular Bitcoin wallets in regtest mode"),
     );
-    console.log("2. Bitcoin Core must be running in regtest mode");
-    console.log("3. Private keys should be kept secure");
-    console.log("4. Use Caravan for real multisig wallet management");
+    console.log(colors.info("- Create wallets, check balances, send funds"));
+    console.log(colors.info("- Fund wallets by mining new blocks"));
 
-    console.log(chalk.yellow("\nUseful Resources:"));
-    console.log("- Caravan: https://github.com/caravan-bitcoin/caravan");
-    console.log("- Bitcoin Core: https://bitcoin.org/en/bitcoin-core/");
-    console.log("- Bitcoin Development: https://bitcoin.org/en/development");
+    console.log(colors.header("\n🔐 Caravan Multisig:"));
+    console.log(
+      colors.info("- Create and manage Caravan multisig wallet configurations"),
+    );
+    console.log(
+      colors.info("- Set up watch-only wallets for multisig addresses"),
+    );
+    console.log(colors.info("- Configure private keys for signing"));
+
+    console.log(colors.header("\n💸 Transactions:"));
+    console.log(colors.info("- Create, sign, and broadcast transactions"));
+    console.log(
+      colors.info("- Work with PSBTs (Partially Signed Bitcoin Transactions)"),
+    );
+    console.log(colors.info("- Sign with wallets or individual private keys"));
+
+    console.log(colors.header("\n⚠️ Important Notes:"));
+    console.log(
+      colors.warning(
+        "1. This tool is designed for regtest mode only (not for mainnet)",
+      ),
+    );
+    console.log(
+      colors.warning("2. Bitcoin Core must be running in regtest mode"),
+    );
+    console.log(colors.warning("3. Private keys should be kept secure"));
+    console.log(
+      colors.warning("4. Use Caravan for real multisig wallet management"),
+    );
+
+    console.log(colors.header("\n📚 Useful Resources:"));
+    console.log(
+      colors.info("- Caravan: https://github.com/caravan-bitcoin/caravan"),
+    );
+    console.log(
+      colors.info("- Bitcoin Core: https://bitcoin.org/en/bitcoin-core/"),
+    );
+    console.log(
+      colors.info("- Bitcoin Development: https://bitcoin.org/en/development"),
+    );
   }
 
   /**
