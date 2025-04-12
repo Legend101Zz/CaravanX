@@ -50,6 +50,7 @@ export class CaravanRegtestManager {
     this.multisigCommands = new MultisigCommands(
       this.caravanService,
       this.bitcoinService,
+      this.bitcoinRpcClient,
     );
     this.transactionCommands = new TransactionCommands(
       this.transactionService,

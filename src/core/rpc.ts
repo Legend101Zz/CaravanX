@@ -7,9 +7,9 @@ import { BitcoinRpcConfig } from "../types/config";
  * Client for communicating with the Bitcoin Core via RPC
  */
 export class BitcoinRpcClient {
-  private readonly config: BitcoinRpcConfig;
-  private readonly baseUrl: string;
-  private readonly auth: { username: string; password: string };
+  public readonly config: BitcoinRpcConfig;
+  public readonly baseUrl: string;
+  public readonly auth: { username: string; password: string };
 
   constructor(config: BitcoinRpcConfig) {
     this.config = config;

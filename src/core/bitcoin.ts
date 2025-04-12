@@ -15,7 +15,7 @@ const BIP32 = bip32.BIP32Factory(ecc);
  * Service for Bitcoin wallet operations
  */
 export class BitcoinService {
-  private readonly rpc: BitcoinRpcClient;
+  public readonly rpc: BitcoinRpcClient;
   private readonly network: bitcoin.networks.Network;
 
   constructor(rpc: BitcoinRpcClient, isRegtest = true) {
