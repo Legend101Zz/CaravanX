@@ -16,9 +16,9 @@ export class CaravanRegtestManager {
   private configManager: ConfigManager;
   private bitcoinRpcClient: BitcoinRpcClient;
   private bitcoinService: BitcoinService;
-  private caravanService: CaravanService;
   private transactionService: TransactionService;
 
+  public caravanService: CaravanService;
   public walletCommands: WalletCommands;
   public multisigCommands: MultisigCommands;
   public transactionCommands: TransactionCommands;
