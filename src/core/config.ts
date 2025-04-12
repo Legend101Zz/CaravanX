@@ -1,12 +1,13 @@
 import * as fs from "fs-extra";
 import * as path from "path";
+import chalk from "chalk";
 import { AppConfig, DEFAULT_CONFIG } from "../types/config";
 
 /**
  * Manages application Configuration
  */
 export class ConfigManager {
-  private readonly configPath: string;
+  private configPath: string;
   private config: AppConfig;
 
   constructor(configPath?: string) {
@@ -83,5 +84,25 @@ export class ConfigManager {
     if (dirs.keysDir) fs.ensureDirSync(dirs.keysDir);
 
     this.saveConfig();
+  }
+  // Add method to change config location
+  async changeConfigLocation(newPath: string): Promise<void> {
+    if (this.configPath === newPath) return;
+
+    // Save current config to new location
+    try {
+      // Ensure directory exists
+      fs.ensureDirSync(path.dirname(newPath));
+
+      // Copy current config to new location
+      fs.copyFileSync(this.configPath, newPath);
+
+      // Update path
+      this.configPath = newPath;
+      console.log(chalk.green(`Configuration moved to: ${newPath}`));
+    } catch (error) {
+      console.error(`Error changing config location: ${error}`);
+      throw error;
+    }
   }
 }

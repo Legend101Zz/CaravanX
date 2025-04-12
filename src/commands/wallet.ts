@@ -344,24 +344,58 @@ export class WalletCommands {
       console.log(
         chalk.green(`Current balance: ${walletInfoBefore.balance} BTC`),
       );
+      console.log(
+        chalk.green(
+          `Immature balance: ${walletInfoBefore.immature_balance} BTC`,
+        ),
+      );
 
       // Get a new address to mine to
       const address = await this.bitcoinService.getNewAddress(walletName);
       console.log(chalk.green(`Using address: ${address}`));
 
-      // Ask how many blocks to mine
-      const blocks = await input({
-        message: "How many blocks to mine?",
-        default: "1",
-        validate: (input) => {
-          const num = parseInt(input);
-          return !isNaN(num) && num > 0
-            ? true
-            : "Please enter a positive number";
-        },
+      // Allow user to specify amount rather than blocks
+      const fundingMethod = await select({
+        message: "How would you like to specify mining?",
+        choices: [
+          { name: "By number of blocks", value: "blocks" },
+          { name: "By target amount (approximate)", value: "amount" },
+        ],
       });
 
-      const numBlocks = parseInt(blocks);
+      let numBlocks;
+
+      if (fundingMethod === "blocks") {
+        const blocks = await input({
+          message: "How many blocks to mine?",
+          default: "1",
+          validate: (input) => {
+            const num = parseInt(input);
+            return !isNaN(num) && num > 0
+              ? true
+              : "Please enter a positive number";
+          },
+        });
+        numBlocks = parseInt(blocks);
+      } else {
+        const targetAmount = await input({
+          message: "How much BTC would you like to mine (approximate)?",
+          default: "50",
+          validate: (input) => {
+            const num = parseFloat(input);
+            return !isNaN(num) && num > 0
+              ? true
+              : "Please enter a positive number";
+          },
+        });
+        // Each block gives ~50 BTC in regtest mode
+        numBlocks = Math.ceil(parseFloat(targetAmount) / 50);
+        console.log(
+          chalk.cyan(
+            `\nMining approximately ${numBlocks} blocks to get ~${targetAmount} BTC...`,
+          ),
+        );
+      }
 
       console.log(
         chalk.cyan(`\nMining ${numBlocks} block(s) to address ${address}...`),
@@ -388,7 +422,22 @@ export class WalletCommands {
       console.log(chalk.green(`\nNew balance: ${walletInfoAfter.balance} BTC`));
       console.log(
         chalk.green(
-          `Added: ${walletInfoAfter.balance - walletInfoBefore.balance} BTC`,
+          `New immature balance: ${walletInfoAfter.immature_balance} BTC`,
+        ),
+      );
+      console.log(
+        chalk.green(
+          `Added: ${walletInfoAfter.balance - walletInfoBefore.balance} BTC (mature)`,
+        ),
+      );
+      console.log(
+        chalk.green(
+          `Added: ${walletInfoAfter.immature_balance - walletInfoBefore.immature_balance} BTC (immature)`,
+        ),
+      );
+      console.log(
+        chalk.yellow(
+          `\nNote: Newly mined coins require 100 confirmations before they can be spent.`,
         ),
       );
 

@@ -140,6 +140,23 @@ program
     }
   });
 
+// Command for changing config path
+program
+  .command("config-path")
+  .description("Change configuration file location")
+  .requiredOption("-p, --path <path>", "New path for config file")
+  .action(async (options) => {
+    try {
+      const app = new CaravanRegtestManager();
+      await app.configManager.changeConfigLocation(options.path);
+      console.log(
+        chalk.green(`Configuration path changed to: ${options.path}`),
+      );
+    } catch (error) {
+      console.error(chalk.red("\nError changing config path:"), error);
+    }
+  });
+
 // Import Caravan wallet from file
 program
   .command("import-caravan")

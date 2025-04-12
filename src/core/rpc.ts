@@ -27,7 +27,6 @@ export class BitcoinRpcClient {
   ): Promise<T> {
     try {
       const url = wallet ? `${this.baseUrl}/wallet/${wallet}` : this.baseUrl;
-
       const requestConfig: AxiosRequestConfig = {
         method: "post",
         url,

@@ -35,7 +35,7 @@ export class MainMenu {
    */
   async showMainMenu(): Promise<void> {
     const choices = [
-      { type: "separator", name: " === Bitcoin Wallets === " },
+      { name: chalk.cyan(" === Bitcoin Wallets === "), disabled: true },
       { name: "List all wallets", value: "list-wallets" },
       { name: "Create new wallet", value: "create-wallet" },
       { name: "Create wallet with private key", value: "create-key-wallet" },
@@ -43,7 +43,7 @@ export class MainMenu {
       { name: "Send funds between wallets", value: "send-funds" },
       { name: "Fund wallet with regtest coins", value: "fund-wallet" },
 
-      { type: "separator", name: " === Caravan Multisig === " },
+      { name: chalk.cyan(" === Caravan Multisig === "), disabled: true },
       { name: "List Caravan wallets", value: "list-caravan" },
       { name: "Create new Caravan multisig wallet", value: "create-caravan" },
       { name: "View Caravan wallet details", value: "caravan-details" },
@@ -54,14 +54,14 @@ export class MainMenu {
       },
       { name: "Fund Caravan multisig wallet", value: "fund-caravan" },
 
-      { type: "separator", name: " === Transactions === " },
+      { name: chalk.cyan(" === Transactions === "), disabled: true },
       { name: "Create new PSBT", value: "create-psbt" },
       { name: "Sign PSBT with wallet", value: "sign-psbt-wallet" },
       { name: "Sign PSBT with private key", value: "sign-psbt-key" },
       { name: "Analyze and decode PSBT", value: "analyze-psbt" },
       { name: "Finalize and broadcast PSBT", value: "finalize-psbt" },
 
-      { type: "separator", name: " === System === " },
+      { name: chalk.cyan(" === System === "), disabled: true },
       { name: "Mining and block generation", value: "mining" },
       { name: "Export data", value: "export" },
       { name: "Import data", value: "import" },
@@ -417,11 +417,62 @@ export class MainMenu {
    */
   private async settingsMenu(): Promise<void> {
     console.log(chalk.cyan("\n=== Settings ==="));
-    console.log(
-      chalk.yellow("Settings functionality not fully implemented yet."),
-    );
 
+    const action = await select({
+      message: "Settings options:",
+      choices: [
+        {
+          name: "Update Bitcoin Core connection settings",
+          value: "update-bitcoin",
+        },
+        { name: "Change application directories", value: "update-dirs" },
+        { name: "View current configuration", value: "view-config" },
+        { name: "Back to main menu", value: "back" },
+      ],
+    });
     // Simply display the current configuration for now
+    const config = this.app.configManager.getConfig();
+
+    if (action === "back") return;
+
+    if (action === "update-bitcoin") {
+      await this.app.setupBitcoinConfig();
+    } else if (action === "update-dirs") {
+      await this.updateAppDirectories();
+    } else if (action === "view-config") {
+      this.displayCurrentConfig();
+    }
+  }
+
+  private async updateAppDirectories(): Promise<void> {
+    const config = this.app.configManager.getConfig();
+
+    console.log(chalk.cyan("\n=== Update Application Directories ==="));
+
+    const appDir = await input({
+      message: "Enter application directory:",
+      default: config.appDir,
+    });
+
+    const caravanDir = await input({
+      message: "Enter Caravan wallets directory:",
+      default: config.caravanDir,
+    });
+
+    const keysDir = await input({
+      message: "Enter keys directory:",
+      default: config.keysDir,
+    });
+
+    await this.app.configManager.updateDirectories({
+      appDir,
+      caravanDir,
+      keysDir,
+    });
+    console.log(chalk.green("\nDirectories updated successfully!"));
+  }
+
+  private displayCurrentConfig(): void {
     const config = this.app.configManager.getConfig();
 
     console.log(chalk.cyan("\nBitcoin RPC Settings:"));
