@@ -48,6 +48,7 @@
   "homepage": "https://github.com/Legend101Zz/CaravanX#readme",
   "dependencies": {
     "@caravan/clients": "^0.4.0",
+    "@inquirer/prompts": "^7.4.1",
     "axios": "^1.8.4",
     "bip32": "^5.0.0-rc.0",
     "bitcoinjs-lib": "^6.1.7",
@@ -57,13 +58,11 @@
     "ecpair": "^3.0.0",
     "figlet": "^1.8.0",
     "fs-extra": "^11.3.0",
-    "inquirer": "^12.5.0",
     "tiny-secp256k1": "^2.2.3"
   },
   "devDependencies": {
     "@types/figlet": "^1.7.0",
     "@types/fs-extra": "^11.0.4",
-    "@types/inquirer": "^9.0.7",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.14.0",
     "@typescript-eslint/eslint-plugin": "^8.29.0",
