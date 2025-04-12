@@ -64,4 +64,16 @@ export class TransactionService {
       throw error;
     }
   }
+
+  /**
+   * Finalize a PSBT that has all required signatures
+   */
+  async finalizePSBT(psbtBase64: string): Promise<FinalizedPSBT> {
+    try {
+      return await this.rpc.finalizePSBT(psbtBase64);
+    } catch (error) {
+      console.error("Error finalizing PSBT:", error);
+      throw error;
+    }
+  }
 }
