@@ -29,6 +29,48 @@ export class CaravanService {
   }
 
   /**
+   * Get the path to the Caravan configuration directory
+   */
+  getCaravanDir(): string {
+    return this.caravanDir;
+  }
+
+  /**
+   * Convert BIP32 path from 'h' notation to apostrophe notation
+   * Example: "m/84h/1h/0h" becomes "m/84'/1'/0'"
+   */
+  convertBip32PathFormat(path: string): string {
+    // If the path already uses apostrophes, return it as is
+    if (path.includes("'")) {
+      return path;
+    }
+
+    // Replace 'h' with apostrophes
+    return path.replace(/h/g, "'");
+  }
+
+  /**
+   * Format a Caravan wallet config for export
+   * This handles any needed conversions (like BIP32 path format)
+   */
+  formatCaravanConfigForExport(
+    config: CaravanWalletConfig,
+  ): CaravanWalletConfig {
+    const formattedConfig = { ...config };
+
+    // Convert BIP32 paths in extended public keys
+    if (formattedConfig.extendedPublicKeys) {
+      formattedConfig.extendedPublicKeys =
+        formattedConfig.extendedPublicKeys.map((key) => ({
+          ...key,
+          bip32Path: this.convertBip32PathFormat(key.bip32Path),
+        }));
+    }
+
+    return formattedConfig;
+  }
+
+  /**
    * List all Caravan wallet configurations
    */
   async listCaravanWallets(): Promise<CaravanWalletConfig[]> {

@@ -8,9 +8,9 @@ import {
   Network,
 } from "../types/caravan";
 import { input, confirm, select, number } from "@inquirer/prompts";
-import * as fs from "fs/promises";
 import crypto from "crypto";
-
+import * as fs from "fs-extra";
+import * as path from "path";
 import chalk from "chalk";
 
 /**
@@ -432,6 +432,22 @@ export class MultisigCommands {
           watcherWalletName,
         );
         console.log(chalk.green(`Multisig descriptors imported successfully!`));
+        console.log(
+          chalk.cyan(
+            `\nIMPORTANT: When using Caravan, you need to import addresses to see your funds.`,
+          ),
+        );
+        console.log(
+          chalk.cyan(
+            `Follow these steps in Caravan after importing your wallet configuration:`,
+          ),
+        );
+        console.log(`1. Go to the "Addresses" tab`);
+        console.log(`2. Click the "Import Addresses" button at the bottom`);
+        console.log(
+          `3. Toggle the "Rescan" switch if this is your first time importing`,
+        );
+        console.log(`4. Click "Import Addresses" to complete the process`);
       } catch (error) {
         console.error(
           chalk.red(`Error importing multisig descriptors: ${error}`),
@@ -578,6 +594,7 @@ export class MultisigCommands {
   private async importMultisigToWatchWallet(
     caravanConfig: CaravanWalletConfig,
     watchWalletName: string,
+    rescan: boolean = false,
   ): Promise<boolean> {
     try {
       const { quorum, extendedPublicKeys, addressType } = caravanConfig;
@@ -610,23 +627,26 @@ export class MultisigCommands {
           throw new Error(`Unsupported address type: ${addressType}`);
       }
 
-      // Create descriptor objects
+      // Format descriptors as Caravan does
       const descriptors = [
         {
           desc: receiveDescriptor,
-          timestamp: "now",
-          active: true,
           internal: false,
-          range: [0, 999],
         },
         {
           desc: changeDescriptor,
-          timestamp: "now",
-          active: true,
           internal: true,
-          range: [0, 999],
         },
-      ];
+      ].map((d) => ({
+        ...d,
+        range: [0, 1005],
+        timestamp: rescan ? 0 : "now",
+        watchonly: true,
+        active: true,
+      }));
+
+      console.log(chalk.cyan("Importing descriptors with format:"));
+      console.log(JSON.stringify(descriptors, null, 2));
 
       // Import descriptors to watch wallet
       const importResult = await this.bitcoinService.rpc.importDescriptors(
@@ -635,7 +655,16 @@ export class MultisigCommands {
       );
 
       // Check if import was successful
-      const success = importResult.every((result: any) => result.success);
+      const success = Array.isArray(importResult)
+        ? importResult.every((result: any) => result.success)
+        : false;
+
+      if (!success) {
+        console.log(chalk.yellow("Import result:"), importResult);
+        console.log(
+          chalk.yellow("Some descriptors may not have imported successfully."),
+        );
+      }
 
       return success;
     } catch (error) {
@@ -659,102 +688,161 @@ export class MultisigCommands {
     );
 
     try {
-      // Fund the multisig wallet first
-      console.log(
-        chalk.cyan(`\nFirst, we need to fund the multisig wallet...`),
+      // Format the config for Caravan - convert BIP32 paths
+      const exportConfig =
+        this.caravanService.formatCaravanConfigForExport(caravanConfig);
+
+      // Save the configuration to a file
+      const configFileName = `${caravanConfig.name.replace(/\s+/g, "_").toLowerCase()}_config.json`;
+      const configPath = path.join(
+        this.caravanService.getCaravanDir(),
+        configFileName,
       );
 
-      // Get an address from the watch wallet
-      const multisigAddress =
-        await this.bitcoinService.getNewAddress(watchWalletName);
+      // Remove credentials if present
+      if (exportConfig.client?.password) {
+        delete exportConfig.client.password;
+      }
+
+      // Save the formatted config
+      await fs.writeJson(configPath, exportConfig, { spaces: 2 });
       console.log(
-        chalk.green(`Generated multisig address: ${multisigAddress}`),
+        chalk.green(`\nCaravan wallet configuration saved to: ${configPath}`),
       );
 
-      // See if signer wallet has funds
-      const signerInfo =
-        await this.bitcoinService.getWalletInfo(signerWalletName);
+      // Provide instructions to the user
+      console.log(
+        chalk.cyan(`\nFollow these steps to create a test transaction:`),
+      );
+      console.log(chalk.cyan(`1. Open Caravan in your browser`));
+      console.log(chalk.cyan(`2. Go to "Wallet" tab and click "Import"`));
+      console.log(chalk.cyan(`3. Load the configuration file: ${configPath}`));
+      console.log(
+        chalk.cyan(`4. Go to "Receive" tab and generate a new address`),
+      );
 
-      if (signerInfo.balance <= 0) {
+      // Ask the user to paste the address from Caravan
+      const multisigAddress = await input({
+        message: "Paste the multisig address from Caravan's Receive tab:",
+        validate: (addr) =>
+          addr && addr.trim().length > 0
+            ? true
+            : "Please enter a valid address",
+      });
+
+      console.log(
+        chalk.green(`\nReceived multisig address: ${multisigAddress}`),
+      );
+
+      // Check which wallets are available for funding
+      const wallets = await this.bitcoinService.listWallets();
+
+      // Remove the watch wallet and current signer wallet from options
+      const fundingWalletChoices = wallets
+        .filter((w) => w !== watchWalletName)
+        .map((w) => ({ name: w, value: w }));
+
+      if (fundingWalletChoices.length === 0) {
         console.log(
-          chalk.yellow(
-            `\nSigner wallet ${signerWalletName} has no funds. Mining some coins...`,
-          ),
+          chalk.yellow(`\nNo wallets available for funding. Let's create one.`),
         );
 
-        // Mine some blocks to fund the signer wallet
-        const signerAddress =
-          await this.bitcoinService.getNewAddress(signerWalletName);
-        await this.bitcoinService.generateToAddress(6, signerAddress);
-        console.log(chalk.green(`Mined 6 blocks to fund ${signerWalletName}`));
+        // Create a funding wallet
+        const fundingWalletName = `${caravanConfig.name.replace(/\s+/g, "_").toLowerCase()}_funding`;
+
+        await this.bitcoinService.createWallet(fundingWalletName, {
+          disablePrivateKeys: false,
+          blank: false,
+          descriptorWallet: true,
+        });
+
+        console.log(
+          chalk.green(`Created funding wallet: ${fundingWalletName}`),
+        );
+
+        // Mine some blocks to fund the wallet
+        const fundingAddress =
+          await this.bitcoinService.getNewAddress(fundingWalletName);
+        console.log(chalk.cyan(`\nMining 6 blocks to fund the wallet...`));
+        await this.bitcoinService.generateToAddress(6, fundingAddress);
+        console.log(chalk.green(`Mined 6 blocks to address ${fundingAddress}`));
+
+        // Set as the funding wallet
+        var selectedFundingWallet = fundingWalletName;
+      } else {
+        // Ask which wallet to use for funding
+        selectedFundingWallet = await select({
+          message: "Select a wallet to use for funding:",
+          choices: fundingWalletChoices,
+        });
+      }
+
+      // Check if selected wallet has funds
+      const walletInfo = await this.bitcoinService.getWalletInfo(
+        selectedFundingWallet,
+      );
+
+      if (walletInfo.balance <= 0) {
+        console.log(
+          chalk.yellow(`\nFunding wallet has no balance. Mining some coins...`),
+        );
+
+        // Mine blocks to fund the wallet
+        const fundingAddress = await this.bitcoinService.getNewAddress(
+          selectedFundingWallet,
+        );
+        await this.bitcoinService.generateToAddress(6, fundingAddress);
+        console.log(
+          chalk.green(`\nMined 6 blocks to fund ${selectedFundingWallet}`),
+        );
 
         // Wait a moment for wallet to update
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
-      // Send funds from signer wallet to multisig address
-      const fundAmount = 1.0; // 1 BTC
+      // Fund amount
+      const fundAmount = await number({
+        message: "Amount to send to multisig address (BTC):",
+        default: 0.005,
+      });
+
       console.log(
         chalk.cyan(`\nSending ${fundAmount} BTC to multisig address...`),
       );
 
-      const fundTxid = await this.bitcoinService.sendToAddress(
-        signerWalletName,
+      // Send to the multisig address
+      const txid = await this.bitcoinService.sendToAddress(
+        selectedFundingWallet,
         multisigAddress,
-        fundAmount,
+        fundAmount!,
       );
 
+      console.log(chalk.green(`\nTransaction sent successfully!`));
+      console.log(chalk.green(`Transaction ID: ${txid}`));
+
+      console.log(chalk.cyan(`\nNext steps:`));
+      console.log(`1. In Caravan, go to the "Pending Transactions" tab`);
+      console.log(`2. Click "Refresh" to see your pending transaction`);
       console.log(
-        chalk.green(`Funding transaction created! TXID: ${fundTxid}`),
+        `3. You can now create and sign spending transactions in the "Spend" tab`,
       );
 
-      // Mine a block to confirm the funding transaction
-      console.log(
-        chalk.cyan(`\nMining a block to confirm the funding transaction...`),
-      );
-      const address = await this.bitcoinService.getNewAddress(signerWalletName);
-      await this.bitcoinService.generateToAddress(1, address);
-      console.log(chalk.green(`Block mined to confirm funding transaction`));
+      // Mine a block to confirm
+      const mineConfirmation = await confirm({
+        message: "Would you like to mine a block to confirm the transaction?",
+        default: true,
+      });
 
-      // Wait a moment for wallet to update
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Create a PSBT to spend from the multisig wallet
-      console.log(
-        chalk.cyan(`\nCreating a test PSBT to spend from multisig wallet...`),
-      );
-
-      // Get a destination address from the signer wallet
-      const destAddress =
-        await this.bitcoinService.getNewAddress(signerWalletName);
-
-      // Create outputs
-      const outputs = [{ [destAddress]: 0.5 }]; // Send 0.5 BTC back to signer wallet
-
-      const psbt = await this.bitcoinService.rpc.createPSBT(
-        watchWalletName,
-        outputs,
-      );
-
-      if (!psbt) {
-        throw new Error("Failed to create PSBT");
+      if (mineConfirmation) {
+        console.log(
+          chalk.cyan(`\nMining a block to confirm the transaction...`),
+        );
+        const miningAddress = await this.bitcoinService.getNewAddress(
+          selectedFundingWallet,
+        );
+        await this.bitcoinService.generateToAddress(1, miningAddress);
+        console.log(chalk.green(`Block mined successfully!`));
       }
-
-      console.log(chalk.green(`\nTest PSBT created successfully!`));
-      console.log(chalk.green(`PSBT Base64: ${psbt.psbt}`));
-
-      // Save PSBT to a file
-      const psbtFileName = `${caravanConfig.name.replace(/\s+/g, "_").toLowerCase()}_test_psbt.txt`;
-      await fs.writeFile(psbtFileName, psbt.psbt);
-      console.log(chalk.green(`PSBT saved to ${psbtFileName}`));
-
-      console.log(chalk.cyan(`\nTo complete the test transaction:`));
-      console.log(`1. Open Caravan`);
-      console.log(`2. Import your wallet configuration`);
-      console.log(`3. Go to "Spend" tab`);
-      console.log(`4. Load the saved PSBT file`);
-      console.log(`5. Sign using your available keys`);
-      console.log(`6. Broadcast the transaction`);
     } catch (error) {
       console.error(chalk.red(`Error creating test transaction: ${error}`));
     }
