@@ -88,4 +88,51 @@ export class TransactionService {
       throw error;
     }
   }
+
+  /**
+   * Sign a PSBT with a private key in WIF format
+   */
+  async signPSBTWithPrivateKey(
+    psbtBase64: string,
+    privateKeyWIF: string,
+  ): Promise<string> {
+    try {
+      // Parse the PSBT
+      const psbt = bitcoin.Psbt.fromBase64(psbtBase64, {
+        network: this.network,
+      });
+
+      // Import the private key
+      const keyPair = ECPair.fromWIF(privateKeyWIF, this.network);
+
+      // Get public key from private key for logging
+      const pubkey = keyPair.publicKey.toString("hex");
+      console.log(`Using key with public key: ${pubkey.substring(0, 8)}...`);
+
+      // Try to sign each input
+      let signedAny = false;
+      const inputCount = psbt.data.inputs.length;
+      console.log(`PSBT has ${inputCount} input(s)`);
+
+      for (let i = 0; i < inputCount; i++) {
+        try {
+          console.log(`Attempting to sign input ${i}...`);
+          psbt.signInput(i, keyPair);
+          signedAny = true;
+          console.log(`Successfully signed input ${i}`);
+        } catch (error) {
+          console.error(`Could not sign input ${i}: ${error.message}`);
+        }
+      }
+
+      if (!signedAny) {
+        throw new Error("Could not sign any inputs with the provided key");
+      }
+
+      return psbt.toBase64();
+    } catch (error) {
+      console.error("Error signing PSBT with private key:", error);
+      throw error;
+    }
+  }
 }
