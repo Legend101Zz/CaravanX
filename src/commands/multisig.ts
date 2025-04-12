@@ -9,9 +9,24 @@ import {
 } from "../types/caravan";
 import { input, confirm, select, number } from "@inquirer/prompts";
 import crypto from "crypto";
+import chalk from "chalk";
 import * as fs from "fs-extra";
 import * as path from "path";
-import chalk from "chalk";
+import ora from "ora";
+import {
+  colors,
+  displayCommandTitle,
+  formatBitcoin,
+  truncate,
+  createTable,
+  formatSuccess,
+  formatWarning,
+  formatError,
+  boxText,
+  keyValue,
+  divider,
+  caravanLogo,
+} from "../utils/terminal";
 
 /**
  * Commands for managing Caravan multisig wallets
@@ -35,28 +50,44 @@ export class MultisigCommands {
    * List all Caravan wallet configurations
    */
   async listCaravanWallets(): Promise<CaravanWalletConfig[]> {
-    console.log(chalk.cyan("\n=== Caravan Wallets ==="));
+    displayCommandTitle("Caravan Wallets");
 
     try {
+      const spinner = ora("Loading Caravan wallet configurations...").start();
       const wallets = await this.caravanService.listCaravanWallets();
+      spinner.succeed("Wallet configurations loaded");
 
       if (wallets.length === 0) {
-        console.log(chalk.yellow("No Caravan wallet configurations found."));
+        console.log(formatWarning("No Caravan wallet configurations found."));
         return [];
       }
 
-      wallets.forEach((wallet, index) => {
-        console.log(chalk.green(`${index + 1}. ${wallet.name}`));
-        console.log(`   Network: ${wallet.network}`);
-        console.log(`   Address Type: ${wallet.addressType}`);
-        console.log(
-          `   Quorum: ${wallet.quorum.requiredSigners} of ${wallet.quorum.totalSigners}`,
-        );
-      });
+      // Prepare data for table
+      const tableRows = wallets.map((wallet, index) => [
+        (index + 1).toString(),
+        colors.highlight(wallet.name),
+        colors.info(wallet.network),
+        colors.info(wallet.addressType),
+        colors.info(
+          `${wallet.quorum.requiredSigners} of ${wallet.quorum.totalSigners}`,
+        ),
+      ]);
+
+      // Display table
+      console.log(
+        createTable(
+          ["#", "Wallet Name", "Network", "Address Type", "Quorum"],
+          tableRows,
+        ),
+      );
+
+      console.log(
+        `\nTotal wallets: ${colors.highlight(wallets.length.toString())}`,
+      );
 
       return wallets;
     } catch (error) {
-      console.error(chalk.red("Error listing Caravan wallets:"), error);
+      console.error(formatError("Error listing Caravan wallets:"), error);
       return [];
     }
   }
@@ -65,7 +96,7 @@ export class MultisigCommands {
    * Create a new Caravan wallet configuration
    */
   async createCaravanWallet(): Promise<CaravanWalletConfig | null> {
-    console.log(chalk.cyan("\n=== Create New Caravan Multisig Wallet ==="));
+    displayCommandTitle("Create New Caravan Multisig Wallet");
 
     try {
       // Basic wallet information
@@ -78,12 +109,15 @@ export class MultisigCommands {
       const addressType = await select({
         message: "Select address type:",
         choices: [
-          { name: "P2WSH (Native SegWit)", value: AddressType.P2WSH },
           {
-            name: "P2SH-P2WSH (Nested SegWit)",
+            name: colors.highlight("P2WSH (Native SegWit)"),
+            value: AddressType.P2WSH,
+          },
+          {
+            name: colors.highlight("P2SH-P2WSH (Nested SegWit)"),
             value: AddressType.P2SH_P2WSH,
           },
-          { name: "P2SH (Legacy)", value: AddressType.P2SH },
+          { name: colors.highlight("P2SH (Legacy)"), value: AddressType.P2SH },
         ],
         default: AddressType.P2WSH,
       });
@@ -91,7 +125,7 @@ export class MultisigCommands {
       // We'll focus on regtest for now
       const network = Network.REGTEST;
 
-      console.log(chalk.cyan(`Using network: ${network}`));
+      console.log(colors.info(`Using network: ${network}`));
 
       // Quorum information
       const requiredSigners = await number({
@@ -105,36 +139,51 @@ export class MultisigCommands {
 
       const totalSigners = await number({
         message: "Enter the total number of signers (N):",
-        validate: (input: number | undefined) =>
-          input !== undefined && input > 0
-            ? true
-            : "Number must be greater than 0",
-
+        validate: (input: number | undefined) => {
+          if (input === undefined || input <= 0) {
+            return "Number must be greater than 0";
+          }
+          if (input < requiredSigners!) {
+            return `Total signers must be at least ${requiredSigners}`;
+          }
+          return true;
+        },
         default: 3,
       });
+
+      console.log(
+        boxText(
+          `Wallet: ${colors.highlight(name)}\n` +
+            `Address Type: ${colors.highlight(addressType)}\n` +
+            `Network: ${colors.highlight(network)}\n` +
+            `Quorum: ${colors.highlight(`${requiredSigners} of ${totalSigners}`)}`,
+          { title: "Wallet Configuration", titleColor: colors.info },
+        ),
+      );
 
       // Create watcher wallet for Caravan
       const watcherWalletName = `${name.replace(/\s+/g, "_").toLowerCase()}_watcher`;
       console.log(
-        chalk.cyan(
+        colors.info(
           `\nCreating watch-only wallet "${watcherWalletName}" for Caravan...`,
         ),
       );
 
       try {
+        const spinner = ora(
+          `Creating watch-only wallet ${watcherWalletName}...`,
+        ).start();
         await this.bitcoinService.createWallet(watcherWalletName, {
           disablePrivateKeys: true,
           blank: false,
           descriptorWallet: true,
         });
-        console.log(
-          chalk.green(
-            `Watch-only wallet "${watcherWalletName}" created successfully!`,
-          ),
+        spinner.succeed(
+          `Watch-only wallet "${watcherWalletName}" created successfully!`,
         );
       } catch (error: any) {
         console.error(
-          chalk.red(`Error creating watch wallet: ${error.message}`),
+          formatError(`Error creating watch wallet: ${error.message}`),
         );
         return null;
       }
@@ -143,8 +192,11 @@ export class MultisigCommands {
       const createMethod = await select({
         message: "How would you like to create signer wallets?",
         choices: [
-          { name: "Create new wallets for each signer", value: "new" },
-          { name: "Use existing wallets", value: "existing" },
+          {
+            name: colors.highlight("Create new wallets for each signer"),
+            value: "new",
+          },
+          { name: colors.highlight("Use existing wallets"), value: "existing" },
         ],
       });
 
@@ -169,32 +221,43 @@ export class MultisigCommands {
 
       if (createMethod === "new") {
         // Create new wallets for each signer
+        console.log(
+          colors.info(`\nCreating ${totalSigners} wallet(s) for signers...`),
+        );
+
         for (let i = 0; i < totalSigners!; i++) {
           const signerName = `${name.replace(/\s+/g, "_").toLowerCase()}_signer_${i + 1}`;
           signerWallets.push(signerName);
 
           console.log(
-            chalk.cyan(`\nCreating wallet for signer ${i + 1}: ${signerName}`),
+            colors.info(`\nCreating wallet for signer ${i + 1}: ${signerName}`),
           );
 
           try {
             // Create wallet WITH descriptor support
+            const createSpinner = ora(
+              `Creating wallet ${signerName}...`,
+            ).start();
             await this.bitcoinService.createWallet(signerName, {
               disablePrivateKeys: false,
               blank: false,
               descriptorWallet: true,
             });
-
-            console.log(
-              chalk.green(`Wallet "${signerName}" created successfully!`),
+            createSpinner.succeed(
+              `Wallet "${signerName}" created successfully!`,
             );
 
             // Give the wallet some time to initialize
-            console.log(chalk.cyan("Initializing wallet descriptors..."));
+            const initSpinner = ora(
+              "Initializing wallet descriptors...",
+            ).start();
             await new Promise((resolve) => setTimeout(resolve, 1000));
+            initSpinner.succeed("Wallet initialized");
 
             // Get descriptors from the wallet
+            const descSpinner = ora("Retrieving wallet descriptors...").start();
             const descriptors = await this.getWalletDescriptors(signerName);
+            descSpinner.succeed("Descriptors retrieved");
 
             if (!descriptors) {
               throw new Error(
@@ -206,38 +269,29 @@ export class MultisigCommands {
             const desiredDescType = formatInfo[addressType].descriptorPrefix;
             let matchingDesc = null;
             console.log(
-              chalk.cyan(
-                `Looking for descriptor: ${desiredDescType} with path: ${bipPath}`,
+              colors.info(
+                `Looking for descriptor: ${colors.code(desiredDescType)} with path: ${colors.code(bipPath)}`,
               ),
             );
-            for (const desc of descriptors) {
-              // Log each descriptor for debugging
-              console.log(chalk.yellow(`Checking descriptor: ${desc.desc}`));
 
+            const matchSpinner = ora(
+              "Matching descriptor to wallet type...",
+            ).start();
+            for (const desc of descriptors) {
               // Try different matching strategies
               const startsWithPrefix = desc.desc.startsWith(desiredDescType);
               const includesPath = desc.desc.includes(bipPath);
               const isExternal = !desc.internal;
 
-              console.log(
-                `- Starts with prefix ${desiredDescType}: ${startsWithPrefix}`,
-              );
-              console.log(`- Includes path ${bipPath}: ${includesPath}`);
-              console.log(`- Is external address chain: ${isExternal}`);
-
               if (startsWithPrefix && includesPath && isExternal) {
-                console.log(chalk.green(`Found exact match!`));
                 matchingDesc = desc;
                 break;
               }
             }
 
             if (!matchingDesc) {
-              console.log(
-                chalk.yellow(
-                  `Could not find matching descriptor for ${addressType} in wallet ${signerName}`,
-                ),
-              );
+              matchSpinner.warn("Could not find exact descriptor match");
+
               // Try to find any descriptor that contains the BIP path
               for (const desc of descriptors) {
                 if (desc.desc.includes(bipPath) && !desc.internal) {
@@ -247,19 +301,28 @@ export class MultisigCommands {
               }
 
               if (!matchingDesc) {
+                matchSpinner.fail("No suitable descriptor found");
                 throw new Error(
                   `No suitable descriptor found for wallet ${signerName}`,
                 );
               }
+
+              matchSpinner.succeed("Found compatible descriptor");
+            } else {
+              matchSpinner.succeed("Found exact matching descriptor");
             }
 
             // Extract xpub and fingerprint from the descriptor
+            const extractSpinner = ora(
+              "Extracting extended public key...",
+            ).start();
             const descStr = matchingDesc.desc;
             const xpubMatch = descStr.match(
               /\[([a-f0-9]+)\/.*?\](.*?)\/[0-9]+\/\*\)/,
             );
 
             if (!xpubMatch) {
+              extractSpinner.fail("Could not extract xpub");
               throw new Error(
                 `Could not extract xpub from descriptor: ${descStr}`,
               );
@@ -267,11 +330,20 @@ export class MultisigCommands {
 
             const fingerprint = xpubMatch[1];
             const xpub = xpubMatch[2];
+            extractSpinner.succeed("Extended public key extracted");
 
-            console.log(chalk.green(`\nExtracted xpub for signer ${i + 1}:`));
-            console.log(`Fingerprint: ${fingerprint}`);
-            console.log(`XPub: ${xpub}`);
-            console.log(`Path: ${displayBipPath}`);
+            console.log(
+              boxText(
+                `Signer: ${colors.highlight(signerName)}\n` +
+                  `Fingerprint: ${colors.code(fingerprint)}\n` +
+                  `XPub: ${colors.code(truncate(xpub, 15))}\n` +
+                  `Path: ${colors.code(displayBipPath)}`,
+                {
+                  title: `Signer ${i + 1} Key Info`,
+                  titleColor: colors.success,
+                },
+              ),
+            );
 
             // Add to extended public keys
             extendedPublicKeys.push({
@@ -283,7 +355,8 @@ export class MultisigCommands {
             });
           } catch (error) {
             console.error(
-              chalk.red(`Error setting up signer ${i + 1}: ${error}`),
+              formatError(`Error setting up signer ${i + 1}:`),
+              error,
             );
             return null;
           }
@@ -291,32 +364,41 @@ export class MultisigCommands {
       } else {
         // Use existing wallets
         console.log(
-          chalk.yellow(
+          formatWarning(
             "\nUsing existing wallets requires manual steps to extract xpubs.",
           ),
         );
         console.log(
-          chalk.yellow(
-            `For ${addressType} wallets, use BIP path ${displayBipPath}`,
+          colors.info(
+            `For ${addressType} wallets, use BIP path ${colors.code(displayBipPath)}`,
           ),
         );
 
+        const listSpinner = ora("Loading available wallets...").start();
         const wallets = await this.bitcoinService.listWallets();
+        listSpinner.succeed("Wallets loaded");
 
         for (let i = 0; i < totalSigners!; i++) {
-          console.log(chalk.cyan(`\nSigner ${i + 1} of ${totalSigners}`));
+          console.log(colors.header(`\nSigner ${i + 1} of ${totalSigners}`));
 
           // Let user choose existing wallet
           const signerWallet = await select({
             message: `Select wallet for signer ${i + 1}:`,
-            choices: wallets.map((w) => ({ name: w, value: w })),
+            choices: wallets.map((w) => ({
+              name: colors.highlight(w),
+              value: w,
+            })),
           });
 
           signerWallets.push(signerWallet);
 
           try {
             // Get descriptors from the wallet
+            const descSpinner = ora(
+              `Loading descriptors from ${signerWallet}...`,
+            ).start();
             const descriptors = await this.getWalletDescriptors(signerWallet);
+            descSpinner.succeed("Descriptors loaded");
 
             if (!descriptors) {
               throw new Error(
@@ -329,15 +411,15 @@ export class MultisigCommands {
               .filter((d) => !d.internal) // Only show external address descriptors
               .map((d, idx) => {
                 const shortDesc =
-                  d.desc.substring(0, 100) + (d.desc.length > 100 ? "..." : "");
+                  d.desc.substring(0, 90) + (d.desc.length > 90 ? "..." : "");
                 return {
-                  name: `${idx + 1}. ${shortDesc}`,
+                  name: colors.highlight(`${idx + 1}. ${shortDesc}`),
                   value: idx,
                 };
               });
 
             console.log(
-              chalk.green(`\nAvailable descriptors for ${signerWallet}:`),
+              colors.success(`\nAvailable descriptors for ${signerWallet}:`),
             );
             const selectedIdx = await select({
               message: "Select the appropriate descriptor:",
@@ -349,12 +431,16 @@ export class MultisigCommands {
             ];
 
             // Extract xpub and fingerprint from the descriptor
+            const extractSpinner = ora(
+              "Extracting public key information...",
+            ).start();
             const descStr = selectedDesc.desc;
             const xpubMatch = descStr.match(
               /\[([a-f0-9]+)\/.*?\](.*?)\/[0-9]+\/\*\)/,
             );
 
             if (!xpubMatch) {
+              extractSpinner.fail("Could not extract xpub");
               throw new Error(
                 `Could not extract xpub from descriptor: ${descStr}`,
               );
@@ -362,10 +448,15 @@ export class MultisigCommands {
 
             const fingerprint = xpubMatch[1];
             const xpub = xpubMatch[2];
+            extractSpinner.succeed("Key information extracted");
 
-            console.log(chalk.green(`\nExtracted information:`));
-            console.log(`Fingerprint: ${fingerprint}`);
-            console.log(`XPub: ${xpub}`);
+            console.log(
+              boxText(
+                `Fingerprint: ${colors.code(fingerprint)}\n` +
+                  `XPub: ${colors.code(truncate(xpub, 15))}`,
+                { title: "Extracted Information", titleColor: colors.success },
+              ),
+            );
 
             // Ask for BIP32 path
             const path = await input({
@@ -383,7 +474,8 @@ export class MultisigCommands {
             });
           } catch (error) {
             console.error(
-              chalk.red(`Error processing wallet ${signerWallet}: ${error}`),
+              formatError(`Error processing wallet ${signerWallet}:`),
+              error,
             );
             return null;
           }
@@ -411,49 +503,43 @@ export class MultisigCommands {
       };
 
       // Save the configuration
+      const saveSpinner = ora("Saving Caravan wallet configuration...").start();
       const savedFileName =
         await this.caravanService.saveCaravanWalletConfig(caravanConfig);
-      console.log(
-        chalk.green(
-          `\nCaravan wallet "${name}" created and saved successfully!`,
-        ),
-      );
+      saveSpinner.succeed(`Caravan wallet "${name}" saved successfully!`);
 
       // Generate multisig descriptors and import them to watch wallet
       console.log(
-        chalk.cyan(
+        colors.info(
           `\nImporting multisig descriptors to watch wallet "${watcherWalletName}"...`,
         ),
       );
 
       try {
+        const importSpinner = ora("Importing multisig descriptors...").start();
         await this.importMultisigToWatchWallet(
           caravanConfig,
           watcherWalletName,
         );
-        console.log(chalk.green(`Multisig descriptors imported successfully!`));
+        importSpinner.succeed("Multisig descriptors imported successfully!");
+
         console.log(
-          chalk.cyan(
-            `\nIMPORTANT: When using Caravan, you need to import addresses to see your funds.`,
+          boxText(
+            "When using Caravan, you need to import addresses to see your funds.\n" +
+              "Follow these steps in Caravan after importing your wallet configuration:\n\n" +
+              '1. Go to the "Addresses" tab\n' +
+              '2. Click the "Import Addresses" button at the bottom\n' +
+              '3. Toggle the "Rescan" switch if this is your first time importing\n' +
+              '4. Click "Import Addresses" to complete the process',
+            { title: "IMPORTANT", titleColor: colors.warning },
           ),
         );
-        console.log(
-          chalk.cyan(
-            `Follow these steps in Caravan after importing your wallet configuration:`,
-          ),
-        );
-        console.log(`1. Go to the "Addresses" tab`);
-        console.log(`2. Click the "Import Addresses" button at the bottom`);
-        console.log(
-          `3. Toggle the "Rescan" switch if this is your first time importing`,
-        );
-        console.log(`4. Click "Import Addresses" to complete the process`);
       } catch (error) {
         console.error(
-          chalk.red(`Error importing multisig descriptors: ${error}`),
+          formatError(`Error importing multisig descriptors: ${error}`),
         );
         console.log(
-          chalk.yellow(
+          formatWarning(
             "Watch wallet may not be fully configured for the multisig setup.",
           ),
         );
@@ -476,7 +562,7 @@ export class MultisigCommands {
 
       return caravanConfig;
     } catch (error) {
-      console.error(chalk.red("\nError creating Caravan wallet:"), error);
+      console.error(formatError("\nError creating Caravan wallet:"), error);
       return null;
     }
   }
@@ -500,7 +586,7 @@ export class MultisigCommands {
         }
       } catch (error: any) {
         console.log(
-          chalk.yellow(`listdescriptors not supported: ${error.message}`),
+          formatWarning(`listdescriptors not supported: ${error.message}`),
         );
         // Continue with alternative methods
       }
@@ -508,18 +594,23 @@ export class MultisigCommands {
       // Alternative: try to get a descriptor from getaddressinfo
       try {
         console.log(
-          chalk.cyan(`Trying alternative method to get descriptors...`),
+          colors.info(`Trying alternative method to get descriptors...`),
         );
 
         // Get an address from the wallet
+        const addressSpinner = ora(
+          "Generating address for descriptor...",
+        ).start();
         const address = await this.bitcoinService.getNewAddress(walletName);
-        console.log(chalk.green(`Generated address: ${address}`));
+        addressSpinner.succeed(`Generated address: ${address}`);
 
         // Get address info
+        const infoSpinner = ora("Getting address information...").start();
         const addressInfo = await this.bitcoinService.getAddressInfo(
           walletName,
           address,
         );
+        infoSpinner.succeed("Address information retrieved");
 
         if (addressInfo && addressInfo.desc) {
           // Create a descriptor-like object manually
@@ -545,20 +636,16 @@ export class MultisigCommands {
             next: 0,
           };
 
-          console.log(
-            chalk.green(
-              `Created descriptor from address info: ${JSON.stringify(descriptor)}`,
-            ),
-          );
+          console.log(formatSuccess("Created descriptor from address info"));
           return [descriptor];
         }
       } catch (error) {
-        console.error(chalk.red(`Error getting address info: ${error}`));
+        console.error(formatError(`Error getting address info: ${error}`));
       }
 
       // Last resort: try to create a dummy descriptor
       console.log(
-        chalk.yellow(`Could not get descriptors, creating dummy descriptor`),
+        formatWarning(`Could not get descriptors, creating dummy descriptor`),
       );
 
       // Map address types to BIP paths
@@ -581,7 +668,7 @@ export class MultisigCommands {
       ];
     } catch (error) {
       console.error(
-        chalk.red(`Error getting descriptors for ${walletName}:`),
+        formatError(`Error getting descriptors for ${walletName}:`),
         error,
       );
       return null;
@@ -603,7 +690,6 @@ export class MultisigCommands {
       // Create descriptor strings for the wallet
       // First, prepare the xpubs with their paths for both receive (0/*) and change (1/*)
       const xpubsReceive = extendedPublicKeys.map((key) => `${key.xpub}/0/*`);
-
       const xpubsChange = extendedPublicKeys.map((key) => `${key.xpub}/1/*`);
 
       // Create descriptors based on address type
@@ -645,8 +731,16 @@ export class MultisigCommands {
         active: true,
       }));
 
-      console.log(chalk.cyan("Importing descriptors with format:"));
-      console.log(JSON.stringify(descriptors, null, 2));
+      console.log(
+        boxText(
+          "Receive descriptor:\n" +
+            colors.code(truncate(receiveDescriptor, 50)) +
+            "\n\n" +
+            "Change descriptor:\n" +
+            colors.code(truncate(changeDescriptor, 50)),
+          { title: "Descriptors", titleColor: colors.info },
+        ),
+      );
 
       // Import descriptors to watch wallet
       const importResult = await this.bitcoinService.rpc.importDescriptors(
@@ -660,15 +754,16 @@ export class MultisigCommands {
         : false;
 
       if (!success) {
-        console.log(chalk.yellow("Import result:"), importResult);
         console.log(
-          chalk.yellow("Some descriptors may not have imported successfully."),
+          formatWarning("Some descriptors may not have imported successfully."),
         );
       }
 
       return success;
     } catch (error) {
-      console.error(`Error importing multisig descriptors:`, error);
+      console.error(
+        formatError(`Error importing multisig descriptors: ${error}`),
+      );
       throw error;
     }
   }
@@ -681,14 +776,13 @@ export class MultisigCommands {
     watchWalletName: string,
     signerWalletName: string,
   ): Promise<void> {
-    console.log(
-      chalk.cyan(
-        `\n=== Creating Test Transaction for ${caravanConfig.name} ===`,
-      ),
-    );
+    displayCommandTitle(`Creating Test Transaction for ${caravanConfig.name}`);
 
     try {
       // Format the config for Caravan - convert BIP32 paths
+      const exportSpinner = ora(
+        "Preparing wallet configuration for export...",
+      ).start();
       const exportConfig =
         this.caravanService.formatCaravanConfigForExport(caravanConfig);
 
@@ -706,19 +800,24 @@ export class MultisigCommands {
 
       // Save the formatted config
       await fs.writeJson(configPath, exportConfig, { spaces: 2 });
-      console.log(
-        chalk.green(`\nCaravan wallet configuration saved to: ${configPath}`),
+      exportSpinner.succeed(
+        `Caravan wallet configuration saved to: ${configPath}`,
       );
 
       // Provide instructions to the user
       console.log(
-        chalk.cyan(`\nFollow these steps to create a test transaction:`),
-      );
-      console.log(chalk.cyan(`1. Open Caravan in your browser`));
-      console.log(chalk.cyan(`2. Go to "Wallet" tab and click "Import"`));
-      console.log(chalk.cyan(`3. Load the configuration file: ${configPath}`));
-      console.log(
-        chalk.cyan(`4. Go to "Receive" tab and generate a new address`),
+        boxText(
+          "1. Open Caravan in your browser\n" +
+            '2. Go to "Wallet" tab and click "Import"\n' +
+            "3. Load the configuration file: " +
+            colors.highlight(configPath) +
+            "\n" +
+            '4. Go to "Receive" tab and generate a new address',
+          {
+            title: "Steps to Create a Test Transaction",
+            titleColor: colors.info,
+          },
+        ),
       );
 
       // Ask the user to paste the address from Caravan
@@ -731,44 +830,54 @@ export class MultisigCommands {
       });
 
       console.log(
-        chalk.green(`\nReceived multisig address: ${multisigAddress}`),
+        formatSuccess(`\nReceived multisig address: ${multisigAddress}`),
       );
 
       // Check which wallets are available for funding
+      const walletsSpinner = ora(
+        "Loading available wallets for funding...",
+      ).start();
       const wallets = await this.bitcoinService.listWallets();
 
       // Remove the watch wallet and current signer wallet from options
       const fundingWalletChoices = wallets
         .filter((w) => w !== watchWalletName)
-        .map((w) => ({ name: w, value: w }));
+        .map((w) => ({ name: colors.highlight(w), value: w }));
+      walletsSpinner.succeed("Wallets loaded");
+
+      let selectedFundingWallet: string;
 
       if (fundingWalletChoices.length === 0) {
         console.log(
-          chalk.yellow(`\nNo wallets available for funding. Let's create one.`),
+          formatWarning(
+            `\nNo wallets available for funding. Creating a new one.`,
+          ),
         );
 
         // Create a funding wallet
         const fundingWalletName = `${caravanConfig.name.replace(/\s+/g, "_").toLowerCase()}_funding`;
 
+        const createSpinner = ora(
+          `Creating funding wallet: ${fundingWalletName}...`,
+        ).start();
         await this.bitcoinService.createWallet(fundingWalletName, {
           disablePrivateKeys: false,
           blank: false,
           descriptorWallet: true,
         });
-
-        console.log(
-          chalk.green(`Created funding wallet: ${fundingWalletName}`),
-        );
+        createSpinner.succeed(`Created funding wallet: ${fundingWalletName}`);
 
         // Mine some blocks to fund the wallet
         const fundingAddress =
           await this.bitcoinService.getNewAddress(fundingWalletName);
-        console.log(chalk.cyan(`\nMining 6 blocks to fund the wallet...`));
+        const mineSpinner = ora(
+          "Mining 6 blocks to fund the wallet...",
+        ).start();
         await this.bitcoinService.generateToAddress(6, fundingAddress);
-        console.log(chalk.green(`Mined 6 blocks to address ${fundingAddress}`));
+        mineSpinner.succeed(`Mined 6 blocks to address ${fundingAddress}`);
 
         // Set as the funding wallet
-        var selectedFundingWallet = fundingWalletName;
+        selectedFundingWallet = fundingWalletName;
       } else {
         // Ask which wallet to use for funding
         selectedFundingWallet = await select({
@@ -778,26 +887,43 @@ export class MultisigCommands {
       }
 
       // Check if selected wallet has funds
+      const balanceSpinner = ora(
+        `Checking balance of ${selectedFundingWallet}...`,
+      ).start();
       const walletInfo = await this.bitcoinService.getWalletInfo(
         selectedFundingWallet,
       );
 
       if (walletInfo.balance <= 0) {
+        balanceSpinner.warn("Funding wallet has no balance");
         console.log(
-          chalk.yellow(`\nFunding wallet has no balance. Mining some coins...`),
+          formatWarning(
+            `\nFunding wallet has no balance. Mining some coins...`,
+          ),
         );
 
         // Mine blocks to fund the wallet
         const fundingAddress = await this.bitcoinService.getNewAddress(
           selectedFundingWallet,
         );
+        const mineSpinner = ora("Mining blocks to funding wallet...").start();
         await this.bitcoinService.generateToAddress(6, fundingAddress);
-        console.log(
-          chalk.green(`\nMined 6 blocks to fund ${selectedFundingWallet}`),
-        );
+        mineSpinner.succeed(`Mined 6 blocks to fund ${selectedFundingWallet}`);
 
         // Wait a moment for wallet to update
         await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Get updated balance
+        const updatedInfo = await this.bitcoinService.getWalletInfo(
+          selectedFundingWallet,
+        );
+        balanceSpinner.succeed(
+          `Wallet balance: ${formatBitcoin(updatedInfo.balance)}`,
+        );
+      } else {
+        balanceSpinner.succeed(
+          `Wallet balance: ${formatBitcoin(walletInfo.balance)}`,
+        );
       }
 
       // Fund amount
