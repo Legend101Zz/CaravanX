@@ -39,4 +39,16 @@ export class TransactionService {
       throw error;
     }
   }
+
+  /**
+   * Decode a PSBT to get detailed information
+   */
+  async decodePSBT(psbtBase64: string): Promise<any> {
+    try {
+      return await this.rpc.decodePSBT(psbtBase64);
+    } catch (error) {
+      console.error("Error decoding PSBT:", error);
+      throw error;
+    }
+  }
 }
