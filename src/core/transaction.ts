@@ -192,4 +192,81 @@ export class TransactionService {
       throw error;
     }
   }
+
+  /**
+   * Try to detect which Caravan wallet a PSBT is for
+   */
+  async detectCaravanWalletForPSBT(
+    psbtBase64: string,
+    caravanWallets: CaravanWalletConfig[],
+  ): Promise<CaravanWalletConfig | null> {
+    try {
+      // Decode the PSBT
+      const decodedPsbt = await this.decodePSBT(psbtBase64);
+
+      // Extract addresses from inputs and outputs
+      const addresses: string[] = [];
+
+      // Check inputs
+      for (const input of decodedPsbt.inputs) {
+        if (
+          input.has_utxo &&
+          input.utxo.scriptPubKey &&
+          input.utxo.scriptPubKey.address
+        ) {
+          addresses.push(input.utxo.scriptPubKey.address);
+        }
+      }
+
+      // Check outputs
+      for (const output of decodedPsbt.tx.vout) {
+        if (output.scriptPubKey && output.scriptPubKey.address) {
+          addresses.push(output.scriptPubKey.address);
+        }
+      }
+
+      if (addresses.length === 0) {
+        return null;
+      }
+
+      console.log(
+        `Found ${addresses.length} addresses in PSBT. Checking against Caravan wallets...`,
+      );
+
+      // For each Caravan wallet, check if any address belongs
+      for (const caravanConfig of caravanWallets) {
+        console.log(`Checking wallet: ${caravanConfig.name}`);
+
+        // Check if a watch-only wallet exists for this Caravan config
+        const safeWalletName = `${caravanConfig.name.replace(/\s+/g, "_").toLowerCase()}_watch`;
+        const wallets = await this.rpc.listWallets();
+
+        if (wallets.includes(safeWalletName)) {
+          console.log(`Found watch wallet: ${safeWalletName}`);
+
+          // Get addresses from this wallet
+          // This is simplified - in practice, a more robust approach might be needed
+          for (const address of addresses) {
+            try {
+              await this.rpc.getAddressInfo(safeWalletName, address);
+              console.log(
+                `Found matching address ${address} in Caravan wallet: ${caravanConfig.name}`,
+              );
+              return caravanConfig;
+            } catch (error) {
+              // Address not found in wallet, continue checking
+            }
+          }
+        }
+      }
+
+      console.log(
+        "Could not automatically determine which Caravan wallet this PSBT belongs to.",
+      );
+      return null;
+    } catch (error) {
+      console.error("Error detecting Caravan wallet for PSBT:", error);
+      return null;
+    }
+  }
 }
