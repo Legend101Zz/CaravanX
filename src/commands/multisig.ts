@@ -80,14 +80,10 @@ export class MultisigCommands {
         default: AddressType.P2WSH,
       });
 
-      const network = await select({
-        message: "Select network:",
-        choices: [
-          { name: "Regtest", value: Network.REGTEST },
-          { name: "Testnet", value: Network.TESTNET },
-        ],
-        default: Network.REGTEST,
-      });
+      // We'll focus on regtest for now
+      const network = Network.REGTEST;
+
+      console.log(chalk.cyan(`Using network: ${network}`));
 
       // Quorum information
       const requiredSigners = await number({
@@ -108,156 +104,330 @@ export class MultisigCommands {
         default: 3,
       });
 
-      // Ask how to add keys
-      const method = await select({
-        message: "How would you like to add the extended public keys?",
+      // Create watcher wallet for Caravan
+      const watcherWalletName = `${name.replace(/\s+/g, "_").toLowerCase()}_watcher`;
+      console.log(
+        chalk.cyan(
+          `\nCreating watch-only wallet "${watcherWalletName}" for Caravan...`,
+        ),
+      );
+
+      try {
+        await this.bitcoinService.createWallet(watcherWalletName, {
+          disablePrivateKeys: true,
+          blank: false,
+          descriptorWallet: true,
+        });
+        console.log(
+          chalk.green(
+            `Watch-only wallet "${watcherWalletName}" created successfully!`,
+          ),
+        );
+      } catch (error) {
+        console.error(
+          chalk.red(`Error creating watch wallet: ${error.message}`),
+        );
+        return null;
+      }
+
+      // Ask how to add wallets for signers
+      const createMethod = await select({
+        message: "How would you like to create signer wallets?",
         choices: [
-          { name: "Enter manually one by one", value: "manual" },
-          {
-            name: "Quick setup (create everything automatically)",
-            value: "quick",
-          },
+          { name: "Create new wallets for each signer", value: "new" },
+          { name: "Use existing wallets", value: "existing" },
         ],
       });
 
+      // Array to store extended public keys
       const extendedPublicKeys: ExtendedPublicKey[] = [];
+      const signerWallets: string[] = [];
 
-      if (method === "manual") {
-        // Collect extended public keys manually
+      // Map of address types to BIP paths and descriptor types
+      const formatInfo = {
+        [AddressType.P2WSH]: { path: "84'/1'/0'", descriptorPrefix: "wpkh" },
+        [AddressType.P2SH_P2WSH]: {
+          path: "49'/1'/0'",
+          descriptorPrefix: "sh(wpkh",
+        },
+        [AddressType.P2SH]: { path: "44'/1'/0'", descriptorPrefix: "pkh" },
+      };
+
+      // The BIP path to use based on address type
+      const bipPath = formatInfo[addressType].path;
+      // Convert BIP path format from 84'/1'/0' to m/84'/1'/0' for display
+      const displayBipPath = `m/${bipPath}`;
+
+      if (createMethod === "new") {
+        // Create new wallets for each signer
         for (let i = 0; i < totalSigners; i++) {
+          const signerName = `${name.replace(/\s+/g, "_").toLowerCase()}_signer_${i + 1}`;
+          signerWallets.push(signerName);
+
           console.log(
-            chalk.cyan(
-              `\nEntering Extended Public Key ${i + 1} of ${totalSigners}`,
-            ),
+            chalk.cyan(`\nCreating wallet for signer ${i + 1}: ${signerName}`),
           );
 
-          // Ask if user wants to create a new wallet for this key
-          const createWallet = await confirm({
-            message: "Create a new wallet for this key?",
-            default: true,
-          });
-
-          let xpub: string, path: string, keyName: string, fingerprint: string;
-
-          if (createWallet) {
-            // Create a new wallet with HD seed
-            console.log(chalk.cyan("\nCreating a new wallet for this key..."));
-
-            const keyWalletName = await input({
-              message: `Enter a name for key ${i + 1} wallet:`,
-              validate: (input: string) =>
-                input.trim() !== "" ? true : "Please enter a valid name",
-              default: `key_${i + 1}_wallet`,
+          try {
+            // Create wallet without descriptor option as it may not be supported in all versions
+            await this.bitcoinService.createWallet(signerName, {
+              disablePrivateKeys: false,
+              blank: false,
+              descriptorWallet: false, // Use legacy wallet format for compatibility
             });
 
-            // Create the wallet
-            const result =
-              await this.bitcoinService.createCaravanKeyWallet(keyWalletName);
+            console.log(
+              chalk.green(`Wallet "${signerName}" created successfully!`),
+            );
 
-            keyName = `Extended Public Key ${i + 1} (${result.wallet})`;
-            xpub = result.xpub;
-            path = result.path;
-            fingerprint = result.rootFingerprint;
-          } else {
-            // Manually enter key details
-            keyName = await input({
-              message: `Enter a name for key ${i + 1}:`,
-              default: `Extended Public Key ${i + 1}`,
-            });
+            // Get descriptors from the wallet
+            const descriptors = await this.getWalletDescriptors(signerName);
 
-            xpub = await input({
-              message: `Enter the extended public key (xpub) for key ${i + 1}:`,
-              validate: (input: string) =>
-                input.trim() !== "" ? true : "Please enter a valid xpub",
-            });
+            if (!descriptors) {
+              throw new Error(
+                `Could not get descriptors for wallet ${signerName}`,
+              );
+            }
 
-            path = await input({
-              message: `Enter the BIP32 derivation path for key ${i + 1}:`,
-              default: `m/84'/1'/0'`,
-            });
+            // Find the appropriate descriptor based on the address type
+            const desiredDescType = formatInfo[addressType].descriptorPrefix;
+            let matchingDesc = null;
 
-            fingerprint = await input({
-              message: `Enter the root fingerprint (xfp) for key ${i + 1} (optional):`,
+            for (const desc of descriptors) {
+              if (
+                desc.desc.startsWith(desiredDescType) &&
+                desc.desc.includes(bipPath) &&
+                !desc.internal
+              ) {
+                matchingDesc = desc;
+                break;
+              }
+            }
+
+            if (!matchingDesc) {
+              console.log(
+                chalk.yellow(
+                  `Could not find matching descriptor for ${addressType} in wallet ${signerName}`,
+                ),
+              );
+              // Try to find any descriptor that contains the BIP path
+              for (const desc of descriptors) {
+                if (desc.desc.includes(bipPath) && !desc.internal) {
+                  matchingDesc = desc;
+                  break;
+                }
+              }
+
+              if (!matchingDesc) {
+                throw new Error(
+                  `No suitable descriptor found for wallet ${signerName}`,
+                );
+              }
+            }
+
+            // Extract xpub and fingerprint from the descriptor
+            const descStr = matchingDesc.desc;
+            const xpubMatch = descStr.match(
+              /\[([a-f0-9]+)\/.*?\](.*?)\/[0-9]+\/\*\)/,
+            );
+
+            if (!xpubMatch) {
+              throw new Error(
+                `Could not extract xpub from descriptor: ${descStr}`,
+              );
+            }
+
+            const fingerprint = xpubMatch[1];
+            const xpub = xpubMatch[2];
+
+            console.log(chalk.green(`\nExtracted xpub for signer ${i + 1}:`));
+            console.log(`Fingerprint: ${fingerprint}`);
+            console.log(`XPub: ${xpub}`);
+            console.log(`Path: ${displayBipPath}`);
+
+            // Add to extended public keys
+            extendedPublicKeys.push({
+              name: `Extended Public Key ${i + 1} (${signerName})`,
+              xpub: xpub,
+              bip32Path: displayBipPath,
+              xfp: fingerprint,
+              method: "text",
             });
+          } catch (error) {
+            console.error(
+              chalk.red(`Error setting up signer ${i + 1}: ${error}`),
+            );
+            return null;
           }
-
-          // Add the key to our collection
-          extendedPublicKeys.push({
-            name: keyName,
-            xpub,
-            bip32Path: path,
-            xfp: fingerprint,
-            method: "text",
-          });
         }
       } else {
-        // Quick setup - create all wallets and keys automatically
+        // Use existing wallets
         console.log(
-          chalk.cyan(
-            "\nPerforming quick setup - creating all keys automatically...",
+          chalk.yellow(
+            "\nUsing existing wallets requires manual steps to extract xpubs.",
+          ),
+        );
+        console.log(
+          chalk.yellow(
+            `For ${addressType} wallets, use BIP path ${displayBipPath}`,
           ),
         );
 
+        const wallets = await this.bitcoinService.listWallets();
+
         for (let i = 0; i < totalSigners; i++) {
-          const walletName = `${name}_key_${i + 1}`;
-          console.log(
-            chalk.cyan(`\nCreating wallet for key ${i + 1}: ${walletName}`),
-          );
+          console.log(chalk.cyan(`\nSigner ${i + 1} of ${totalSigners}`));
 
-          const result =
-            await this.bitcoinService.createCaravanKeyWallet(walletName);
-
-          extendedPublicKeys.push({
-            name: `Extended Public Key ${i + 1} (${result.wallet})`,
-            xpub: result.xpub,
-            bip32Path: result.path,
-            xfp: result.rootFingerprint,
-            method: "text",
+          // Let user choose existing wallet
+          const signerWallet = await select({
+            message: `Select wallet for signer ${i + 1}:`,
+            choices: wallets.map((w) => ({ name: w, value: w })),
           });
 
-          console.log(
-            chalk.green(
-              `Created key ${i + 1} with xpub: ${result.xpub.substring(0, 10)}...`,
-            ),
-          );
+          signerWallets.push(signerWallet);
+
+          try {
+            // Get descriptors from the wallet
+            const descriptors = await this.getWalletDescriptors(signerWallet);
+
+            if (!descriptors) {
+              throw new Error(
+                `Could not get descriptors for wallet ${signerWallet}`,
+              );
+            }
+
+            // Show descriptors and let user select
+            const descriptorChoices = descriptors
+              .filter((d) => !d.internal) // Only show external address descriptors
+              .map((d, idx) => {
+                const shortDesc =
+                  d.desc.substring(0, 100) + (d.desc.length > 100 ? "..." : "");
+                return {
+                  name: `${idx + 1}. ${shortDesc}`,
+                  value: idx,
+                };
+              });
+
+            console.log(
+              chalk.green(`\nAvailable descriptors for ${signerWallet}:`),
+            );
+            const selectedIdx = await select({
+              message: "Select the appropriate descriptor:",
+              choices: descriptorChoices,
+            });
+
+            const selectedDesc = descriptors.filter((d) => !d.internal)[
+              selectedIdx
+            ];
+
+            // Extract xpub and fingerprint from the descriptor
+            const descStr = selectedDesc.desc;
+            const xpubMatch = descStr.match(
+              /\[([a-f0-9]+)\/.*?\](.*?)\/[0-9]+\/\*\)/,
+            );
+
+            if (!xpubMatch) {
+              throw new Error(
+                `Could not extract xpub from descriptor: ${descStr}`,
+              );
+            }
+
+            const fingerprint = xpubMatch[1];
+            const xpub = xpubMatch[2];
+
+            console.log(chalk.green(`\nExtracted information:`));
+            console.log(`Fingerprint: ${fingerprint}`);
+            console.log(`XPub: ${xpub}`);
+
+            // Ask for BIP32 path
+            const path = await input({
+              message: "Enter the BIP32 derivation path:",
+              default: displayBipPath,
+            });
+
+            // Add to extended public keys
+            extendedPublicKeys.push({
+              name: `Extended Public Key ${i + 1} (${signerWallet})`,
+              xpub: xpub,
+              bip32Path: path,
+              xfp: fingerprint,
+              method: "text",
+            });
+          } catch (error) {
+            console.error(
+              chalk.red(`Error processing wallet ${signerWallet}: ${error}`),
+            );
+            return null;
+          }
         }
       }
 
       // Create the Caravan wallet configuration
-      const caravanConfig = await this.caravanService.createCaravanWalletConfig(
-        {
-          name,
-          addressType,
-          network,
-          requiredSigners,
-          totalSigners,
-          extendedPublicKeys,
-          startingAddressIndex: 0,
+      const caravanConfig: CaravanWalletConfig = {
+        name,
+        addressType,
+        network: "regtest", // Always regtest for this tool
+        quorum: {
+          requiredSigners: requiredSigners!,
+          totalSigners: totalSigners!,
         },
-      );
+        extendedPublicKeys,
+        startingAddressIndex: 0,
+        uuid: crypto.randomBytes(16).toString("hex"),
+        client: {
+          type: "private",
+          url: this.bitcoinRpcClient?.baseUrl || "http://127.0.0.1:18443",
+          username: this.bitcoinRpcClient?.auth.username || "user",
+          walletName: watcherWalletName,
+        },
+      };
 
+      // Save the configuration
+      const savedFileName =
+        await this.caravanService.saveCaravanWalletConfig(caravanConfig);
       console.log(
         chalk.green(
-          `\nCaravan wallet "${caravanConfig.name}" created successfully!`,
+          `\nCaravan wallet "${name}" created and saved successfully!`,
         ),
       );
 
-      // Store key data
-      const keyData = extendedPublicKeys.map((key) => ({
-        xpub: key.xpub,
-        wallet: key.name.includes("(")
-          ? key.name.split("(")[1].split(")")[0]
-          : undefined,
-      }));
+      // Generate multisig descriptors and import them to watch wallet
+      console.log(
+        chalk.cyan(
+          `\nImporting multisig descriptors to watch wallet "${watcherWalletName}"...`,
+        ),
+      );
 
-      // Ask if user wants to create a watch-only wallet
-      const createWatch = await confirm({
-        message: "Create a watch-only wallet for this multisig wallet?",
+      try {
+        await this.importMultisigToWatchWallet(
+          caravanConfig,
+          watcherWalletName,
+        );
+        console.log(chalk.green(`Multisig descriptors imported successfully!`));
+      } catch (error) {
+        console.error(
+          chalk.red(`Error importing multisig descriptors: ${error}`),
+        );
+        console.log(
+          chalk.yellow(
+            "Watch wallet may not be fully configured for the multisig setup.",
+          ),
+        );
+      }
+
+      // Ask if user wants to create a test transaction
+      const createTestTx = await confirm({
+        message:
+          "Would you like to create a test transaction for this multisig wallet?",
         default: true,
       });
 
-      if (createWatch) {
-        await this.createWatchWallet(caravanConfig);
+      if (createTestTx) {
+        await this.createTestTransaction(
+          caravanConfig,
+          watcherWalletName,
+          signerWallets[0],
+        );
       }
 
       return caravanConfig;
