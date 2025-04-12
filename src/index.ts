@@ -13,11 +13,11 @@ import chalk from "chalk";
  * Main application class
  */
 export class CaravanRegtestManager {
-  private configManager: ConfigManager;
   private bitcoinRpcClient: BitcoinRpcClient;
-  private bitcoinService: BitcoinService;
   private transactionService: TransactionService;
 
+  public configManager: ConfigManager;
+  public bitcoinService: BitcoinService;
   public caravanService: CaravanService;
   public walletCommands: WalletCommands;
   public multisigCommands: MultisigCommands;
@@ -61,8 +61,11 @@ export class CaravanRegtestManager {
    */
   async checkBitcoinCore(): Promise<boolean> {
     try {
-      const blockchainInfo =
-        await this.bitcoinRpcClient.callRpc("getblockchaininfo");
+      const blockchainInfo = (await this.bitcoinRpcClient.callRpc(
+        "getblockchaininfo",
+      )) as {
+        chain: string;
+      };
       return blockchainInfo && blockchainInfo.chain === "regtest";
     } catch (error) {
       return false;

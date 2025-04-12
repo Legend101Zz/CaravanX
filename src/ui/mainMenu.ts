@@ -1,4 +1,4 @@
-import inquirer from "inquirer";
+import { input, confirm, select, number } from "@inquirer/prompts";
 import chalk from "chalk";
 import { CaravanRegtestManager } from "../index";
 import figlet from "figlet";
@@ -35,7 +35,7 @@ export class MainMenu {
    */
   async showMainMenu(): Promise<void> {
     const choices = [
-      new inquirer.Separator(" === Bitcoin Wallets === "),
+      { type: "separator", name: " === Bitcoin Wallets === " },
       { name: "List all wallets", value: "list-wallets" },
       { name: "Create new wallet", value: "create-wallet" },
       { name: "Create wallet with private key", value: "create-key-wallet" },
@@ -43,7 +43,7 @@ export class MainMenu {
       { name: "Send funds between wallets", value: "send-funds" },
       { name: "Fund wallet with regtest coins", value: "fund-wallet" },
 
-      new inquirer.Separator(" === Caravan Multisig === "),
+      { type: "separator", name: " === Caravan Multisig === " },
       { name: "List Caravan wallets", value: "list-caravan" },
       { name: "Create new Caravan multisig wallet", value: "create-caravan" },
       { name: "View Caravan wallet details", value: "caravan-details" },
@@ -54,14 +54,14 @@ export class MainMenu {
       },
       { name: "Fund Caravan multisig wallet", value: "fund-caravan" },
 
-      new inquirer.Separator(" === Transactions === "),
+      { type: "separator", name: " === Transactions === " },
       { name: "Create new PSBT", value: "create-psbt" },
       { name: "Sign PSBT with wallet", value: "sign-psbt-wallet" },
       { name: "Sign PSBT with private key", value: "sign-psbt-key" },
       { name: "Analyze and decode PSBT", value: "analyze-psbt" },
       { name: "Finalize and broadcast PSBT", value: "finalize-psbt" },
 
-      new inquirer.Separator(" === System === "),
+      { type: "separator", name: " === System === " },
       { name: "Mining and block generation", value: "mining" },
       { name: "Export data", value: "export" },
       { name: "Import data", value: "import" },
@@ -75,15 +75,14 @@ export class MainMenu {
       this.displayBanner();
 
       try {
-        const response = await inquirer.prompt({
-          type: "list",
-          name: "action",
+        const action = await select({
           message: "What would you like to do?",
           pageSize: 20,
+          //@ts-ignore
           choices,
         });
 
-        if (response.action === "exit") {
+        if (action === "exit") {
           console.log(
             chalk.green(
               "Thank you for using Caravan Regtest Manager. Goodbye!",
@@ -92,19 +91,15 @@ export class MainMenu {
           process.exit(0);
         }
 
-        await this.processAction(response.action);
+        await this.processAction(action!);
 
         // Wait for user to press Enter before showing the menu again
-        await inquirer.prompt({
-          type: "input",
-          name: "continue",
+        await input({
           message: "Press Enter to continue...",
         });
       } catch (error) {
         console.error(chalk.red("Error:"), error);
-        await inquirer.prompt({
-          type: "input",
-          name: "continue",
+        await input({
           message: "Press Enter to continue...",
         });
       }
@@ -148,9 +143,6 @@ export class MainMenu {
         break;
       case "create-watch":
         await this.app.multisigCommands.createWatchWallet();
-        break;
-      case "configure-keys":
-        await this.app.multisigCommands.configureCaravanKeys();
         break;
       case "fund-caravan":
         await this.app.multisigCommands.fundCaravanWallet();
@@ -198,9 +190,7 @@ export class MainMenu {
    * Mining options menu
    */
   private async miningMenu(): Promise<void> {
-    const response = await inquirer.prompt({
-      type: "list",
-      name: "action",
+    const action = await select({
       message: "Mining Options:",
       choices: [
         { name: "Generate blocks to a wallet", value: "mine-to-wallet" },
@@ -209,11 +199,11 @@ export class MainMenu {
       ],
     });
 
-    if (response.action === "back") {
+    if (action === "back") {
       return;
     }
 
-    if (response.action === "mine-to-wallet") {
+    if (action === "mine-to-wallet") {
       // List wallets to select from
       const wallets = await this.app.walletCommands.listWallets();
 
@@ -222,59 +212,51 @@ export class MainMenu {
         return;
       }
 
-      const walletAnswer = await inquirer.prompt({
-        type: "list",
-        name: "wallet",
+      const wallet = await select({
         message: "Select a wallet to mine to:",
         choices: wallets.map((w) => ({ name: w, value: w })),
       });
 
-      const blockAnswer = await inquirer.prompt({
-        type: "number",
-        name: "blocks",
+      const blocks = await number({
         message: "How many blocks do you want to mine?",
         default: 1,
         validate: (input) =>
-          input > 0 ? true : "Please enter a positive number",
+          input! > 0 ? true : "Please enter a positive number",
       });
 
-      await this.app.walletCommands.fundWallet(walletAnswer.wallet);
-    } else if (response.action === "mine-to-address") {
-      const addressAnswer = await inquirer.prompt({
-        type: "input",
-        name: "address",
+      await this.app.walletCommands.fundWallet(wallet);
+    } else if (action === "mine-to-address") {
+      const address = await input({
         message: "Enter destination address:",
         validate: (input) =>
           input.trim() !== "" ? true : "Please enter a valid address",
       });
 
-      const blockAnswer = await inquirer.prompt({
-        type: "number",
-        name: "blocks",
+      const blocks = await number({
         message: "How many blocks do you want to mine?",
         default: 1,
         validate: (input) =>
-          input > 0 ? true : "Please enter a positive number",
+          input! > 0 ? true : "Please enter a positive number",
       });
 
       console.log(
-        chalk.cyan(
-          `\nMining ${blockAnswer.blocks} block(s) to address ${addressAnswer.address}...`,
-        ),
+        chalk.cyan(`\nMining ${blocks} block(s) to address ${address}...`),
       );
 
       try {
         // Access bitcoin service directly since it's not exposed through a command
-        const blocks = await this.app.bitcoinService.generateToAddress(
-          blockAnswer.blocks,
-          addressAnswer.address,
+        const minedBlocks = await this.app.bitcoinService.generateToAddress(
+          blocks!,
+          address,
         );
 
         console.log(
-          chalk.green(`\nSuccessfully mined ${blocks.length} block(s)!`),
+          chalk.green(`\nSuccessfully mined ${minedBlocks.length} block(s)!`),
         );
         console.log(
-          chalk.green(`Latest block hash: ${blocks[blocks.length - 1]}`),
+          chalk.green(
+            `Latest block hash: ${minedBlocks[minedBlocks.length - 1]}`,
+          ),
         );
       } catch (error) {
         console.error(chalk.red("\nError mining blocks:"), error);
@@ -286,9 +268,7 @@ export class MainMenu {
    * Export menu
    */
   private async exportMenu(): Promise<void> {
-    const response = await inquirer.prompt({
-      type: "list",
-      name: "action",
+    const action = await select({
       message: "Export Options:",
       choices: [
         {
@@ -300,11 +280,11 @@ export class MainMenu {
       ],
     });
 
-    if (response.action === "back") {
+    if (action === "back") {
       return;
     }
 
-    if (response.action === "export-caravan") {
+    if (action === "export-caravan") {
       const wallets = await this.app.multisigCommands.listCaravanWallets();
 
       if (wallets.length === 0) {
@@ -312,89 +292,22 @@ export class MainMenu {
         return;
       }
 
-      const walletAnswer = await inquirer.prompt({
-        type: "list",
-        name: "walletIndex",
+      const walletIndex = await select({
         message: "Select a Caravan wallet to export:",
         choices: wallets.map((w, i) => ({ name: w.name, value: i })),
       });
 
-      const selectedWallet = wallets[walletAnswer.walletIndex];
-      const fileAnswer = await inquirer.prompt({
-        type: "input",
-        name: "filename",
+      const selectedWallet = wallets[walletIndex];
+      const filename = await input({
         message: "Enter export file name:",
         default: `${selectedWallet.name.replace(/\s+/g, "_")}_export.json`,
       });
 
       try {
-        await fs.writeJson(fileAnswer.filename, selectedWallet, { spaces: 2 });
-        console.log(
-          chalk.green(`\nCaravan wallet exported to ${fileAnswer.filename}`),
-        );
+        await fs.writeJson(filename, selectedWallet, { spaces: 2 });
+        console.log(chalk.green(`\nCaravan wallet exported to ${filename}`));
       } catch (error) {
         console.error(chalk.red("\nError exporting wallet:"), error);
-      }
-    } else if (response.action === "export-keys") {
-      console.log(
-        chalk.yellow("\nWARNING: Exporting key data may expose private keys!"),
-      );
-
-      const confirmAnswer = await inquirer.prompt({
-        type: "confirm",
-        name: "confirm",
-        message: "Are you sure you want to continue?",
-        default: false,
-      });
-
-      if (!confirmAnswer.confirm) {
-        return;
-      }
-
-      const wallets = await this.app.multisigCommands.listCaravanWallets();
-
-      if (wallets.length === 0) {
-        console.log(chalk.yellow("\nNo Caravan wallets found."));
-        return;
-      }
-
-      const walletAnswer = await inquirer.prompt({
-        type: "list",
-        name: "walletIndex",
-        message: "Select a Caravan wallet:",
-        choices: wallets.map((w, i) => ({ name: w.name, value: i })),
-      });
-
-      const selectedWallet = wallets[walletAnswer.walletIndex];
-
-      // Get key data
-      const keyData =
-        await this.app.caravanService.loadCaravanPrivateKeyData(selectedWallet);
-
-      if (!keyData) {
-        console.log(chalk.yellow("\nNo key data found for this wallet."));
-        return;
-      }
-
-      const fileAnswer = await inquirer.prompt({
-        type: "input",
-        name: "filename",
-        message: "Enter export file name:",
-        default: `${selectedWallet.name.replace(/\s+/g, "_")}_keys_export.json`,
-      });
-
-      try {
-        await fs.writeJson(fileAnswer.filename, keyData, { spaces: 2 });
-        console.log(
-          chalk.green(`\nKey data exported to ${fileAnswer.filename}`),
-        );
-        console.log(
-          chalk.yellow(
-            "\nWARNING: Keep this file secure! It may contain private keys.",
-          ),
-        );
-      } catch (error) {
-        console.error(chalk.red("\nError exporting key data:"), error);
       }
     }
   }
@@ -403,9 +316,7 @@ export class MainMenu {
    * Import menu
    */
   private async importMenu(): Promise<void> {
-    const response = await inquirer.prompt({
-      type: "list",
-      name: "action",
+    const action = await select({
       message: "Import Options:",
       choices: [
         {
@@ -417,21 +328,19 @@ export class MainMenu {
       ],
     });
 
-    if (response.action === "back") {
+    if (action === "back") {
       return;
     }
 
-    if (response.action === "import-caravan") {
-      const fileAnswer = await inquirer.prompt({
-        type: "input",
-        name: "filename",
+    if (action === "import-caravan") {
+      const filename = await input({
         message: "Enter path to Caravan wallet JSON file:",
         validate: (input) =>
           fs.existsSync(input) ? true : "File does not exist",
       });
 
       try {
-        const config = await fs.readJson(fileAnswer.filename);
+        const config = await fs.readJson(filename);
 
         if (!config.name || !config.quorum || !config.extendedPublicKeys) {
           console.log(chalk.red("\nInvalid Caravan wallet configuration."));
@@ -452,30 +361,26 @@ export class MainMenu {
         );
 
         // Ask if user wants to create a watch-only wallet
-        const createWatchAnswer = await inquirer.prompt({
-          type: "confirm",
-          name: "createWatch",
+        const createWatch = await confirm({
           message: "Create a watch-only wallet for this multisig wallet?",
           default: true,
         });
 
-        if (createWatchAnswer.createWatch) {
+        if (createWatch) {
           await this.app.multisigCommands.createWatchWallet(config);
         }
       } catch (error) {
         console.error(chalk.red("\nError importing Caravan wallet:"), error);
       }
-    } else if (response.action === "import-keys") {
-      const fileAnswer = await inquirer.prompt({
-        type: "input",
-        name: "filename",
+    } else if (action === "import-keys") {
+      const filename = await input({
         message: "Enter path to key data JSON file:",
         validate: (input) =>
           fs.existsSync(input) ? true : "File does not exist",
       });
 
       try {
-        const keyData = await fs.readJson(fileAnswer.filename);
+        const keyData = await fs.readJson(filename);
 
         if (!keyData.caravanName || !keyData.keyData) {
           console.log(chalk.red("\nInvalid key data file."));

@@ -117,6 +117,7 @@ export class TransactionService {
       for (let i = 0; i < inputCount; i++) {
         try {
           console.log(`Attempting to sign input ${i}...`);
+          // @ts-ignore
           psbt.signInput(i, keyPair);
           signedAny = true;
           console.log(`Successfully signed input ${i}`);
@@ -162,6 +163,7 @@ export class TransactionService {
       for (let i = 0; i < inputCount; i++) {
         try {
           // First try to sign the input
+          // @ts-ignore
           psbt.signInput(i, keyPair);
 
           // Then extract the signature

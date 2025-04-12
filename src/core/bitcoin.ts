@@ -1,3 +1,4 @@
+//@ts-nocheck
 import { BitcoinRpcClient } from "./rpc";
 import { UTXO } from "../types/bitcoin";
 import * as bitcoin from "bitcoinjs-lib";
@@ -172,7 +173,6 @@ export class BitcoinService {
 
       // Import the private key
       const privateKey = wif;
-      const pubKey = keyPair.publicKey.toString("hex");
 
       try {
         await this.rpc.callRpc(

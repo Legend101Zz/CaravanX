@@ -137,7 +137,6 @@ export class WalletCommands {
           message: "Enter the private key (WIF format):",
           validate: (input) =>
             input.trim() !== "" ? true : "Please enter a valid private key",
-          type: "password",
         });
       }
 

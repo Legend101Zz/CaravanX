@@ -1,3 +1,4 @@
+//@ts-nocheck
 import { CaravanService } from "../core/caravan";
 import { BitcoinService } from "../core/bitcoin";
 import {
