@@ -119,4 +119,84 @@ export class CaravanService {
     await this.saveCaravanWalletConfig(config);
     return config;
   }
+  /**
+   * Create a watch-only wallet for a Caravan wallet configuration
+   */
+  async createWatchWalletForCaravan(
+    caravanConfig: CaravanWalletConfig,
+  ): Promise<string> {
+    // Create a safe wallet name
+    const safeWalletName = `${caravanConfig.name.replace(/\s+/g, "_").toLowerCase()}_watch`;
+
+    try {
+      // Create the wallet
+      await this.rpc.createWallet(safeWalletName, true, false);
+
+      // Build descriptors from the Caravan config
+      const descriptors = this.buildDescriptorsFromCaravanConfig(caravanConfig);
+
+      // Import descriptors into the wallet
+      await this.rpc.importDescriptors(safeWalletName, descriptors);
+
+      return safeWalletName;
+    } catch (error) {
+      console.error(
+        `Error creating watch-only wallet for ${caravanConfig.name}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Build wallet descriptors from a Caravan configuration
+   */
+  private buildDescriptorsFromCaravanConfig(
+    caravanConfig: CaravanWalletConfig,
+  ): any[] {
+    const { requiredSigners } = caravanConfig.quorum;
+    const xpubs = caravanConfig.extendedPublicKeys.map(
+      (key) => `${key.xpub}/0/*`,
+    );
+    const changeXpubs = caravanConfig.extendedPublicKeys.map(
+      (key) => `${key.xpub}/1/*`,
+    );
+
+    let receiveDescriptor: string;
+    let changeDescriptor: string;
+
+    // Build descriptors based on address type
+    switch (caravanConfig.addressType) {
+      case AddressType.P2WSH:
+        receiveDescriptor = `wsh(multi(${requiredSigners},${xpubs.join(",")}))`;
+        changeDescriptor = `wsh(multi(${requiredSigners},${changeXpubs.join(",")}))`;
+        break;
+      case AddressType.P2SH_P2WSH:
+        receiveDescriptor = `sh(wsh(multi(${requiredSigners},${xpubs.join(",")})))`;
+        changeDescriptor = `sh(wsh(multi(${requiredSigners},${changeXpubs.join(",")})))`;
+        break;
+      case AddressType.P2SH:
+        receiveDescriptor = `sh(multi(${requiredSigners},${xpubs.join(",")}))`;
+        changeDescriptor = `sh(multi(${requiredSigners},${changeXpubs.join(",")}))`;
+        break;
+      default:
+        throw new Error(
+          `Unsupported address type: ${caravanConfig.addressType}`,
+        );
+    }
+    return [
+      {
+        desc: receiveDescriptor,
+        timestamp: "now",
+        active: true,
+        internal: false,
+      },
+      {
+        desc: changeDescriptor,
+        timestamp: "now",
+        active: true,
+        internal: true,
+      },
+    ];
+  }
 }
