@@ -51,4 +51,17 @@ export class TransactionService {
       throw error;
     }
   }
+
+  /**
+   * Process a PSBT with a wallet (sign inputs that the wallet can sign)
+   */
+  async processPSBT(wallet: string, psbtBase64: string): Promise<string> {
+    try {
+      const result = await this.rpc.processPSBT(wallet, psbtBase64);
+      return result.psbt;
+    } catch (error) {
+      console.error(`Error processing PSBT with wallet "${wallet}":`, error);
+      throw error;
+    }
+  }
 }
