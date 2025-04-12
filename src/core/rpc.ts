@@ -38,6 +38,7 @@ export class BitcoinRpcClient {
           method,
           params,
         },
+        timeout: 5000,
       };
 
       const response = await axios(requestConfig);
@@ -48,15 +49,36 @@ export class BitcoinRpcClient {
 
       return response.data.result;
     } catch (error: any) {
+      // More descriptive error message
+      if (error.code === "ECONNREFUSED") {
+        throw new Error(
+          `Connection refused - Bitcoin Core not running at ${this.baseUrl}`,
+        );
+      } else if (error.response && error.response.status === 401) {
+        throw new Error(
+          `Authentication failed - Check RPC username and password`,
+        );
+      } else if (error.message.includes("timeout")) {
+        throw new Error(`Connection timed out - Bitcoin Core not responding`);
+      }
+
+      // Log the error for debugging
       console.error(`RPC call failed for method: ${method}`, error.message);
-      // If RPC fails, attempt fallback with bitcoin-cli
+
+      // Try fallback method if possible
       try {
-        const cliCommand = `${method} ${params.map((p) => JSON.stringify(p)).join(" ")}`;
-        const result = this.executeCliCommand(cliCommand, wallet);
-        return JSON.parse(result) as T;
+        if (this.config.dataDir && fs.existsSync(this.config.dataDir)) {
+          const cliCommand = `${method} ${params.map((p) => JSON.stringify(p)).join(" ")}`;
+          const result = this.executeCliCommand(cliCommand, wallet);
+          return JSON.parse(result) as T;
+        } else {
+          throw new Error(
+            `Specified data directory "${this.config.dataDir}" does not exist.`,
+          );
+        }
       } catch (cliError: any) {
         throw new Error(
-          `Fallback bitcoin-cli command failed: ${cliError.message}`,
+          `${error.message}${cliError.message ? "\n" + cliError.message : ""}`,
         );
       }
     }

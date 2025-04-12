@@ -7,6 +7,8 @@ import { WalletCommands } from "./commands/wallet";
 import { MultisigCommands } from "./commands/multisig";
 import { TransactionCommands } from "./commands/transaction";
 import { MainMenu } from "./ui/mainMenu";
+
+import { confirm, input, number } from "@inquirer/prompts";
 import chalk from "chalk";
 
 /**
@@ -67,7 +69,28 @@ export class CaravanRegtestManager {
         chain: string;
       };
       return blockchainInfo && blockchainInfo.chain === "regtest";
-    } catch (error) {
+    } catch (error: any) {
+      // More detailed error information
+      if (error.message.includes("ECONNREFUSED")) {
+        console.log(
+          chalk.red(
+            "Error: Bitcoin Core is not running or RPC server is not accessible.",
+          ),
+        );
+      } else if (error.message.includes("401")) {
+        console.log(
+          chalk.red(
+            "Error: Authentication failed. Check your RPC username and password.",
+          ),
+        );
+      } else if (error.message.includes("data directory")) {
+        console.log(chalk.red(`Error: ${error.message}`));
+      } else {
+        console.log(
+          chalk.red("Error connecting to Bitcoin Core:"),
+          error.message,
+        );
+      }
       return false;
     }
   }
@@ -79,7 +102,7 @@ export class CaravanRegtestManager {
     console.log(chalk.bold.cyan("\n=== Caravan Regtest Manager ==="));
 
     // Check if Bitcoin Core is running
-    const bitcoinCoreRunning = await this.checkBitcoinCore();
+    let bitcoinCoreRunning = await this.checkBitcoinCore();
     if (!bitcoinCoreRunning) {
       console.log(chalk.red("\nERROR: Could not connect to Bitcoin Core."));
       console.log(
@@ -101,16 +124,92 @@ export class CaravanRegtestManager {
       console.log(`User: ${config.bitcoin.user}`);
       console.log(`Data Directory: ${config.bitcoin.dataDir}`);
 
-      process.exit(1);
+      const setupConfig = await confirm({
+        message:
+          "Would you like to update your Bitcoin Core connection settings?",
+        default: true,
+      });
+
+      if (setupConfig) {
+        await this.setupBitcoinConfig();
+        // Try connecting again
+        bitcoinCoreRunning = await this.checkBitcoinCore();
+      }
     }
 
-    console.log(
-      chalk.green("\nSuccessfully connected to Bitcoin Core (regtest mode)."),
-    );
+    if (!bitcoinCoreRunning) {
+      console.log(
+        chalk.yellow("\nContinuing without Bitcoin Core connection."),
+      );
+      console.log(
+        chalk.yellow("Some features will not be available until connected."),
+      );
+    } else {
+      console.log(
+        chalk.green("\nSuccessfully connected to Bitcoin Core (regtest mode)."),
+      );
+    }
 
     // Start the main menu
     const mainMenu = new MainMenu(this);
     await mainMenu.start();
+  }
+
+  /**
+   * Set up Bitcoin Core connection configuration interactively
+   */
+  async setupBitcoinConfig(): Promise<void> {
+    console.log(chalk.cyan("\n=== Bitcoin Core Configuration ==="));
+
+    const config = this.configManager.getConfig();
+
+    const protocol = await input({
+      message: "Enter RPC protocol (http/https):",
+      default: config.bitcoin.protocol,
+    });
+
+    const host = await input({
+      message: "Enter RPC host:",
+      default: config.bitcoin.host,
+    });
+
+    const port = await number({
+      message: "Enter RPC port:",
+      default: config.bitcoin.port,
+    });
+
+    const user = await input({
+      message: "Enter RPC username:",
+      default: config.bitcoin.user,
+    });
+
+    const pass = await input({
+      message: "Enter RPC password:",
+      default: config.bitcoin.pass,
+    });
+
+    const dataDir = await input({
+      message: "Enter Bitcoin data directory:",
+      default: config.bitcoin.dataDir,
+    });
+
+    // Update the configuration
+    this.configManager.updateBitcoinConfig({
+      protocol,
+      host,
+      port: port!,
+      user,
+      pass,
+      dataDir,
+    });
+
+    // Reinitialize the RPC client with new settings
+    this.bitcoinRpcClient = new BitcoinRpcClient(
+      this.configManager.getConfig().bitcoin,
+    );
+    this.bitcoinService = new BitcoinService(this.bitcoinRpcClient, true);
+
+    console.log(chalk.green("\nConfiguration updated successfully!"));
   }
 }
 
