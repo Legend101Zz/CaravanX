@@ -3,9 +3,22 @@ import { TransactionService } from "../core/transaction";
 import { CaravanService } from "../core/caravan";
 import { BitcoinService } from "../core/bitcoin";
 import { input, confirm, select, number, password } from "@inquirer/prompts";
-import chalk from "chalk";
 import * as fs from "fs-extra";
 import * as clipboard from "clipboardy";
+import ora from "ora";
+import {
+  colors,
+  displayCommandTitle,
+  formatBitcoin,
+  truncate,
+  createTable,
+  formatSuccess,
+  formatWarning,
+  formatError,
+  boxText,
+  keyValue,
+  divider,
+} from "../utils/terminal";
 
 /**
  * Commands for managing Bitcoin transactions and PSBTs
@@ -29,31 +42,45 @@ export class TransactionCommands {
    * Create a PSBT from a watch-only wallet
    */
   async createPSBT(): Promise<string | null> {
-    console.log(chalk.cyan("\n=== Create New PSBT ==="));
+    displayCommandTitle("Create New PSBT");
 
     try {
       // First, list all wallets
+      const walletsSpinner = ora("Loading wallets...").start();
       const wallets = await this.bitcoinService.listWallets();
+      walletsSpinner.succeed("Wallets loaded");
 
       if (wallets.length === 0) {
-        console.log(chalk.yellow("No wallets found."));
+        console.log(formatWarning("No wallets found."));
         return null;
       }
 
       // Select the wallet
       const selectedWallet = await select({
         message: "Select a wallet to create the PSBT from:",
-        choices: wallets.map((w) => ({ name: w, value: w })),
+        choices: wallets.map((w) => ({
+          name: colors.highlight(w),
+          value: w,
+        })),
       });
 
       // Get wallet info to show balance
+      const infoSpinner = ora(
+        `Loading wallet information for ${selectedWallet}...`,
+      ).start();
       const walletInfo =
         await this.bitcoinService.getWalletInfo(selectedWallet);
-      console.log(chalk.green(`\nWallet "${selectedWallet}" selected.`));
-      console.log(chalk.green(`Available balance: ${walletInfo.balance} BTC`));
+      infoSpinner.succeed("Wallet information loaded");
+
+      console.log(keyValue("Selected wallet", selectedWallet));
+      console.log(
+        keyValue("Available balance", formatBitcoin(walletInfo.balance)),
+      );
 
       if (walletInfo.balance <= 0) {
-        console.log(chalk.yellow("Wallet has no funds. Please fund it first."));
+        console.log(
+          formatWarning("Wallet has no funds. Please fund it first."),
+        );
         return null;
       }
 
@@ -69,9 +96,12 @@ export class TransactionCommands {
         default: 1,
       });
 
+      console.log(divider());
+      console.log(colors.header("Output Configuration"));
+
       // Collect output details
       for (let i = 0; i < numOutputs!; i++) {
-        console.log(chalk.cyan(`\nOutput #${i + 1}:`));
+        console.log(colors.info(`\nOutput #${i + 1}:`));
 
         const address = await input({
           message: `Enter destination address for output #${i + 1}:`,
@@ -86,7 +116,7 @@ export class TransactionCommands {
               return "Please enter a valid positive amount";
             }
             if (totalAmount + input! > walletInfo.balance) {
-              return `Total amount (${totalAmount + input!} BTC) exceeds balance (${walletInfo.balance} BTC)`;
+              return `Total amount (${formatBitcoin(totalAmount + input!)}) exceeds balance (${formatBitcoin(walletInfo.balance)})`;
             }
             return true;
           },
@@ -94,32 +124,57 @@ export class TransactionCommands {
 
         outputs.push({ [address]: amount });
         totalAmount += amount!;
+
+        console.log(
+          keyValue(
+            `Output #${i + 1}`,
+            `${formatBitcoin(amount!)} to ${address}`,
+          ),
+        );
       }
 
-      // Create the PSBT
-      console.log(chalk.cyan("\nCreating PSBT..."));
+      // Show summary
+      console.log(divider());
+      console.log(colors.header("Transaction Summary"));
+      console.log(keyValue("Total amount", formatBitcoin(totalAmount)));
+      console.log(keyValue("From wallet", selectedWallet));
+      console.log(keyValue("Number of outputs", numOutputs!.toString()));
 
-      const psbt = await this.transactionService.createPSBT(
-        selectedWallet,
-        //@ts-ignore
-        outputs,
-      );
+      // Confirm
+      const confirm = await select({
+        message: "Proceed with creating the PSBT?",
+        choices: [
+          { name: colors.success("Yes, create PSBT"), value: "yes" },
+          { name: colors.error("No, cancel"), value: "no" },
+        ],
+      });
 
-      if (!psbt) {
-        console.log(chalk.red("Failed to create PSBT."));
+      if (confirm === "no") {
+        console.log(formatWarning("PSBT creation cancelled."));
         return null;
       }
 
-      console.log(chalk.green("\nPSBT created successfully!"));
+      // Create the PSBT
+      const createSpinner = ora("Creating PSBT...").start();
+      const psbt = await this.transactionService.createPSBT(
+        selectedWallet,
+        outputs,
+      );
+      createSpinner.succeed("PSBT created successfully");
+
+      if (!psbt) {
+        console.log(formatError("Failed to create PSBT."));
+        return null;
+      }
 
       // Handle the PSBT
       const action = await select({
         message: "What would you like to do with the PSBT?",
         choices: [
-          { name: "Save to file", value: "file" },
-          { name: "Copy to clipboard", value: "clipboard" },
-          { name: "Display", value: "display" },
-          { name: "Process with this wallet", value: "sign" },
+          { name: colors.highlight("Save to file"), value: "file" },
+          { name: colors.highlight("Copy to clipboard"), value: "clipboard" },
+          { name: colors.highlight("Display"), value: "display" },
+          { name: colors.highlight("Process with this wallet"), value: "sign" },
         ],
       });
 
@@ -130,17 +185,30 @@ export class TransactionCommands {
             default: "unsigned-psbt.txt",
           });
 
+          const saveSpinner = ora(`Saving PSBT to ${filename}...`).start();
           await fs.writeFile(filename, psbt);
-          console.log(chalk.green(`\nPSBT saved to ${filename}`));
+          saveSpinner.succeed("PSBT saved");
+
+          console.log(
+            boxText(
+              `The PSBT has been saved to ${colors.highlight(filename)}`,
+              { title: "PSBT Saved", titleColor: colors.success },
+            ),
+          );
           break;
         }
         case "clipboard":
+          const clipboardSpinner = ora("Copying PSBT to clipboard...").start();
           await clipboard.write(psbt);
-          console.log(chalk.green("\nPSBT copied to clipboard."));
+          clipboardSpinner.succeed("PSBT copied to clipboard");
           break;
         case "display":
-          console.log(chalk.cyan("\nPSBT (Base64):"));
-          console.log(psbt);
+          console.log(
+            boxText(colors.code(psbt), {
+              title: "PSBT (Base64)",
+              titleColor: colors.info,
+            }),
+          );
           break;
         case "sign":
           // Process the PSBT with the same wallet
@@ -149,7 +217,7 @@ export class TransactionCommands {
 
       return psbt;
     } catch (error) {
-      console.error(chalk.red("\nError creating PSBT:"), error);
+      console.error(formatError("Error creating PSBT:"), error);
       return null;
     }
   }
@@ -161,7 +229,7 @@ export class TransactionCommands {
     psbtBase64?: string,
     walletName?: string,
   ): Promise<string | null> {
-    console.log(chalk.cyan("\n=== Sign PSBT with Wallet ==="));
+    displayCommandTitle("Sign PSBT with Wallet");
 
     try {
       // If no PSBT provided, get it from the user
@@ -169,9 +237,12 @@ export class TransactionCommands {
         const source = await select({
           message: "How would you like to provide the PSBT?",
           choices: [
-            { name: "Load from file", value: "file" },
-            { name: "Paste Base64 string", value: "paste" },
-            { name: "Read from clipboard", value: "clipboard" },
+            { name: colors.highlight("Load from file"), value: "file" },
+            { name: colors.highlight("Paste Base64 string"), value: "paste" },
+            {
+              name: colors.highlight("Read from clipboard"),
+              value: "clipboard",
+            },
           ],
         });
 
@@ -183,7 +254,9 @@ export class TransactionCommands {
                 fs.existsSync(input) ? true : "File does not exist",
             });
 
+            const readSpinner = ora(`Reading PSBT from ${filename}...`).start();
             psbtBase64 = (await fs.readFile(filename, "utf8")).trim();
+            readSpinner.succeed("PSBT loaded from file");
             break;
           }
           case "paste": {
@@ -198,10 +271,14 @@ export class TransactionCommands {
           }
           case "clipboard":
             try {
+              const clipboardSpinner = ora("Reading from clipboard...").start();
               psbtBase64 = await clipboard.read();
-              console.log(chalk.green("PSBT read from clipboard."));
+              clipboardSpinner.succeed("PSBT read from clipboard");
             } catch (error) {
-              console.error(chalk.red("Error reading from clipboard:"), error);
+              console.error(
+                formatError("Error reading from clipboard:"),
+                error,
+              );
               return null;
             }
             break;
@@ -210,79 +287,62 @@ export class TransactionCommands {
 
       // Try to decode the PSBT for inspection
       try {
+        const decodeSpinner = ora("Decoding PSBT...").start();
         const decodedPsbt =
           await this.transactionService.decodePSBT(psbtBase64);
+        decodeSpinner.succeed("PSBT decoded successfully");
 
-        console.log(chalk.green("\nPSBT Decoded Successfully:"));
-        console.log(chalk.cyan("Transaction Details:"));
-
-        // Display inputs
-        console.log(chalk.cyan("\nInputs:"));
-        decodedPsbt.inputs.forEach((input, index) => {
-          console.log(`Input #${index + 1}:`);
-          if (input.has_utxo) {
-            console.log(`  TXID: ${decodedPsbt.tx.vin[index].txid}`);
-            console.log(`  VOUT: ${decodedPsbt.tx.vin[index].vout}`);
-            console.log(`  Amount: ${input.utxo.amount} BTC`);
-            console.log(
-              `  Address: ${input.utxo.scriptPubKey.address || "Unknown"}`,
-            );
-          } else {
-            console.log(`  TXID: ${decodedPsbt.tx.vin[index].txid}`);
-            console.log(`  VOUT: ${decodedPsbt.tx.vin[index].vout}`);
-          }
-        });
-
-        // Display outputs
-        console.log(chalk.cyan("\nOutputs:"));
-        decodedPsbt.tx.vout.forEach((output, index) => {
-          console.log(`Output #${index + 1}:`);
-          console.log(`  Amount: ${output.value} BTC`);
-          console.log(`  Address: ${output.scriptPubKey.address || "Unknown"}`);
-        });
-
-        // Display fee
-        if (decodedPsbt.fee) {
-          console.log(chalk.cyan("\nFee:"));
-          console.log(`  ${decodedPsbt.fee} BTC`);
-        }
+        console.log(
+          boxText(this.formatPSBTSummary(decodedPsbt), {
+            title: "PSBT Summary",
+            titleColor: colors.info,
+          }),
+        );
       } catch (error) {
-        console.error(chalk.yellow("\nWarning: Could not decode PSBT:"), error);
+        console.log(formatWarning("Could not decode PSBT for inspection."));
       }
 
       // If no wallet provided, ask user to select one
       if (!walletName) {
+        const walletsSpinner = ora("Loading wallets...").start();
         const wallets = await this.bitcoinService.listWallets();
+        walletsSpinner.succeed("Wallets loaded");
 
         if (wallets.length === 0) {
-          console.log(chalk.yellow("No wallets found."));
+          console.log(formatWarning("No wallets found."));
           return null;
         }
 
         walletName = await select({
           message: "Select a wallet to sign with:",
-          choices: wallets.map((w) => ({ name: w, value: w })),
+          choices: wallets.map((w) => ({
+            name: colors.highlight(w),
+            value: w,
+          })),
         });
       }
 
       // Sign the PSBT with the selected wallet
-      console.log(chalk.cyan(`\nSigning PSBT with wallet "${walletName}"...`));
+      console.log(colors.info(`\nSigning PSBT with wallet "${walletName}"...`));
 
+      const signSpinner = ora("Signing PSBT...").start();
       const signedPsbt = await this.transactionService.processPSBT(
         walletName,
         psbtBase64,
       );
-
-      console.log(chalk.green("\nPSBT signed successfully!"));
+      signSpinner.succeed("PSBT signed successfully");
 
       // Handle the signed PSBT
       const action = await select({
         message: "What would you like to do with the signed PSBT?",
         choices: [
-          { name: "Save to file", value: "file" },
-          { name: "Copy to clipboard", value: "clipboard" },
-          { name: "Display", value: "display" },
-          { name: "Try to finalize and broadcast", value: "finalize" },
+          { name: colors.highlight("Save to file"), value: "file" },
+          { name: colors.highlight("Copy to clipboard"), value: "clipboard" },
+          { name: colors.highlight("Display"), value: "display" },
+          {
+            name: colors.highlight("Try to finalize and broadcast"),
+            value: "finalize",
+          },
         ],
       });
 
@@ -293,17 +353,34 @@ export class TransactionCommands {
             default: "signed-psbt.txt",
           });
 
+          const saveSpinner = ora(
+            `Saving signed PSBT to ${filename}...`,
+          ).start();
           await fs.writeFile(filename, signedPsbt);
-          console.log(chalk.green(`\nSigned PSBT saved to ${filename}`));
+          saveSpinner.succeed("Signed PSBT saved");
+
+          console.log(
+            boxText(
+              `The signed PSBT has been saved to ${colors.highlight(filename)}`,
+              { title: "Signed PSBT Saved", titleColor: colors.success },
+            ),
+          );
           break;
         }
         case "clipboard":
+          const clipboardSpinner = ora(
+            "Copying signed PSBT to clipboard...",
+          ).start();
           await clipboard.write(signedPsbt);
-          console.log(chalk.green("\nSigned PSBT copied to clipboard."));
+          clipboardSpinner.succeed("Signed PSBT copied to clipboard");
           break;
         case "display":
-          console.log(chalk.cyan("\nSigned PSBT (Base64):"));
-          console.log(signedPsbt);
+          console.log(
+            boxText(colors.code(signedPsbt), {
+              title: "Signed PSBT (Base64)",
+              titleColor: colors.info,
+            }),
+          );
           break;
         case "finalize":
           return this.finalizeAndBroadcastPSBT(signedPsbt);
@@ -311,25 +388,70 @@ export class TransactionCommands {
 
       return signedPsbt;
     } catch (error) {
-      console.error(chalk.red("\nError signing PSBT:"), error);
+      console.error(formatError("Error signing PSBT:"), error);
       return null;
     }
+  }
+
+  /**
+   * Format a decoded PSBT for display
+   */
+  private formatPSBTSummary(decodedPsbt: any): string {
+    let summary = "";
+
+    // Display inputs
+    summary += colors.header("Inputs:") + "\n";
+    decodedPsbt.inputs.forEach((input, index) => {
+      summary += `Input #${index + 1}:\n`;
+      if (input.has_utxo) {
+        summary += `  TXID: ${truncate(decodedPsbt.tx.vin[index].txid, 10)}\n`;
+        summary += `  VOUT: ${decodedPsbt.tx.vin[index].vout}\n`;
+        summary += `  Amount: ${formatBitcoin(input.utxo.amount)}\n`;
+        summary += `  Address: ${input.utxo.scriptPubKey.address || "Unknown"}\n`;
+      } else {
+        summary += `  TXID: ${truncate(decodedPsbt.tx.vin[index].txid, 10)}\n`;
+        summary += `  VOUT: ${decodedPsbt.tx.vin[index].vout}\n`;
+      }
+      summary += "\n";
+    });
+
+    // Display outputs
+    summary += colors.header("Outputs:") + "\n";
+    decodedPsbt.tx.vout.forEach((output, index) => {
+      summary += `Output #${index + 1}:\n`;
+      summary += `  Amount: ${formatBitcoin(output.value)}\n`;
+      summary += `  Address: ${output.scriptPubKey.address || "Unknown"}\n\n`;
+    });
+
+    // Display fee
+    if (decodedPsbt.fee) {
+      summary += colors.header("Fee:") + "\n";
+      summary += `  ${formatBitcoin(decodedPsbt.fee)}\n`;
+
+      // Calculate fee rate
+      if (decodedPsbt.tx.vsize) {
+        const feeRate = decodedPsbt.fee / (decodedPsbt.tx.vsize / 1000);
+        summary += `  Rate: ${feeRate.toFixed(2)} BTC/kB\n`;
+      }
+    }
+
+    return summary;
   }
 
   /**
    * Sign a PSBT with a private key
    */
   async signPSBTWithPrivateKey(): Promise<any | null> {
-    console.log(chalk.cyan("\n=== Sign PSBT with Private Key ==="));
+    displayCommandTitle("Sign PSBT with Private Key");
 
     try {
       // Get the PSBT from the user
       const source = await select({
         message: "How would you like to provide the PSBT?",
         choices: [
-          { name: "Load from file", value: "file" },
-          { name: "Paste Base64 string", value: "paste" },
-          { name: "Read from clipboard", value: "clipboard" },
+          { name: colors.highlight("Load from file"), value: "file" },
+          { name: colors.highlight("Paste Base64 string"), value: "paste" },
+          { name: colors.highlight("Read from clipboard"), value: "clipboard" },
         ],
       });
 
@@ -343,7 +465,9 @@ export class TransactionCommands {
               fs.existsSync(input) ? true : "File does not exist",
           });
 
+          const readSpinner = ora(`Reading PSBT from ${filename}...`).start();
           psbtBase64 = (await fs.readFile(filename, "utf8")).trim();
+          readSpinner.succeed("PSBT loaded from file");
           break;
         }
         case "paste": {
@@ -358,39 +482,45 @@ export class TransactionCommands {
         }
         case "clipboard":
           try {
+            const clipboardSpinner = ora("Reading from clipboard...").start();
             psbtBase64 = await clipboard.read();
-            console.log(chalk.green("PSBT read from clipboard."));
+            clipboardSpinner.succeed("PSBT read from clipboard");
           } catch (error) {
-            console.error(chalk.red("Error reading from clipboard:"), error);
+            console.error(formatError("Error reading from clipboard:"), error);
             return null;
           }
           break;
       }
 
       // Try to detect if this is a Caravan PSBT
+      const detectSpinner = ora("Analyzing PSBT...").start();
       const caravanWallets = await this.caravanService.listCaravanWallets();
       const caravanConfig =
         await this.transactionService.detectCaravanWalletForPSBT(
           psbtBase64,
           caravanWallets,
         );
+      detectSpinner.succeed("PSBT analysis complete");
 
       let privateKey: string;
 
       if (caravanConfig) {
         console.log(
-          chalk.green(
-            `\nThis PSBT belongs to Caravan wallet: ${caravanConfig.name}`,
+          boxText(
+            `This PSBT belongs to Caravan wallet: ${colors.highlight(caravanConfig.name)}`,
+            { title: "Caravan PSBT Detected", titleColor: colors.success },
           ),
         );
 
         // Load private key data for this wallet
+        const keyDataSpinner = ora("Loading private key data...").start();
         const keyData =
           await this.caravanService.loadCaravanPrivateKeyData(caravanConfig);
+        keyDataSpinner.succeed("Key data loaded");
 
         if (keyData && keyData.keyData.some((k) => k.privateKey)) {
           console.log(
-            chalk.green("\nFound configured private keys for this wallet."),
+            formatSuccess("Found configured private keys for this wallet."),
           );
 
           // Let user select which key to use
@@ -403,7 +533,7 @@ export class TransactionCommands {
                 ?.name || `Key #${index + 1}`;
 
             return {
-              name: `${keyName} (${xpub.substring(0, 8)}...)`,
+              name: colors.highlight(`${keyName} (${truncate(xpub, 8)})`),
               value: index,
             };
           });
@@ -416,7 +546,7 @@ export class TransactionCommands {
 
             privateKey = availableKeys[keyIndex].privateKey;
           } else {
-            console.log(chalk.yellow("No private keys available."));
+            console.log(formatWarning("No private keys available."));
 
             // Ask for manual entry
             privateKey = await password({
@@ -429,7 +559,7 @@ export class TransactionCommands {
           }
         } else {
           console.log(
-            chalk.yellow("No private key data found for this wallet."),
+            formatWarning("No private key data found for this wallet."),
           );
 
           // Ask for manual entry
@@ -443,24 +573,33 @@ export class TransactionCommands {
         }
 
         // For Caravan, we need to extract signatures in a special format
-        console.log(chalk.cyan("\nSigning PSBT for Caravan..."));
+        console.log(colors.info("\nSigning PSBT for Caravan..."));
 
+        const signSpinner = ora("Extracting signatures for Caravan...").start();
         const signedResult =
           await this.transactionService.extractSignaturesForCaravan(
             psbtBase64,
             privateKey,
           );
-
-        console.log(chalk.green("\nPSBT signed successfully!"));
+        signSpinner.succeed("PSBT signed successfully for Caravan");
 
         // Handle the signed result
         const action = await select({
           message: "What would you like to do with the Caravan signature data?",
           choices: [
-            { name: "Save to file (JSON format)", value: "file" },
-            { name: "Copy to clipboard (JSON format)", value: "clipboard" },
-            { name: "Display", value: "display" },
-            { name: "Just continue with the base64 PSBT", value: "psbt" },
+            {
+              name: colors.highlight("Save to file (JSON format)"),
+              value: "file",
+            },
+            {
+              name: colors.highlight("Copy to clipboard (JSON format)"),
+              value: "clipboard",
+            },
+            { name: colors.highlight("Display"), value: "display" },
+            {
+              name: colors.highlight("Just continue with the base64 PSBT"),
+              value: "psbt",
+            },
           ],
         });
 
@@ -482,21 +621,34 @@ export class TransactionCommands {
               default: "caravan-signatures.json",
             });
 
+            const saveSpinner = ora(
+              `Saving signatures to ${filename}...`,
+            ).start();
             await fs.writeFile(filename, caravanJson);
+            saveSpinner.succeed("Caravan signature data saved");
+
             console.log(
-              chalk.green(`\nCaravan signature data saved to ${filename}`),
+              boxText(
+                `The signature data has been saved to ${colors.highlight(filename)}`,
+                { title: "Signatures Saved", titleColor: colors.success },
+              ),
             );
             break;
           }
           case "clipboard":
+            const clipboardSpinner = ora(
+              "Copying signatures to clipboard...",
+            ).start();
             await clipboard.write(caravanJson);
-            console.log(
-              chalk.green("\nCaravan signature data copied to clipboard."),
-            );
+            clipboardSpinner.succeed("Signature data copied to clipboard");
             break;
           case "display":
-            console.log(chalk.cyan("\nCaravan signature data (JSON):"));
-            console.log(caravanJson);
+            console.log(
+              boxText(colors.code(caravanJson), {
+                title: "Caravan Signature Data (JSON)",
+                titleColor: colors.info,
+              }),
+            );
             break;
           case "psbt":
             return this.handleSignedPSBT(signedResult.base64);
@@ -506,7 +658,7 @@ export class TransactionCommands {
       } else {
         // Standard PSBT signing
         console.log(
-          chalk.cyan("\nStandard PSBT signing (not Caravan-specific)."),
+          colors.info("\nStandard PSBT signing (not Caravan-specific)."),
         );
 
         // Ask for private key
@@ -519,19 +671,19 @@ export class TransactionCommands {
         privateKey = privateKey.trim();
 
         // Sign the PSBT
-        console.log(chalk.cyan("\nSigning PSBT with private key..."));
+        console.log(colors.info("\nSigning PSBT with private key..."));
 
+        const signSpinner = ora("Signing PSBT...").start();
         const signedPsbt = await this.transactionService.signPSBTWithPrivateKey(
           psbtBase64,
           privateKey,
         );
-
-        console.log(chalk.green("\nPSBT signed successfully!"));
+        signSpinner.succeed("PSBT signed successfully");
 
         return this.handleSignedPSBT(signedPsbt);
       }
     } catch (error) {
-      console.error(chalk.red("\nError signing PSBT with private key:"), error);
+      console.error(formatError("Error signing PSBT with private key:"), error);
       return null;
     }
   }
@@ -543,10 +695,13 @@ export class TransactionCommands {
     const action = await select({
       message: "What would you like to do with the signed PSBT?",
       choices: [
-        { name: "Save to file", value: "file" },
-        { name: "Copy to clipboard", value: "clipboard" },
-        { name: "Display", value: "display" },
-        { name: "Try to finalize and broadcast", value: "finalize" },
+        { name: colors.highlight("Save to file"), value: "file" },
+        { name: colors.highlight("Copy to clipboard"), value: "clipboard" },
+        { name: colors.highlight("Display"), value: "display" },
+        {
+          name: colors.highlight("Try to finalize and broadcast"),
+          value: "finalize",
+        },
       ],
     });
 
@@ -557,17 +712,32 @@ export class TransactionCommands {
           default: "signed-psbt.txt",
         });
 
+        const saveSpinner = ora(`Saving signed PSBT to ${filename}...`).start();
         await fs.writeFile(filename, signedPsbt);
-        console.log(chalk.green(`\nSigned PSBT saved to ${filename}`));
+        saveSpinner.succeed("Signed PSBT saved");
+
+        console.log(
+          boxText(
+            `The signed PSBT has been saved to ${colors.highlight(filename)}`,
+            { title: "Signed PSBT Saved", titleColor: colors.success },
+          ),
+        );
         break;
       }
       case "clipboard":
+        const clipboardSpinner = ora(
+          "Copying signed PSBT to clipboard...",
+        ).start();
         await clipboard.write(signedPsbt);
-        console.log(chalk.green("\nSigned PSBT copied to clipboard."));
+        clipboardSpinner.succeed("Signed PSBT copied to clipboard");
         break;
       case "display":
-        console.log(chalk.cyan("\nSigned PSBT (Base64):"));
-        console.log(signedPsbt);
+        console.log(
+          boxText(colors.code(signedPsbt), {
+            title: "Signed PSBT (Base64)",
+            titleColor: colors.info,
+          }),
+        );
         break;
       case "finalize":
         return this.finalizeAndBroadcastPSBT(signedPsbt);
@@ -580,7 +750,7 @@ export class TransactionCommands {
    * Finalize and broadcast a PSBT
    */
   async finalizeAndBroadcastPSBT(psbtBase64?: string): Promise<string | null> {
-    console.log(chalk.cyan("\n=== Finalize and Broadcast PSBT ==="));
+    displayCommandTitle("Finalize and Broadcast PSBT");
 
     try {
       // If no PSBT provided, get it from the user
@@ -588,9 +758,12 @@ export class TransactionCommands {
         const source = await select({
           message: "How would you like to provide the PSBT?",
           choices: [
-            { name: "Load from file", value: "file" },
-            { name: "Paste Base64 string", value: "paste" },
-            { name: "Read from clipboard", value: "clipboard" },
+            { name: colors.highlight("Load from file"), value: "file" },
+            { name: colors.highlight("Paste Base64 string"), value: "paste" },
+            {
+              name: colors.highlight("Read from clipboard"),
+              value: "clipboard",
+            },
           ],
         });
 
@@ -602,7 +775,9 @@ export class TransactionCommands {
                 fs.existsSync(input) ? true : "File does not exist",
             });
 
+            const readSpinner = ora(`Reading PSBT from ${filename}...`).start();
             psbtBase64 = (await fs.readFile(filename, "utf8")).trim();
+            readSpinner.succeed("PSBT loaded from file");
             break;
           }
           case "paste": {
@@ -617,10 +792,14 @@ export class TransactionCommands {
           }
           case "clipboard":
             try {
+              const clipboardSpinner = ora("Reading from clipboard...").start();
               psbtBase64 = await clipboard.read();
-              console.log(chalk.green("PSBT read from clipboard."));
+              clipboardSpinner.succeed("PSBT read from clipboard");
             } catch (error) {
-              console.error(chalk.red("Error reading from clipboard:"), error);
+              console.error(
+                formatError("Error reading from clipboard:"),
+                error,
+              );
               return null;
             }
             break;
@@ -628,32 +807,42 @@ export class TransactionCommands {
       }
 
       // Finalize the PSBT
-      console.log(chalk.cyan("\nFinalizing PSBT..."));
+      console.log(colors.info("\nFinalizing PSBT..."));
 
+      const finalizeSpinner = ora("Finalizing PSBT...").start();
       const finalizedPsbt =
         await this.transactionService.finalizePSBT(psbtBase64);
+      finalizeSpinner.succeed("PSBT finalization complete");
 
       if (!finalizedPsbt.complete) {
         console.log(
-          chalk.yellow(
-            "\nPSBT is not complete yet. Additional signatures may be required.",
+          boxText(
+            formatWarning(
+              "PSBT is not complete yet. Additional signatures may be required.",
+            ),
+            { title: "Incomplete PSBT", titleColor: colors.warning },
           ),
         );
 
         // Show PSBT details
         try {
+          const decodeSpinner = ora("Analyzing incomplete PSBT...").start();
           const decodedPsbt =
             await this.transactionService.decodePSBT(psbtBase64);
+          decodeSpinner.succeed("PSBT analysis complete");
 
-          console.log(chalk.cyan("\nPSBT Details:"));
-          console.log(`Inputs: ${decodedPsbt.tx.vin.length}`);
-          console.log(`Outputs: ${decodedPsbt.tx.vout.length}`);
-
-          if (decodedPsbt.fee) {
-            console.log(`Fee: ${decodedPsbt.fee} BTC`);
-          }
+          console.log(
+            boxText(
+              `Inputs: ${colors.highlight(decodedPsbt.tx.vin.length.toString())}\n` +
+                `Outputs: ${colors.highlight(decodedPsbt.tx.vout.length.toString())}\n` +
+                (decodedPsbt.fee
+                  ? `Fee: ${colors.highlight(formatBitcoin(decodedPsbt.fee))}`
+                  : ""),
+              { title: "PSBT Details", titleColor: colors.info },
+            ),
+          );
         } catch (error) {
-          console.error(chalk.yellow("Could not decode PSBT:"), error);
+          console.log(formatWarning("Could not decode PSBT for analysis."));
         }
 
         // Ask if user wants to try signing with another key
@@ -667,8 +856,11 @@ export class TransactionCommands {
           const method = await select({
             message: "How would you like to sign?",
             choices: [
-              { name: "Sign with wallet", value: "wallet" },
-              { name: "Sign with private key", value: "privkey" },
+              { name: colors.highlight("Sign with wallet"), value: "wallet" },
+              {
+                name: colors.highlight("Sign with private key"),
+                value: "privkey",
+              },
             ],
           });
 
@@ -683,9 +875,9 @@ export class TransactionCommands {
         const action = await select({
           message: "What would you like to do with the PSBT?",
           choices: [
-            { name: "Save to file", value: "file" },
-            { name: "Copy to clipboard", value: "clipboard" },
-            { name: "Display", value: "display" },
+            { name: colors.highlight("Save to file"), value: "file" },
+            { name: colors.highlight("Copy to clipboard"), value: "clipboard" },
+            { name: colors.highlight("Display"), value: "display" },
           ],
         });
 
@@ -696,24 +888,44 @@ export class TransactionCommands {
               default: "incomplete-psbt.txt",
             });
 
+            const saveSpinner = ora(`Saving PSBT to ${filename}...`).start();
             await fs.writeFile(filename, psbtBase64);
-            console.log(chalk.green(`\nPSBT saved to ${filename}`));
+            saveSpinner.succeed("PSBT saved");
+
+            console.log(
+              boxText(
+                `The incomplete PSBT has been saved to ${colors.highlight(filename)}`,
+                { title: "PSBT Saved", titleColor: colors.info },
+              ),
+            );
             break;
           }
           case "clipboard":
+            const clipboardSpinner = ora(
+              "Copying PSBT to clipboard...",
+            ).start();
             await clipboard.write(psbtBase64);
-            console.log(chalk.green("\nPSBT copied to clipboard."));
+            clipboardSpinner.succeed("PSBT copied to clipboard");
             break;
           case "display":
-            console.log(chalk.cyan("\nPSBT (Base64):"));
-            console.log(psbtBase64);
+            console.log(
+              boxText(colors.code(psbtBase64), {
+                title: "Incomplete PSBT (Base64)",
+                titleColor: colors.info,
+              }),
+            );
             break;
         }
 
         return null;
       }
 
-      console.log(chalk.green("\nPSBT finalized successfully!"));
+      console.log(
+        boxText(formatSuccess("PSBT finalized successfully!"), {
+          title: "PSBT Ready for Broadcast",
+          titleColor: colors.success,
+        }),
+      );
 
       // Ask if user wants to broadcast the transaction
       const broadcast = await confirm({
@@ -722,14 +934,22 @@ export class TransactionCommands {
       });
 
       if (broadcast) {
-        console.log(chalk.cyan("\nBroadcasting transaction..."));
+        console.log(colors.info("\nBroadcasting transaction..."));
 
+        const broadcastSpinner = ora(
+          "Broadcasting transaction to network...",
+        ).start();
         const txid = await this.transactionService.broadcastTransaction(
           finalizedPsbt.hex,
         );
+        broadcastSpinner.succeed("Transaction broadcast successfully");
 
-        console.log(chalk.green("\nTransaction broadcast successfully!"));
-        console.log(chalk.green(`Transaction ID: ${txid}`));
+        console.log(
+          boxText(`Transaction ID: ${colors.highlight(txid)}`, {
+            title: "Transaction Broadcast",
+            titleColor: colors.success,
+          }),
+        );
 
         // Ask if user wants to mine a block to confirm the transaction
         const mineBlock = await confirm({
@@ -739,32 +959,43 @@ export class TransactionCommands {
 
         if (mineBlock) {
           // Get a wallet for mining
+          const walletsSpinner = ora("Loading wallets for mining...").start();
           const wallets = await this.bitcoinService.listWallets();
+          walletsSpinner.succeed("Wallets loaded");
 
           if (wallets.length === 0) {
-            console.log(chalk.yellow("\nNo wallets found for mining."));
+            console.log(formatWarning("\nNo wallets found for mining."));
             return txid;
           }
 
           const miningWallet = await select({
             message: "Select a wallet to mine to:",
-            choices: wallets.map((w) => ({ name: w, value: w })),
+            choices: wallets.map((w) => ({
+              name: colors.highlight(w),
+              value: w,
+            })),
           });
 
+          const addressSpinner = ora(
+            `Generating address for mining...`,
+          ).start();
           const miningAddress =
             await this.bitcoinService.getNewAddress(miningWallet);
+          addressSpinner.succeed(`Mining to address: ${miningAddress}`);
 
-          console.log(
-            chalk.cyan(`\nMining block to address ${miningAddress}...`),
-          );
-
+          const mineSpinner = ora("Mining a block...").start();
           const blockHashes = await this.bitcoinService.generateToAddress(
             1,
             miningAddress,
           );
+          mineSpinner.succeed("Block mined successfully");
 
-          console.log(chalk.green("\nBlock mined successfully!"));
-          console.log(chalk.green(`Block hash: ${blockHashes[0]}`));
+          console.log(
+            boxText(`Block hash: ${colors.highlight(blockHashes[0])}`, {
+              title: "Block Mined",
+              titleColor: colors.success,
+            }),
+          );
         }
 
         return txid;
@@ -773,9 +1004,9 @@ export class TransactionCommands {
         const action = await select({
           message: "What would you like to do with the transaction hex?",
           choices: [
-            { name: "Save to file", value: "file" },
-            { name: "Copy to clipboard", value: "clipboard" },
-            { name: "Display", value: "display" },
+            { name: colors.highlight("Save to file"), value: "file" },
+            { name: colors.highlight("Copy to clipboard"), value: "clipboard" },
+            { name: colors.highlight("Display"), value: "display" },
           ],
         });
 
@@ -786,17 +1017,34 @@ export class TransactionCommands {
               default: "transaction.hex",
             });
 
+            const saveSpinner = ora(
+              `Saving transaction hex to ${filename}...`,
+            ).start();
             await fs.writeFile(filename, finalizedPsbt.hex);
-            console.log(chalk.green(`\nTransaction hex saved to ${filename}`));
+            saveSpinner.succeed("Transaction hex saved");
+
+            console.log(
+              boxText(
+                `The transaction hex has been saved to ${colors.highlight(filename)}`,
+                { title: "Transaction Saved", titleColor: colors.success },
+              ),
+            );
             break;
           }
           case "clipboard":
+            const clipboardSpinner = ora(
+              "Copying transaction hex to clipboard...",
+            ).start();
             await clipboard.write(finalizedPsbt.hex);
-            console.log(chalk.green("\nTransaction hex copied to clipboard."));
+            clipboardSpinner.succeed("Transaction hex copied to clipboard");
             break;
           case "display":
-            console.log(chalk.cyan("\nTransaction hex:"));
-            console.log(finalizedPsbt.hex);
+            console.log(
+              boxText(colors.code(finalizedPsbt.hex), {
+                title: "Transaction hex",
+                titleColor: colors.info,
+              }),
+            );
             break;
         }
 
@@ -804,7 +1052,7 @@ export class TransactionCommands {
       }
     } catch (error) {
       console.error(
-        chalk.red("\nError finalizing and broadcasting PSBT:"),
+        formatError("Error finalizing and broadcasting PSBT:"),
         error,
       );
       return null;
@@ -815,16 +1063,16 @@ export class TransactionCommands {
    * Analyze a PSBT (decode and show details)
    */
   async analyzePSBT(): Promise<any | null> {
-    console.log(chalk.cyan("\n=== Analyze PSBT ==="));
+    displayCommandTitle("Analyze PSBT");
 
     try {
       // Get the PSBT from the user
       const source = await select({
         message: "How would you like to provide the PSBT?",
         choices: [
-          { name: "Load from file", value: "file" },
-          { name: "Paste Base64 string", value: "paste" },
-          { name: "Read from clipboard", value: "clipboard" },
+          { name: colors.highlight("Load from file"), value: "file" },
+          { name: colors.highlight("Paste Base64 string"), value: "paste" },
+          { name: colors.highlight("Read from clipboard"), value: "clipboard" },
         ],
       });
 
@@ -838,7 +1086,9 @@ export class TransactionCommands {
               fs.existsSync(input) ? true : "File does not exist",
           });
 
+          const readSpinner = ora(`Reading PSBT from ${filename}...`).start();
           psbtBase64 = (await fs.readFile(filename, "utf8")).trim();
+          readSpinner.succeed("PSBT loaded from file");
           break;
         }
         case "paste": {
@@ -853,16 +1103,20 @@ export class TransactionCommands {
         }
         case "clipboard":
           try {
+            const clipboardSpinner = ora("Reading from clipboard...").start();
             psbtBase64 = await clipboard.read();
-            console.log(chalk.green("PSBT read from clipboard."));
+            clipboardSpinner.succeed("PSBT read from clipboard");
           } catch (error) {
-            console.error(chalk.red("Error reading from clipboard:"), error);
+            console.error(formatError("Error reading from clipboard:"), error);
             return null;
           }
           break;
       }
 
       // Try to detect if this is a Caravan PSBT
+      const detectSpinner = ora(
+        "Detecting if this is a Caravan PSBT...",
+      ).start();
       const caravanWallets = await this.caravanService.listCaravanWallets();
       const caravanConfig =
         await this.transactionService.detectCaravanWalletForPSBT(
@@ -871,98 +1125,107 @@ export class TransactionCommands {
         );
 
       if (caravanConfig) {
+        detectSpinner.succeed("Caravan wallet detected");
         console.log(
-          chalk.green(
-            `\nThis PSBT belongs to Caravan wallet: ${caravanConfig.name}`,
+          boxText(
+            `PSBT belongs to Caravan wallet: ${colors.highlight(caravanConfig.name)}\n` +
+              `Quorum: ${colors.highlight(`${caravanConfig.quorum.requiredSigners} of ${caravanConfig.quorum.totalSigners}`)}`,
+            { title: "Caravan Wallet Information", titleColor: colors.success },
           ),
         );
-        console.log(
-          chalk.green(
-            `Quorum: ${caravanConfig.quorum.requiredSigners} of ${caravanConfig.quorum.totalSigners}`,
-          ),
-        );
+      } else {
+        detectSpinner.succeed("PSBT analysis complete");
       }
 
       // Decode the PSBT
-      console.log(chalk.cyan("\nDecoding PSBT..."));
-
+      const decodeSpinner = ora("Decoding PSBT...").start();
       const decodedPsbt = await this.transactionService.decodePSBT(psbtBase64);
-
-      console.log(chalk.green("\nPSBT Decoded Successfully:"));
+      decodeSpinner.succeed("PSBT decoded successfully");
 
       // Display basic information
-      console.log(chalk.cyan("\nTransaction Details:"));
-      console.log(`Version: ${decodedPsbt.tx.version}`);
-      console.log(`Locktime: ${decodedPsbt.tx.locktime}`);
-      console.log(`Inputs: ${decodedPsbt.tx.vin.length}`);
-      console.log(`Outputs: ${decodedPsbt.tx.vout.length}`);
+      const basicInfo = `
+${keyValue("Version", decodedPsbt.tx.version.toString())}
+${keyValue("Locktime", decodedPsbt.tx.locktime.toString())}
+${keyValue("Inputs", decodedPsbt.tx.vin.length.toString())}
+${keyValue("Outputs", decodedPsbt.tx.vout.length.toString())}
+${
+  decodedPsbt.fee
+    ? keyValue("Fee", formatBitcoin(decodedPsbt.fee)) +
+      "\n" +
+      keyValue(
+        "Fee rate",
+        `${(decodedPsbt.fee / (decodedPsbt.tx.vsize / 1000)).toFixed(8)} BTC/kB`,
+      )
+    : ""
+}`;
 
-      if (decodedPsbt.fee) {
-        console.log(`Fee: ${decodedPsbt.fee} BTC`);
-        console.log(
-          `Fee rate: ${decodedPsbt.fee / (decodedPsbt.tx.vsize / 1000)} BTC/kB`,
-        );
-      }
+      console.log(
+        boxText(basicInfo, {
+          title: "Transaction Details",
+          titleColor: colors.header,
+        }),
+      );
 
       // Ask for detail level
       const level = await select({
         message: "How much detail would you like to see?",
         choices: [
-          { name: "Basic", value: "basic" },
-          { name: "Detailed", value: "detailed" },
-          { name: "Raw JSON", value: "raw" },
+          { name: colors.highlight("Basic"), value: "basic" },
+          { name: colors.highlight("Detailed"), value: "detailed" },
+          { name: colors.highlight("Raw JSON"), value: "raw" },
         ],
       });
 
       if (level === "detailed" || level === "raw") {
         // Display inputs
-        console.log(chalk.cyan("\nInputs:"));
+        console.log("\n" + colors.header("=== Inputs ==="));
         decodedPsbt.inputs.forEach((input, index) => {
-          console.log(`\nInput #${index + 1}:`);
-          console.log(`  TXID: ${decodedPsbt.tx.vin[index].txid}`);
-          console.log(`  VOUT: ${decodedPsbt.tx.vin[index].vout}`);
-          console.log(`  Sequence: ${decodedPsbt.tx.vin[index].sequence}`);
+          const inputInfo = `
+Input #${index + 1}:
+  ${keyValue("TXID", truncate(decodedPsbt.tx.vin[index].txid, 15))}
+  ${keyValue("VOUT", decodedPsbt.tx.vin[index].vout.toString())}
+  ${keyValue("Sequence", decodedPsbt.tx.vin[index].sequence.toString())}
+  ${
+    input.has_utxo
+      ? keyValue("Amount", formatBitcoin(input.utxo.amount)) +
+        "\n  " +
+        keyValue("Script Type", input.utxo.scriptPubKey.type || "Unknown") +
+        "\n  " +
+        keyValue("Address", input.utxo.scriptPubKey.address || "Unknown")
+      : ""
+  }
+  ${input.has_sighash ? keyValue("Sighash", input.sighash_type.toString()) : ""}
+  ${
+    input.partial_signatures
+      ? keyValue("Signatures", input.partial_signatures.length.toString()) +
+        input.partial_signatures
+          .map(
+            (sig, sigIndex) =>
+              `\n    Signature #${sigIndex + 1}: ${sig.pubkey ? truncate(sig.pubkey, 8) : "Unknown"}`,
+          )
+          .join("")
+      : ""
+  }`;
 
-          if (input.has_utxo) {
-            console.log(`  Amount: ${input.utxo.amount} BTC`);
-            console.log(
-              `  Script Type: ${input.utxo.scriptPubKey.type || "Unknown"}`,
-            );
-            console.log(
-              `  Address: ${input.utxo.scriptPubKey.address || "Unknown"}`,
-            );
-          }
-
-          if (input.has_sighash) {
-            console.log(`  Sighash: ${input.sighash_type}`);
-          }
-
-          if (input.partial_signatures) {
-            console.log(`  Signatures: ${input.partial_signatures.length}`);
-
-            input.partial_signatures.forEach((sig, sigIndex) => {
-              console.log(
-                `    Signature #${sigIndex + 1}: ${sig.pubkey ? sig.pubkey.substring(0, 8) + "..." : "Unknown"}`,
-              );
-            });
-          }
+          console.log(boxText(inputInfo, { padding: 1 }));
         });
 
         // Display outputs
-        console.log(chalk.cyan("\nOutputs:"));
+        console.log("\n" + colors.header("=== Outputs ==="));
         decodedPsbt.tx.vout.forEach((output, index) => {
-          console.log(`\nOutput #${index + 1}:`);
-          console.log(`  Amount: ${output.value} BTC`);
-          console.log(
-            `  Script Type: ${output.scriptPubKey.type || "Unknown"}`,
-          );
-          console.log(`  Address: ${output.scriptPubKey.address || "Unknown"}`);
+          const outputInfo = `
+Output #${index + 1}:
+  ${keyValue("Amount", formatBitcoin(output.value))}
+  ${keyValue("Script Type", output.scriptPubKey.type || "Unknown")}
+  ${keyValue("Address", output.scriptPubKey.address || "Unknown")}`;
+
+          console.log(boxText(outputInfo, { padding: 1 }));
         });
       }
 
       // Display raw JSON if requested
       if (level === "raw") {
-        console.log(chalk.cyan("\nRaw PSBT Data:"));
+        console.log("\n" + colors.header("=== Raw PSBT Data ==="));
         console.log(JSON.stringify(decodedPsbt, null, 2));
       }
 
@@ -978,18 +1241,26 @@ export class TransactionCommands {
           default: "decoded-psbt.json",
         });
 
+        const saveSpinner = ora(
+          `Saving decoded PSBT to ${filename}...`,
+        ).start();
         await fs.writeJson(filename, decodedPsbt, { spaces: 2 });
-        console.log(chalk.green(`\nDecoded PSBT saved to ${filename}`));
+        saveSpinner.succeed("Decoded PSBT saved");
+
+        console.log(formatSuccess(`Decoded PSBT saved to ${filename}`));
       }
 
       // Ask what action to take next
       const action = await select({
         message: "What would you like to do with this PSBT?",
         choices: [
-          { name: "Sign with wallet", value: "wallet" },
-          { name: "Sign with private key", value: "privkey" },
-          { name: "Try to finalize and broadcast", value: "finalize" },
-          { name: "Nothing, just exit", value: "exit" },
+          { name: colors.highlight("Sign with wallet"), value: "wallet" },
+          { name: colors.highlight("Sign with private key"), value: "privkey" },
+          {
+            name: colors.highlight("Try to finalize and broadcast"),
+            value: "finalize",
+          },
+          { name: colors.highlight("Nothing, just exit"), value: "exit" },
         ],
       });
 
@@ -1006,7 +1277,7 @@ export class TransactionCommands {
 
       return decodedPsbt;
     } catch (error) {
-      console.error(chalk.red("\nError analyzing PSBT:"), error);
+      console.error(formatError("Error analyzing PSBT:"), error);
       return null;
     }
   }

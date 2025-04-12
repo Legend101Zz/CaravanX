@@ -2,6 +2,20 @@ import { BitcoinService } from "../core/bitcoin";
 import { Network } from "../types/caravan";
 import { input, confirm, select } from "@inquirer/prompts";
 import chalk from "chalk";
+import ora from "ora";
+import {
+  colors,
+  displayCommandTitle,
+  formatBitcoin,
+  truncate,
+  createTable,
+  formatSuccess,
+  formatWarning,
+  formatError,
+  boxText,
+  keyValue,
+  divider,
+} from "../utils/terminal";
 
 /**
  * Wallet commands for managing Bitcoin wallets
@@ -17,38 +31,64 @@ export class WalletCommands {
    * List all wallets on the node
    */
   async listWallets(): Promise<string[]> {
-    console.log(chalk.cyan("\n=== Available Wallets ==="));
+    displayCommandTitle("Available Wallets");
 
     try {
+      const spinner = ora("Fetching wallets...").start();
       const wallets = await this.bitcoinService.listWallets();
+      spinner.succeed("Wallets fetched successfully");
 
       if (wallets.length === 0) {
-        console.log(chalk.yellow("No wallets found."));
+        console.log(formatWarning("No wallets found."));
         return [];
       }
 
+      // Prepare table data
+      const tableRows = [];
+
       for (let i = 0; i < wallets.length; i++) {
         const wallet = wallets[i];
-
         try {
+          const spinner = ora(`Loading wallet info for ${wallet}...`).start();
           const walletInfo = await this.bitcoinService.getWalletInfo(wallet);
-          console.log(chalk.green(`\n${i + 1}. ${wallet}`));
-          console.log(`   Balance: ${walletInfo.balance} BTC`);
-          console.log(
-            `   Type: ${walletInfo.private_keys_enabled ? "Full" : "Watch-only"}`,
-          );
-          console.log(
-            `   Descriptors: ${walletInfo.descriptors ? "Yes" : "Legacy"}`,
-          );
+          spinner.succeed(`Loaded info for ${wallet}`);
+
+          tableRows.push([
+            `${i + 1}`,
+            colors.highlight(wallet),
+            formatBitcoin(walletInfo.balance),
+            walletInfo.private_keys_enabled
+              ? colors.success("Full")
+              : colors.warning("Watch-only"),
+            walletInfo.descriptors
+              ? colors.success("Yes")
+              : colors.muted("Legacy"),
+          ]);
         } catch (error) {
-          console.log(chalk.green(`\n${i + 1}. ${wallet}`));
-          console.log(chalk.yellow("   (Unable to get wallet info)"));
+          tableRows.push([
+            `${i + 1}`,
+            colors.highlight(wallet),
+            colors.muted("Unknown"),
+            colors.muted("Unknown"),
+            colors.muted("Unknown"),
+          ]);
         }
       }
 
+      // Display table
+      const table = createTable(
+        ["#", "Wallet Name", "Balance", "Type", "Descriptors"],
+        tableRows,
+      );
+
+      console.log(table);
+      console.log(
+        `\nTotal wallets: ${colors.highlight(wallets.length.toString())}`,
+      );
+
       return wallets;
     } catch (error) {
-      console.error(chalk.red("Error listing wallets:"), error);
+      console.error(formatError("Error listing wallets:"), error);
       return [];
     }
   }
@@ -57,7 +97,7 @@ export class WalletCommands {
    * Create a new wallet
    */
   async createWallet(): Promise<string | null> {
-    console.log(chalk.cyan("\n=== Create New Wallet ==="));
+    displayCommandTitle("Create New Wallet");
 
     try {
       const walletName = await input({
@@ -69,9 +109,18 @@ export class WalletCommands {
       const walletType = await select({
         message: "What type of wallet would you like to create?",
         choices: [
-          { name: "Standard wallet (with private keys)", value: "standard" },
-          { name: "Watch-only wallet (no private keys)", value: "watch-only" },
-          { name: "Blank wallet (no keys or addresses)", value: "blank" },
+          {
+            name: colors.highlight("Standard wallet (with private keys)"),
+            value: "standard",
+          },
+          {
+            name: colors.highlight("Watch-only wallet (no private keys)"),
+            value: "watch-only",
+          },
+          {
+            name: colors.highlight("Blank wallet (no keys or addresses)"),
+            value: "blank",
+          },
         ],
       });
 
@@ -80,23 +129,36 @@ export class WalletCommands {
       const blank = walletType === "blank";
 
       console.log(
-        chalk.cyan(`\nCreating ${walletType} wallet "${walletName}"...`),
+        colors.info(`\nCreating ${walletType} wallet "${walletName}"...`),
       );
 
+      const spinner = ora("Creating wallet...").start();
       const result = await this.bitcoinService.createWallet(walletName, {
         disablePrivateKeys,
         blank,
       });
+      spinner.succeed("Wallet created");
 
       if (result) {
         console.log(
-          chalk.green(`\nWallet "${walletName}" created successfully!`),
+          boxText(
+            formatSuccess(`Wallet "${walletName}" created successfully!`),
+            { title: "Wallet Created", titleColor: colors.success },
+          ),
         );
 
         // Generate a new address if the wallet has private keys
         if (walletType === "standard") {
+          const addressSpinner = ora("Generating address...").start();
           const address = await this.bitcoinService.getNewAddress(walletName);
-          console.log(chalk.green(`\nGenerated address: ${address}`));
+          addressSpinner.succeed("Address generated");
+
+          console.log(
+            boxText(
+              `Wallet: ${colors.highlight(walletName)}\nAddress: ${colors.highlight(address)}`,
+              { title: "Generated Address", titleColor: colors.info },
+            ),
+          );
         }
 
         return walletName;
@@ -104,7 +166,7 @@ export class WalletCommands {
 
       return null;
     } catch (error) {
-      console.error(chalk.red("\nError creating wallet:"), error);
+      console.error(formatError("Error creating wallet:"), error);
       return null;
     }
   }
@@ -117,7 +179,7 @@ export class WalletCommands {
     wif: string;
     address: string;
   } | null> {
-    console.log(chalk.cyan("\n=== Create Wallet with Private Key ==="));
+    displayCommandTitle("Create Wallet with Private Key");
 
     try {
       const walletName = await input({
@@ -141,25 +203,29 @@ export class WalletCommands {
       }
 
       console.log(
-        chalk.cyan(
+        colors.info(
           `\nCreating wallet "${walletName}" with ${wif ? "specified" : "random"} private key...`,
         ),
       );
 
+      const spinner = ora("Creating wallet with private key...").start();
       const result = await this.bitcoinService.createPrivateKeyWallet(
         walletName,
         wif,
       );
+      spinner.succeed("Wallet created successfully");
 
       if (result) {
         console.log(
-          chalk.green(`\nWallet "${walletName}" created successfully!`),
+          boxText(
+            `Wallet: ${colors.highlight(result.wallet)}\nAddress: ${colors.highlight(result.address)}\nPrivate key (WIF): ${colors.code(result.wif)}`,
+            { title: "Wallet Created", titleColor: colors.success },
+          ),
         );
-        console.log(chalk.green(`Address: ${result.address}`));
-        console.log(chalk.green(`Private key (WIF): ${result.wif}`));
+
         console.log(
-          chalk.yellow(
-            "\nWARNING: Keep this private key secure! Anyone with this key can spend funds.",
+          formatWarning(
+            "\nKeep this private key secure! Anyone with this key can spend funds.",
           ),
         );
 
@@ -169,7 +235,7 @@ export class WalletCommands {
       return null;
     } catch (error) {
       console.error(
-        chalk.red("\nError creating wallet with private key:"),
+        formatError("Error creating wallet with private key:"),
         error,
       );
       return null;
@@ -180,7 +246,7 @@ export class WalletCommands {
    * Create a HD wallet for Caravan multisig (with xpub)
    */
   async createCaravanKeyWallet(): Promise<any> {
-    console.log(chalk.cyan("\n=== Create Caravan Key Wallet ==="));
+    displayCommandTitle("Create Caravan Key Wallet");
 
     try {
       const walletName = await input({
@@ -192,37 +258,46 @@ export class WalletCommands {
       const network = await select({
         message: "Which network?",
         choices: [
-          { name: "Regtest", value: Network.REGTEST },
-          { name: "Testnet", value: Network.TESTNET },
+          { name: colors.highlight("Regtest"), value: Network.REGTEST },
+          { name: colors.highlight("Testnet"), value: Network.TESTNET },
         ],
         default: Network.REGTEST,
       });
 
       console.log(
-        chalk.cyan(`\nCreating Caravan key wallet "${walletName}_key"...`),
+        colors.info(`\nCreating Caravan key wallet "${walletName}_key"...`),
       );
 
       // Different derivation paths for different networks
       let derivationPath =
         network === Network.REGTEST ? "m/84'/1'/0'" : "m/84'/1'/0'";
 
+      const spinner = ora("Creating Caravan key wallet...").start();
       const result = await this.bitcoinService.createCaravanKeyWallet(
         walletName,
         derivationPath,
       );
+      spinner.succeed("Caravan key wallet created");
 
       if (result) {
+        // Format output
+        const outputText = `
+Wallet: ${colors.highlight(result.wallet)}
+Extended Public Key (xpub): ${colors.code(truncate(result.xpub, 15))}
+Derivation Path: ${colors.code(result.path)}
+Root Fingerprint: ${colors.code(result.rootFingerprint)}
+${result.wif ? `\nSample Private Key (WIF): ${colors.code(result.wif)}` : ""}`;
+
         console.log(
-          chalk.green(`\nWallet "${result.wallet}" created successfully!`),
+          boxText(outputText, {
+            title: "Caravan Key Wallet Created",
+            titleColor: colors.success,
+          }),
         );
-        console.log(chalk.green(`Extended Public Key (xpub): ${result.xpub}`));
-        console.log(chalk.green(`Derivation Path: ${result.path}`));
-        console.log(chalk.green(`Root Fingerprint: ${result.rootFingerprint}`));
 
         if (result.wif) {
-          console.log(chalk.green(`Sample Private Key (WIF): ${result.wif}`));
           console.log(
-            chalk.yellow(
+            formatWarning(
               "\nWARNING: Keep these keys secure! Anyone with these keys can spend funds.",
             ),
           );
@@ -233,7 +308,7 @@ export class WalletCommands {
 
       return null;
     } catch (error) {
-      console.error(chalk.red("\nError creating Caravan key wallet:"), error);
+      console.error(formatError("Error creating Caravan key wallet:"), error);
       return null;
     }
   }
@@ -242,66 +317,88 @@ export class WalletCommands {
    * Show wallet details
    */
   async showWalletDetails(walletName?: string): Promise<any> {
+    displayCommandTitle("Wallet Details");
+
     if (!walletName) {
+      const walletsSpinner = ora("Loading wallets...").start();
       const wallets = await this.listWallets();
+      walletsSpinner.succeed("Wallets loaded");
 
       if (wallets.length === 0) {
-        console.log(chalk.yellow("\nNo wallets found."));
+        console.log(formatWarning("No wallets found."));
         return null;
       }
 
       walletName = await select({
         message: "Select a wallet to view:",
-        choices: wallets.map((w) => ({ name: w, value: w })),
+        choices: wallets.map((w) => ({
+          name: colors.highlight(w),
+          value: w,
+        })),
       });
     }
 
-    console.log(chalk.cyan(`\n=== Wallet Details: ${walletName} ===`));
+    console.log(colors.info(`\nFetching details for wallet: ${walletName}`));
 
     try {
+      const spinner = ora("Loading wallet information...").start();
       const walletInfo = await this.bitcoinService.getWalletInfo(walletName);
+      spinner.succeed("Wallet information loaded");
 
-      console.log(chalk.green("\nWallet Information:"));
-      console.log(`Balance: ${walletInfo.balance} BTC`);
-      console.log(`Unconfirmed Balance: ${walletInfo.unconfirmed_balance} BTC`);
-      console.log(`Immature Balance: ${walletInfo.immature_balance} BTC`);
+      // Format the wallet information
+      const infoText = `
+${keyValue("Balance", formatBitcoin(walletInfo.balance))}
+${keyValue("Unconfirmed Balance", formatBitcoin(walletInfo.unconfirmed_balance))}
+${keyValue("Immature Balance", formatBitcoin(walletInfo.immature_balance))}
+${keyValue("Private Keys Enabled", walletInfo.private_keys_enabled ? "Yes" : "No")}
+${keyValue("HD Seed", walletInfo.hdseedid ? walletInfo.hdseedid : "N/A")}
+${keyValue("TX Count", walletInfo.txcount)}
+${keyValue("Key Pool Size", walletInfo.keypoolsize)}`;
+
       console.log(
-        `Private Keys Enabled: ${walletInfo.private_keys_enabled ? "Yes" : "No"}`,
+        boxText(infoText, {
+          title: `Wallet: ${walletName}`,
+          titleColor: colors.header,
+        }),
       );
-      console.log(
-        `HD Seed: ${walletInfo.hdseedid ? walletInfo.hdseedid : "N/A"}`,
-      );
-      console.log(`TX Count: ${walletInfo.txcount}`);
-      console.log(`Key Pool Size: ${walletInfo.keypoolsize}`);
 
       // Generate a new address
-      console.log(chalk.green("\nGenerate a new address?"));
       const generateAddress = await confirm({
         message: "Generate a new address?",
         default: true,
       });
 
       if (generateAddress) {
+        const addressSpinner = ora("Generating new address...").start();
         // Wallet name is now guaranteed to be a string here
         const address = await this.bitcoinService.getNewAddress(walletName);
-        console.log(chalk.green(`\nGenerated address: ${address}`));
+        addressSpinner.succeed("Address generated");
 
         // Get address info
         try {
+          const infoSpinner = ora("Fetching address information...").start();
           const addressInfo = await this.bitcoinService.getAddressInfo(
             walletName,
             address,
           );
-          console.log(chalk.green("\nAddress Information:"));
-          console.log(`Address: ${addressInfo.address}`);
+          infoSpinner.succeed("Address information loaded");
+
+          // Format address information
+          const addressText = `
+${keyValue("Address", addressInfo.address)}
+${keyValue("Type", addressInfo.scriptPubKey ? addressInfo.scriptPubKey.type : "Unknown")}
+${keyValue("HD Path", addressInfo.hdkeypath || "N/A")}
+${keyValue("Public Key", addressInfo.pubkey ? truncate(addressInfo.pubkey, 10) : "N/A")}`;
+
           console.log(
-            `Type: ${addressInfo.scriptPubKey ? addressInfo.scriptPubKey.type : "Unknown"}`,
+            boxText(addressText, {
+              title: "Generated Address",
+              titleColor: colors.info,
+            }),
           );
-          console.log(`HD Path: ${addressInfo.hdkeypath || "N/A"}`);
-          console.log(`Public Key: ${addressInfo.pubkey || "N/A"}`);
         } catch (error) {
           console.error(
-            chalk.yellow("\nCould not retrieve address info:"),
+            formatWarning("Could not retrieve address info:"),
             error,
           );
         }
@@ -310,7 +407,7 @@ export class WalletCommands {
       return walletInfo;
     } catch (error) {
       console.error(
-        chalk.red(`\nError getting wallet details for ${walletName}:`),
+        formatError(`Error getting wallet details for ${walletName}:`),
         error,
       );
       return null;
@@ -321,45 +418,63 @@ export class WalletCommands {
    * Fund a wallet with new coins (using mining)
    */
   async fundWallet(walletName?: string): Promise<any> {
+    displayCommandTitle("Fund Wallet");
+
     if (!walletName) {
+      const walletsSpinner = ora("Loading wallets...").start();
       const wallets = await this.listWallets();
+      walletsSpinner.succeed("Wallets loaded");
 
       if (wallets.length === 0) {
-        console.log(chalk.yellow("\nNo wallets found."));
+        console.log(formatWarning("No wallets found."));
         return null;
       }
 
       walletName = await select({
         message: "Select a wallet to fund:",
-        choices: wallets.map((w) => ({ name: w, value: w })),
+        choices: wallets.map((w) => ({
+          name: colors.highlight(w),
+          value: w,
+        })),
       });
     }
 
-    console.log(chalk.cyan(`\n=== Funding Wallet: ${walletName} ===`));
+    console.log(colors.info(`\nPreparing to fund wallet: ${walletName}`));
 
     try {
       // Check wallet balance before
+      const infoSpinner = ora("Checking current balance...").start();
       const walletInfoBefore =
         await this.bitcoinService.getWalletInfo(walletName);
+      infoSpinner.succeed("Balance checked");
+
       console.log(
-        chalk.green(`Current balance: ${walletInfoBefore.balance} BTC`),
+        keyValue("Current balance", formatBitcoin(walletInfoBefore.balance)),
       );
       console.log(
-        chalk.green(
-          `Immature balance: ${walletInfoBefore.immature_balance} BTC`,
+        keyValue(
+          "Immature balance",
+          formatBitcoin(walletInfoBefore.immature_balance),
         ),
       );
 
       // Get a new address to mine to
+      const addressSpinner = ora("Generating address for mining...").start();
       const address = await this.bitcoinService.getNewAddress(walletName);
-      console.log(chalk.green(`Using address: ${address}`));
+      addressSpinner.succeed(`Using address: ${address}`);
 
       // Allow user to specify amount rather than blocks
       const fundingMethod = await select({
         message: "How would you like to specify mining?",
         choices: [
-          { name: "By number of blocks", value: "blocks" },
-          { name: "By target amount (approximate)", value: "amount" },
+          {
+            name: colors.highlight("By number of blocks"),
+            value: "blocks",
+          },
+          {
+            name: colors.highlight("By target amount (approximate)"),
+            value: "amount",
+          },
         ],
       });
 
@@ -391,59 +506,61 @@ export class WalletCommands {
         // Each block gives ~50 BTC in regtest mode
         numBlocks = Math.ceil(parseFloat(targetAmount) / 50);
         console.log(
-          chalk.cyan(
+          colors.info(
             `\nMining approximately ${numBlocks} blocks to get ~${targetAmount} BTC...`,
           ),
         );
       }
 
+      console.log(divider());
       console.log(
-        chalk.cyan(`\nMining ${numBlocks} block(s) to address ${address}...`),
+        colors.info(`Mining ${numBlocks} block(s) to address ${address}...`),
       );
 
       // Mine the blocks
+      const miningSpinner = ora(`Mining ${numBlocks} blocks...`).start();
       const blockHashes = await this.bitcoinService.generateToAddress(
         numBlocks,
         address,
       );
+      miningSpinner.succeed(`Successfully mined ${blockHashes.length} blocks!`);
 
       console.log(
-        chalk.green(`\nSuccessfully mined ${blockHashes.length} block(s)!`),
-      );
-      console.log(
-        chalk.green(
-          `Latest block hash: ${blockHashes[blockHashes.length - 1]}`,
+        keyValue(
+          "Latest block hash",
+          truncate(blockHashes[blockHashes.length - 1], 10),
         ),
       );
 
       // Check wallet balance after
+      const afterSpinner = ora("Checking updated balance...").start();
       const walletInfoAfter =
         await this.bitcoinService.getWalletInfo(walletName);
-      console.log(chalk.green(`\nNew balance: ${walletInfoAfter.balance} BTC`));
+      afterSpinner.succeed("Balance updated");
+
+      // Format results
+      const resultText = `
+${keyValue("New balance", formatBitcoin(walletInfoAfter.balance))}
+${keyValue("New immature balance", formatBitcoin(walletInfoAfter.immature_balance))}
+${keyValue("Added (mature)", formatBitcoin(walletInfoAfter.balance - walletInfoBefore.balance))}
+${keyValue("Added (immature)", formatBitcoin(walletInfoAfter.immature_balance - walletInfoBefore.immature_balance))}`;
+
       console.log(
-        chalk.green(
-          `New immature balance: ${walletInfoAfter.immature_balance} BTC`,
-        ),
+        boxText(resultText, {
+          title: "Mining Results",
+          titleColor: colors.success,
+        }),
       );
+
       console.log(
-        chalk.green(
-          `Added: ${walletInfoAfter.balance - walletInfoBefore.balance} BTC (mature)`,
-        ),
-      );
-      console.log(
-        chalk.green(
-          `Added: ${walletInfoAfter.immature_balance - walletInfoBefore.immature_balance} BTC (immature)`,
-        ),
-      );
-      console.log(
-        chalk.yellow(
-          `\nNote: Newly mined coins require 100 confirmations before they can be spent.`,
+        formatWarning(
+          "Newly mined coins require 100 confirmations before they can be spent.",
         ),
       );
 
       return { blockHashes, newBalance: walletInfoAfter.balance };
     } catch (error) {
-      console.error(chalk.red(`\nError funding wallet ${walletName}:`), error);
+      console.error(formatError(`Error funding wallet ${walletName}:`), error);
       return null;
     }
   }
@@ -452,35 +569,44 @@ export class WalletCommands {
    * Send funds between wallets
    */
   async sendFunds(): Promise<any> {
+    displayCommandTitle("Send Funds");
+
+    const walletsSpinner = ora("Loading wallets...").start();
     const wallets = await this.listWallets();
+    walletsSpinner.succeed("Wallets loaded");
 
     if (wallets.length < 1) {
       console.log(
-        chalk.yellow(
-          "\nNot enough wallets found. You need at least one wallet.",
+        formatWarning(
+          "Not enough wallets found. You need at least one wallet.",
         ),
       );
       return null;
     }
 
-    console.log(chalk.cyan("\n=== Send Funds ==="));
-
     try {
       // Select source wallet
       const sourceWallet = await select({
         message: "Select source wallet:",
-        choices: wallets.map((w) => ({ name: w, value: w })),
+        choices: wallets.map((w) => ({
+          name: colors.highlight(w),
+          value: w,
+        })),
       });
 
+      const infoSpinner = ora(
+        `Loading information for ${sourceWallet}...`,
+      ).start();
       const sourceInfo = await this.bitcoinService.getWalletInfo(sourceWallet);
+      infoSpinner.succeed("Wallet information loaded");
 
       console.log(
-        chalk.green(`\nSource wallet balance: ${sourceInfo.balance} BTC`),
+        keyValue("Source wallet balance", formatBitcoin(sourceInfo.balance)),
       );
 
       if (sourceInfo.balance <= 0) {
         console.log(
-          chalk.yellow("Source wallet has no funds. Please fund it first."),
+          formatWarning("Source wallet has no funds. Please fund it first."),
         );
         return null;
       }
@@ -489,8 +615,8 @@ export class WalletCommands {
       const destType = await select({
         message: "Send to:",
         choices: [
-          { name: "Another wallet", value: "wallet" },
-          { name: "External address", value: "address" },
+          { name: colors.highlight("Another wallet"), value: "wallet" },
+          { name: colors.highlight("External address"), value: "address" },
         ],
       });
 
@@ -502,7 +628,7 @@ export class WalletCommands {
 
         if (destWallets.length === 0) {
           console.log(
-            chalk.yellow(
+            formatWarning(
               "No other wallets found. Create another wallet first.",
             ),
           );
@@ -511,17 +637,21 @@ export class WalletCommands {
 
         const destWallet = await select({
           message: "Select destination wallet:",
-          choices: destWallets.map((w) => ({ name: w, value: w })),
+          choices: destWallets.map((w) => ({
+            name: colors.highlight(w),
+            value: w,
+          })),
         });
 
         // Get a new address from the destination wallet
+        const addressSpinner = ora(
+          `Generating address from wallet ${destWallet}...`,
+        ).start();
         destinationAddress =
           await this.bitcoinService.getNewAddress(destWallet);
-        console.log(
-          chalk.green(
-            `\nGenerated address from wallet ${destWallet}: ${destinationAddress}`,
-          ),
-        );
+        addressSpinner.succeed("Address generated");
+
+        console.log(keyValue("Generated address", destinationAddress));
       } else {
         destinationAddress = await input({
           message: "Enter destination address:",
@@ -539,7 +669,7 @@ export class WalletCommands {
             return "Please enter a valid positive amount";
           }
           if (num > sourceInfo.balance) {
-            return `Amount exceeds balance (${sourceInfo.balance} BTC)`;
+            return `Amount exceeds balance (${formatBitcoin(sourceInfo.balance)})`;
           }
           return true;
         },
@@ -548,20 +678,26 @@ export class WalletCommands {
       const amountNum = parseFloat(amount);
 
       console.log(
-        chalk.cyan(
-          `\nSending ${amountNum} BTC from ${sourceWallet} to ${destinationAddress}...`,
+        colors.info(
+          `\nSending ${formatBitcoin(amountNum)} from ${sourceWallet} to ${destinationAddress}...`,
         ),
       );
 
       // Send the transaction
+      const txSpinner = ora("Sending transaction...").start();
       const txid = await this.bitcoinService.sendToAddress(
         sourceWallet,
         destinationAddress,
         amountNum,
       );
+      txSpinner.succeed("Transaction sent successfully");
 
-      console.log(chalk.green(`\nTransaction sent successfully!`));
-      console.log(chalk.green(`Transaction ID: ${txid}`));
+      console.log(
+        boxText(`${keyValue("Transaction ID", truncate(txid, 15))}`, {
+          title: "Transaction Sent",
+          titleColor: colors.success,
+        }),
+      );
 
       // Ask if user wants to mine a block to confirm the transaction
       const mine = await confirm({
@@ -571,14 +707,20 @@ export class WalletCommands {
 
       if (mine) {
         // Use the source wallet for mining
+        const mineAddressSpinner = ora(
+          "Generating address for mining...",
+        ).start();
         const address = await this.bitcoinService.getNewAddress(sourceWallet);
+        mineAddressSpinner.succeed("Address generated for mining");
+
+        const mineSpinner = ora("Mining block...").start();
         const blockHashes = await this.bitcoinService.generateToAddress(
           1,
           address,
         );
+        mineSpinner.succeed("Block mined successfully");
 
-        console.log(chalk.green(`\nMined 1 block to confirm the transaction!`));
-        console.log(chalk.green(`Block hash: ${blockHashes[0]}`));
+        console.log(keyValue("Block hash", blockHashes[0]));
       }
 
       return { txid };
