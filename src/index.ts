@@ -51,6 +51,7 @@ export class CaravanRegtestManager {
       this.caravanService,
       this.bitcoinService,
       this.bitcoinRpcClient,
+      this.transactionService,
     );
     this.transactionCommands = new TransactionCommands(
       this.transactionService,

@@ -16,7 +16,7 @@ const colors = {
   info: chalk.hex("#17a2b8"), // Teal
   muted: chalk.hex("#6c757d"), // Gray
   header: chalk.bold.hex("#F7931A"), // Bold orange for headers
-  commandName: chalk.bold.hex("#1C2C5B"), // Bold dark blue for command names
+  commandName: chalk.bold.hex("#0095d5"), // Bold dark blue for command names
 };
 
 /**
@@ -66,6 +66,10 @@ export class MainMenu {
       {
         name: colors.commandName("Create new Caravan multisig wallet"),
         value: "create-caravan",
+      },
+      {
+        name: colors.commandName("Spend from Caravan multisig wallet"),
+        value: "spend-caravan",
       },
       {
         name: colors.commandName("View Caravan wallet details"),
@@ -339,6 +343,9 @@ export class MainMenu {
           break;
         case "create-caravan":
           await this.app.multisigCommands.createCaravanWallet();
+          break;
+        case "spend-caravan":
+          await this.app.multisigCommands.spendFromCaravanWallet();
           break;
         case "caravan-details":
           await this.app.multisigCommands.showCaravanWalletDetails();

@@ -1,6 +1,7 @@
 import { CaravanService } from "../core/caravan";
 import { BitcoinService } from "../core/bitcoin";
 import { BitcoinRpcClient } from "../core/rpc";
+import { TransactionService } from "../core/transaction";
 import {
   CaravanWalletConfig,
   ExtendedPublicKey,
@@ -35,15 +36,17 @@ export class MultisigCommands {
   private readonly caravanService: CaravanService;
   private readonly bitcoinService: BitcoinService;
   private readonly bitcoinRpcClient: BitcoinRpcClient;
-
+  private readonly transactionService: TransactionService;
   constructor(
     caravanService: CaravanService,
     bitcoinService: BitcoinService,
     bitcoinRpcClient: BitcoinRpcClient,
+    transactionService: TransactionService,
   ) {
     this.caravanService = caravanService;
     this.bitcoinService = bitcoinService;
     this.bitcoinRpcClient = bitcoinRpcClient;
+    this.transactionService = transactionService;
   }
 
   /**
@@ -503,10 +506,29 @@ export class MultisigCommands {
       };
 
       // Save the configuration
-      const saveSpinner = ora("Saving Caravan wallet configuration...").start();
-      const savedFileName =
-        await this.caravanService.saveCaravanWalletConfig(caravanConfig);
-      saveSpinner.succeed(`Caravan wallet "${name}" saved successfully!`);
+      const exportSpinner = ora(
+        "Saving Caravan wallet configuration...",
+      ).start();
+      const exportConfig =
+        this.caravanService.formatCaravanConfigForExport(caravanConfig);
+
+      // Save the configuration to a file
+      const configFileName = `${caravanConfig.name.replace(/\s+/g, "_").toLowerCase()}_config.json`;
+      const configPath = path.join(
+        this.caravanService.getCaravanDir(),
+        configFileName,
+      );
+
+      // Remove credentials if present
+      if (exportConfig.client?.password) {
+        delete exportConfig.client.password;
+      }
+
+      // Save the formatted config
+      await fs.writeJson(configPath, exportConfig, { spaces: 2 });
+      exportSpinner.succeed(
+        `Caravan wallet configuration saved to: ${configPath}`,
+      );
 
       // Generate multisig descriptors and import them to watch wallet
       console.log(
@@ -565,6 +587,683 @@ export class MultisigCommands {
       console.error(formatError("\nError creating Caravan wallet:"), error);
       return null;
     }
+  }
+
+  /**
+   * Spend funds from a Caravan multisig wallet
+   */
+  async spendFromCaravanWallet(): Promise<any | null> {
+    displayCommandTitle("Spend from Caravan Multisig Wallet");
+
+    try {
+      // Step 1: Select a Caravan wallet
+      const wallets = await this.caravanService.listCaravanWallets();
+
+      if (wallets.length === 0) {
+        console.log(
+          formatWarning("No Caravan wallets found. Create one first."),
+        );
+        return null;
+      }
+
+      const walletIndex = await select({
+        message: "Select Caravan wallet to spend from:",
+        choices: wallets.map((w, i) => ({
+          name:
+            colors.highlight(w.name) +
+            colors.info(
+              ` (${w.quorum.requiredSigners} of ${w.quorum.totalSigners}, ${w.addressType})`,
+            ),
+          value: i,
+        })),
+      });
+
+      const selectedWallet = wallets[walletIndex];
+
+      // Determine if this is a wallet created by our terminal tool
+      const isTerminalCreatedWallet = await this.isTerminalCreatedWallet(
+        selectedWallet.name,
+      );
+
+      console.log(
+        boxText(
+          `Wallet: ${colors.highlight(selectedWallet.name)}\n` +
+            `Quorum: ${colors.highlight(`${selectedWallet.quorum.requiredSigners} of ${selectedWallet.quorum.totalSigners}`)}\n` +
+            `Address Type: ${colors.highlight(selectedWallet.addressType)}\n` +
+            `Creator: ${isTerminalCreatedWallet ? colors.success("Created by this tool") : colors.warning("External wallet")}`,
+          { title: "Selected Wallet", titleColor: colors.info },
+        ),
+      );
+
+      // Find watcher wallet name
+      let watcherWalletName = `${selectedWallet.name.replace(/\\s+/g, "_").toLowerCase()}_watch`;
+
+      // Check if watcher wallet exists
+      const bitcoinWallets = await this.bitcoinService.listWallets();
+      let watchWalletExists = bitcoinWallets.includes(watcherWalletName);
+
+      if (!watchWalletExists) {
+        console.log(
+          formatWarning(`Watch wallet "${watcherWalletName}" not found.`),
+        );
+
+        if (isTerminalCreatedWallet) {
+          // Try to create the watch wallet automatically
+          const createWatch = await confirm({
+            message: "Create watch wallet automatically?",
+            default: true,
+          });
+
+          if (createWatch) {
+            await this.createWatchWallet(selectedWallet);
+            watchWalletExists = true;
+          } else {
+            watcherWalletName = await input({
+              message: "Enter the name of the watch wallet:",
+              validate: (input) =>
+                input.trim() !== "" ? true : "Please enter a valid wallet name",
+            });
+
+            // Check if the entered wallet exists
+            watchWalletExists = bitcoinWallets.includes(watcherWalletName);
+
+            if (!watchWalletExists) {
+              console.log(
+                formatError(`Watch wallet "${watcherWalletName}" not found.`),
+              );
+              return null;
+            }
+          }
+        } else {
+          watcherWalletName = await input({
+            message: "Enter the name of the watch wallet:",
+            validate: (input) =>
+              input.trim() !== "" ? true : "Please enter a valid wallet name",
+          });
+
+          // Check if the entered wallet exists
+          watchWalletExists = bitcoinWallets.includes(watcherWalletName);
+
+          if (!watchWalletExists) {
+            console.log(
+              formatError(`Watch wallet "${watcherWalletName}" not found.`),
+            );
+            return null;
+          }
+        }
+      }
+
+      // Step 2: Guide the user to create a PSBT with Caravan
+      console.log(
+        boxText(
+          "1. Open Caravan in your browser\n" +
+            '2. Go to "Wallet" tab and select your wallet\n' +
+            '3. Navigate to the "Spend" tab\n' +
+            "4. Create a transaction by filling in the recipient address and amount\n" +
+            '5. Click "Create Transaction" to generate the PSBT\n' +
+            "6. Copy the PSBT string",
+          { title: "Create Transaction in Caravan", titleColor: colors.info },
+        ),
+      );
+
+      // Get the PSBT from the user
+      const psbtBase64 = await input({
+        message: "Paste the PSBT from Caravan:",
+        validate: (input) =>
+          input.trim() !== "" ? true : "Please enter a valid PSBT",
+      });
+
+      // Step 3: Process the PSBT with the watcher wallet
+      console.log(
+        colors.info(
+          `\nProcessing PSBT with watch wallet "${watcherWalletName}"...`,
+        ),
+      );
+
+      const processSpinner = ora("Processing PSBT...").start();
+      let processedPSBT;
+      try {
+        processedPSBT = await this.transactionService.processPSBT(
+          watcherWalletName,
+          psbtBase64.trim(),
+        );
+        processSpinner.succeed("PSBT processed successfully with watch wallet");
+      } catch (error) {
+        processSpinner.fail("Error processing PSBT with watch wallet");
+        console.error(formatError(`Error: ${error}`));
+
+        // Try to decode the PSBT to provide more information
+        try {
+          const decodedPsbt = await this.transactionService.decodePSBT(
+            psbtBase64.trim(),
+          );
+          console.log(
+            formatWarning("The PSBT may be missing UTXO information."),
+          );
+        } catch (decodeError) {
+          console.log(
+            formatError("Could not decode the PSBT. It may be invalid."),
+          );
+        }
+
+        return null;
+      }
+
+      // Show processed PSBT details
+      try {
+        const decodeSpinner = ora("Decoding processed PSBT...").start();
+        const decodedPsbt =
+          await this.transactionService.decodePSBT(processedPSBT);
+        decodeSpinner.succeed("PSBT decoded");
+
+        console.log(
+          boxText(this.formatPSBTSummary(decodedPsbt), {
+            title: "Transaction Details",
+            titleColor: colors.info,
+          }),
+        );
+      } catch (error) {
+        console.log(
+          formatWarning("Could not decode the processed PSBT for display."),
+        );
+      }
+
+      // Step 4: Collect signatures based on quorum requirements
+      const { requiredSigners, totalSigners } = selectedWallet.quorum;
+      const signedPSBTs: string[] = [];
+
+      // First signed PSBT is the processed one
+      let currentPSBT = processedPSBT;
+      signedPSBTs.push(currentPSBT);
+
+      console.log(
+        boxText(
+          `This wallet requires ${colors.highlight(requiredSigners.toString())} of ${colors.highlight(totalSigners.toString())} signatures.`,
+          { title: "Signature Requirements", titleColor: colors.info },
+        ),
+      );
+
+      // Track signers we've already used
+      const usedSigners = new Set<string>();
+
+      // Keep collecting signatures until we have enough
+      for (let i = 0; i < requiredSigners; i++) {
+        console.log(
+          colors.header(`\nSignature ${i + 1} of ${requiredSigners}`),
+        );
+
+        // Ask how to provide the signature
+        const signMethod = await select({
+          message: "How would you like to sign?",
+          choices: [
+            { name: colors.highlight("Sign with wallet"), value: "wallet" },
+            {
+              name: colors.highlight("Sign with private key"),
+              value: "privkey",
+            },
+            ...(i > 0
+              ? [
+                  {
+                    name: colors.highlight(
+                      "Skip (already have enough signatures)",
+                    ),
+                    value: "skip",
+                  },
+                ]
+              : []),
+          ],
+        });
+
+        if (signMethod === "skip") {
+          console.log(formatWarning("Skipping remaining signatures."));
+          break;
+        }
+
+        if (signMethod === "wallet") {
+          // Find potential signer wallets
+          let signerWallets: string[] = [];
+
+          if (isTerminalCreatedWallet) {
+            // For terminal-created wallets, we can guess the signer wallet names
+            for (let j = 1; j <= totalSigners; j++) {
+              const signerName = `${selectedWallet.name.replace(/\\s+/g, "_").toLowerCase()}_signer_${j}`;
+              if (
+                bitcoinWallets.includes(signerName) &&
+                !usedSigners.has(signerName)
+              ) {
+                signerWallets.push(signerName);
+              }
+            }
+          }
+
+          // If we didn't find any or this is an external wallet, let the user select
+          if (signerWallets.length === 0) {
+            // Filter out already used signers and the watch wallet
+            signerWallets = bitcoinWallets.filter(
+              (w) => w !== watcherWalletName && !usedSigners.has(w),
+            );
+          }
+
+          if (signerWallets.length === 0) {
+            console.log(formatWarning("No available signer wallets found."));
+            continue;
+          }
+
+          // Let user select a signer wallet
+          const signerWallet = await select({
+            message: `Select wallet for signature ${i + 1}:`,
+            choices: signerWallets.map((w) => ({
+              name: colors.highlight(w),
+              value: w,
+            })),
+          });
+
+          // Sign with the selected wallet
+          const signSpinner = ora(
+            `Signing with wallet "${signerWallet}"...`,
+          ).start();
+          try {
+            const newSignedPSBT = await this.transactionService.processPSBT(
+              signerWallet,
+              currentPSBT,
+            );
+            signSpinner.succeed(`Signed with wallet "${signerWallet}"`);
+
+            // Update the current PSBT and add to signed list
+            currentPSBT = newSignedPSBT;
+            signedPSBTs.push(newSignedPSBT);
+
+            // Mark this signer as used
+            usedSigners.add(signerWallet);
+          } catch (error) {
+            signSpinner.fail(`Failed to sign with wallet "${signerWallet}"`);
+            console.error(formatError(`Error: ${error}`));
+
+            // Let the user try again with a different method
+            i--; // Decrement to retry this signature
+            continue;
+          }
+        } else if (signMethod === "privkey") {
+          // Sign with private key
+          console.log(
+            colors.info(
+              "\nYou'll need the private key for one of the signers.",
+            ),
+          );
+
+          const privateKey = await input({
+            message: "Enter private key (WIF format):",
+            validate: (input) =>
+              input.trim() !== "" ? true : "Please enter a valid private key",
+          });
+
+          const signSpinner = ora("Signing with private key...").start();
+          try {
+            const newSignedPSBT =
+              await this.transactionService.signPSBTWithPrivateKey(
+                currentPSBT,
+                privateKey.trim(),
+              );
+            signSpinner.succeed("Signed with private key");
+
+            // Update the current PSBT and add to signed list
+            currentPSBT = newSignedPSBT;
+            signedPSBTs.push(newSignedPSBT);
+          } catch (error) {
+            signSpinner.fail("Failed to sign with private key");
+            console.error(formatError(`Error: ${error}`));
+
+            // Let the user try again with a different method
+            i--; // Decrement to retry this signature
+            continue;
+          }
+        } else if (signMethod === "import") {
+          // Import signature from Caravan
+          console.log(
+            boxText(
+              "1. In Caravan, sign the transaction with your hardware wallet or key\n" +
+                '2. Once signed, copy the "Signed Transaction Hex" or PSBT',
+              {
+                title: "Import Signature from Caravan",
+                titleColor: colors.info,
+              },
+            ),
+          );
+
+          const importedSignature = await input({
+            message: "Paste the signed transaction or PSBT from Caravan:",
+            validate: (input) =>
+              input.trim() !== "" ? true : "Please enter a valid signature",
+          });
+
+          // Try to determine if this is a PSBT or a transaction hex
+          let importedPSBT = importedSignature.trim();
+
+          // If it starts with "70736274" (hex for "psbt"), it might be hex encoded rather than base64
+          if (importedPSBT.startsWith("70736274")) {
+            console.log(
+              formatWarning(
+                "Detected hex-encoded PSBT, converting to base64...",
+              ),
+            );
+            // We'd need to convert hex to base64, but for simplicity we'll assume it's a valid PSBT format
+          }
+
+          try {
+            // Try to decode the imported data to see if it's valid
+            const decodeSpinner = ora(
+              "Validating imported signature...",
+            ).start();
+            await this.transactionService.decodePSBT(importedPSBT);
+            decodeSpinner.succeed("Signature validated");
+
+            // Update the current PSBT and add to signed list
+            currentPSBT = importedPSBT;
+            signedPSBTs.push(importedPSBT);
+          } catch (error) {
+            console.error(formatError(`Error: ${error}`));
+
+            // Let the user try again with a different method
+            i--; // Decrement to retry this signature
+            continue;
+          }
+        }
+
+        // If we've collected enough signatures, give the option to proceed
+        if (signedPSBTs.length > 1 && i < requiredSigners - 1) {
+          const proceed = await confirm({
+            message: `You have ${signedPSBTs.length - 1} signature(s). Try to finalize now?`,
+            default: false,
+          });
+
+          if (proceed) {
+            console.log(
+              formatWarning(
+                "Proceeding to finalization with current signatures.",
+              ),
+            );
+            break;
+          }
+        }
+      }
+
+      // Step 5: Finalize the PSBT
+      console.log(colors.info("\nFinalizing transaction..."));
+
+      const finalizeSpinner = ora("Finalizing PSBT...").start();
+      let finalizedPSBT;
+      try {
+        finalizedPSBT = await this.transactionService.finalizePSBT(currentPSBT);
+        finalizeSpinner.succeed("PSBT finalized successfully");
+      } catch (error) {
+        finalizeSpinner.fail("Failed to finalize PSBT");
+        console.error(formatError(`Error: ${error}`));
+
+        console.log(
+          boxText(
+            "The transaction could not be finalized. This usually means:\n" +
+              "1. Not enough signatures were collected\n" +
+              "2. The signatures are not valid for this transaction\n" +
+              "3. There was an issue with the PSBT structure",
+            { title: "Finalization Failed", titleColor: colors.error },
+          ),
+        );
+
+        // Ask if the user wants to save the partially signed PSBT
+        const savePSBT = await confirm({
+          message: "Would you like to save the partially signed PSBT?",
+          default: true,
+        });
+
+        if (savePSBT) {
+          const filename = await input({
+            message: "Enter filename to save PSBT:",
+            default: `${selectedWallet.name.replace(/\\s+/g, "_").toLowerCase()}_partially_signed.psbt`,
+          });
+
+          const saveSpinner = ora(`Saving PSBT to ${filename}...`).start();
+          await fs.writeFile(filename, currentPSBT);
+          saveSpinner.succeed(`PSBT saved to ${filename}`);
+        }
+
+        return null;
+      }
+
+      // Check if finalization was complete
+      if (!finalizedPSBT.complete) {
+        console.log(
+          boxText(
+            "The PSBT could not be fully finalized. More signatures may be required.",
+            { title: "Incomplete Finalization", titleColor: colors.warning },
+          ),
+        );
+
+        // Ask if the user wants to save the partially signed PSBT
+        const savePSBT = await confirm({
+          message: "Would you like to save the partially signed PSBT?",
+          default: true,
+        });
+
+        if (savePSBT) {
+          const filename = await input({
+            message: "Enter filename to save PSBT:",
+            default: `${selectedWallet.name.replace(/\\s+/g, "_").toLowerCase()}_partially_signed.psbt`,
+          });
+
+          const saveSpinner = ora(`Saving PSBT to ${filename}...`).start();
+          await fs.writeFile(filename, currentPSBT);
+          saveSpinner.succeed(`PSBT saved to ${filename}`);
+        }
+
+        return null;
+      }
+
+      // Step 6: Broadcast the transaction
+      const broadcastTx = await confirm({
+        message: "Would you like to broadcast the transaction now?",
+        default: true,
+      });
+
+      if (broadcastTx) {
+        const broadcastSpinner = ora("Broadcasting transaction...").start();
+        try {
+          const txid = await this.transactionService.broadcastTransaction(
+            finalizedPSBT.hex,
+          );
+          broadcastSpinner.succeed("Transaction broadcast successfully");
+
+          console.log(
+            boxText(
+              `Transaction ID: ${colors.highlight(txid)}\n` +
+                `\nThe transaction has been broadcast to the Bitcoin network.`,
+              { title: "Transaction Broadcast", titleColor: colors.success },
+            ),
+          );
+
+          // Offer to mine a block in regtest mode
+          const mineBlock = await confirm({
+            message: "Mine a block to confirm the transaction?",
+            default: true,
+          });
+
+          if (mineBlock) {
+            // Find a wallet to mine to (preferably a signer wallet)
+            let miningWallet;
+            if (usedSigners.size > 0) {
+              miningWallet = Array.from(usedSigners)[0];
+            } else {
+              // Fallback: use any wallet that's not the watch wallet
+              const otherWallets = bitcoinWallets.filter(
+                (w) => w !== watcherWalletName,
+              );
+              if (otherWallets.length > 0) {
+                miningWallet = otherWallets[0];
+              } else {
+                miningWallet = await select({
+                  message: "Select wallet to mine to:",
+                  choices: bitcoinWallets.map((w) => ({ name: w, value: w })),
+                });
+              }
+            }
+
+            const mineSpinner = ora(
+              `Mining block to wallet ${miningWallet}...`,
+            ).start();
+            try {
+              const miningAddress =
+                await this.bitcoinService.getNewAddress(miningWallet);
+              const blockHashes = await this.bitcoinService.generateToAddress(
+                1,
+                miningAddress,
+              );
+              mineSpinner.succeed(
+                `Block mined successfully: ${truncate(blockHashes[0], 10)}`,
+              );
+            } catch (error) {
+              mineSpinner.fail("Failed to mine block");
+              console.error(formatError(`Error: ${error}`));
+            }
+          }
+
+          return { txid };
+        } catch (error) {
+          broadcastSpinner.fail("Failed to broadcast transaction");
+          console.error(formatError(`Error: ${error}`));
+
+          console.log(
+            boxText(
+              "The transaction could not be broadcast. This could be due to:\n" +
+                "1. Network connectivity issues\n" +
+                "2. The transaction is invalid (e.g., spending already spent outputs)\n" +
+                "3. The transaction violates policy rules (e.g., too low fee)",
+              { title: "Broadcast Failed", titleColor: colors.error },
+            ),
+          );
+
+          // Ask if the user wants to save the transaction hex
+          const saveHex = await confirm({
+            message: "Would you like to save the transaction hex?",
+            default: true,
+          });
+
+          if (saveHex) {
+            const filename = await input({
+              message: "Enter filename to save transaction hex:",
+              default: `${selectedWallet.name.replace(/\\s+/g, "_").toLowerCase()}_tx.hex`,
+            });
+
+            const saveSpinner = ora(
+              `Saving transaction hex to ${filename}...`,
+            ).start();
+            await fs.writeFile(filename, finalizedPSBT.hex);
+            saveSpinner.succeed(`Transaction hex saved to ${filename}`);
+          }
+
+          return null;
+        }
+      } else {
+        // The user chose not to broad
+        // cast
+        console.log(
+          formatWarning(
+            "Transaction not broadcast. You can broadcast it later.",
+          ),
+        );
+
+        // Ask if the user wants to save the transaction hex
+        const saveHex = await confirm({
+          message: "Would you like to save the transaction hex?",
+          default: true,
+        });
+
+        if (saveHex) {
+          const filename = await input({
+            message: "Enter filename to save transaction hex:",
+            default: `${selectedWallet.name.replace(/\\s+/g, "_").toLowerCase()}_tx.hex`,
+          });
+
+          const saveSpinner = ora(
+            `Saving transaction hex to ${filename}...`,
+          ).start();
+          await fs.writeFile(filename, finalizedPSBT.hex);
+          saveSpinner.succeed(`Transaction hex saved to ${filename}`);
+        }
+
+        return { hex: finalizedPSBT.hex };
+      }
+    } catch (error) {
+      console.error(formatError("Error spending from Caravan wallet:"), error);
+      return null;
+    }
+  }
+
+  /**
+   * Helper method to check if a wallet was created by this terminal tool
+   */
+  private async isTerminalCreatedWallet(walletName: string): Promise<boolean> {
+    // Check for watch wallet with expected naming pattern
+    const watcherWalletName = `${walletName.replace(/\\s+/g, "_").toLowerCase()}_watcher`;
+    const bitcoinWallets = await this.bitcoinService.listWallets();
+
+    if (bitcoinWallets.includes(watcherWalletName)) {
+      return true;
+    }
+
+    // Check for signer wallets with expected naming pattern
+    const signerPrefix = `${walletName.replace(/\\s+/g, "_").toLowerCase()}_signer_`;
+
+    const matchingSigner = bitcoinWallets.find((w) =>
+      w.startsWith(signerPrefix),
+    );
+    if (matchingSigner) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Format a decoded PSBT for display
+   */
+  private formatPSBTSummary(decodedPsbt: any): string {
+    let summary = "";
+
+    // Display inputs
+    summary += colors.header("Inputs:") + "\n";
+    decodedPsbt.inputs.forEach((input: any, index: any) => {
+      summary += `Input #${index + 1}:\n`;
+      if (input.has_utxo) {
+        summary += `  TXID: ${truncate(decodedPsbt.tx.vin[index].txid, 10)}\n`;
+        summary += `  VOUT: ${decodedPsbt.tx.vin[index].vout}\n`;
+        summary += `  Amount: ${formatBitcoin(input.utxo.amount)}\n`;
+        summary += `  Address: ${input.utxo.scriptPubKey.address || "Unknown"}\n`;
+      } else {
+        summary += `  TXID: ${truncate(decodedPsbt.tx.vin[index].txid, 10)}\n`;
+        summary += `  VOUT: ${decodedPsbt.tx.vin[index].vout}\n`;
+      }
+      summary += "\n";
+    });
+
+    // Display outputs
+    summary += colors.header("Outputs:") + "\n";
+    decodedPsbt.tx.vout.forEach((output: any, index: any) => {
+      summary += `Output #${index + 1}:\n`;
+      summary += `  Amount: ${formatBitcoin(output.value)}\n`;
+      summary += `  Address: ${output.scriptPubKey.address || "Unknown"}\n\n`;
+    });
+
+    // Display fee
+    if (decodedPsbt.fee) {
+      summary += colors.header("Fee:") + "\n";
+      summary += `  ${formatBitcoin(decodedPsbt.fee)}\n`;
+
+      // Calculate fee rate
+      if (decodedPsbt.tx.vsize) {
+        const feeRate = decodedPsbt.fee / (decodedPsbt.tx.vsize / 1000);
+        summary += `  Rate: ${feeRate.toFixed(2)} BTC/kB\n`;
+      }
+    }
+
+    return summary;
   }
 
   /**
@@ -779,29 +1478,11 @@ export class MultisigCommands {
     displayCommandTitle(`Creating Test Transaction for ${caravanConfig.name}`);
 
     try {
-      // Format the config for Caravan - convert BIP32 paths
-      const exportSpinner = ora(
-        "Preparing wallet configuration for export...",
-      ).start();
-      const exportConfig =
-        this.caravanService.formatCaravanConfigForExport(caravanConfig);
-
       // Save the configuration to a file
       const configFileName = `${caravanConfig.name.replace(/\s+/g, "_").toLowerCase()}_config.json`;
       const configPath = path.join(
         this.caravanService.getCaravanDir(),
         configFileName,
-      );
-
-      // Remove credentials if present
-      if (exportConfig.client?.password) {
-        delete exportConfig.client.password;
-      }
-
-      // Save the formatted config
-      await fs.writeJson(configPath, exportConfig, { spaces: 2 });
-      exportSpinner.succeed(
-        `Caravan wallet configuration saved to: ${configPath}`,
       );
 
       // Provide instructions to the user

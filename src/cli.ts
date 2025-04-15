@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { Command } from "commander";
 import CaravanRegtestManager from "./index";
 import { confirm, input } from "@inquirer/prompts";
@@ -120,6 +119,22 @@ program
       await app.multisigCommands.createCaravanWallet();
     } catch (error) {
       console.error(formatError("Error creating Caravan wallet:"), error);
+    }
+  });
+
+// Spend from Caravan wallet command
+program
+  .command("spend-caravan")
+  .description("Spend funds from a Caravan multisig wallet")
+  .action(async () => {
+    const spinner = ora("Initializing...").start();
+    const app = new CaravanRegtestManager();
+    spinner.succeed("Initialized");
+
+    try {
+      await app.multisigCommands.spendFromCaravanWallet();
+    } catch (error) {
+      console.error(formatError("Error spending from Caravan wallet:"), error);
     }
   });
 

@@ -382,11 +382,11 @@ ${keyValue("Key Pool Size", walletInfo.keypoolsize)}`;
             address,
           );
           infoSpinner.succeed("Address information loaded");
-
+          console.log(colors.info(`testing:${addressInfo})`));
           // Format address information
           const addressText = `
-${keyValue("Address", addressInfo.address)}
-${keyValue("Type", addressInfo.scriptPubKey ? addressInfo.scriptPubKey.type : "Unknown")}
+${keyValue("Address", addressInfo.address || "N/A")}
+${keyValue("Type", addressInfo.scriptPubKey ? addressInfo.scriptPubKey || "N/A" : "Unknown")}
 ${keyValue("HD Path", addressInfo.hdkeypath || "N/A")}
 ${keyValue("Public Key", addressInfo.pubkey ? truncate(addressInfo.pubkey, 10) : "N/A")}`;
 
