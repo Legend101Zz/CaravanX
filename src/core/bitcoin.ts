@@ -262,6 +262,9 @@ export class BitcoinService {
 
   /**
    * Create a wallet with a known private key (for testing)
+   * NOTE DOES NMOT WORK AS:Bitcoin Core is rejecting the creation of legacy wallets (BDB wallets)
+   * which are required for the importprivkey command.
+   * This is because newer versions of Bitcoin Core (v0.21+) have moved away from BDB wallets to descriptor wallets by default.
    */
   async createPrivateKeyWallet(
     name: string,
@@ -270,7 +273,12 @@ export class BitcoinService {
     try {
       // Create the wallet
       const createSpinner = ora(`Creating wallet "${name}"...`).start();
-      await this.rpc.createWallet(name, false, false);
+      await this.createWallet(name, {
+        disablePrivateKeys: false,
+        blank: false,
+        descriptorWallet: false, // Explicitly create a legacy wallet that supports importprivkey
+      });
+
       createSpinner.succeed(`Wallet "${name}" created`);
 
       let keyPair;

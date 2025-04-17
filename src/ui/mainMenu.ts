@@ -40,10 +40,10 @@ export class MainMenu {
     "bitcoin-wallets": [
       { name: colors.commandName("List all wallets"), value: "list-wallets" },
       { name: colors.commandName("Create new wallet"), value: "create-wallet" },
-      {
-        name: colors.commandName("Create wallet with private key"),
-        value: "create-key-wallet",
-      },
+      // {
+      //   name: colors.commandName("Create wallet with private key"),
+      //   value: "create-key-wallet",
+      // },
       {
         name: colors.commandName("View wallet details"),
         value: "wallet-details",
@@ -321,9 +321,9 @@ export class MainMenu {
         case "create-wallet":
           await this.app.walletCommands.createWallet();
           break;
-        case "create-key-wallet":
-          await this.app.walletCommands.createPrivateKeyWallet();
-          break;
+        // case "create-key-wallet":
+        //   await this.app.walletCommands.createPrivateKeyWallet();
+        //   break;
         case "wallet-details":
           await this.app.walletCommands.showWalletDetails();
           break;
