@@ -63,6 +63,7 @@
     "figlet": "^1.8.0",
     "fs-extra": "^11.3.0",
     "gradient-string": "^3.0.0",
+    "open": "^10.1.1",
     "ora": "^8.2.0",
     "string-width": "^7.2.0",
     "terminal-link": "^4.0.0",
