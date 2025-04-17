@@ -4,7 +4,6 @@ import * as bitcoin from "bitcoinjs-lib";
 import { ECPairFactory } from "ecpair";
 import * as ecc from "tiny-secp256k1";
 import * as bip32 from "bip32";
-import ora from "ora";
 import {
   colors,
   formatBitcoin,
@@ -22,7 +21,7 @@ const ECPair = ECPairFactory(ecc);
 const BIP32 = bip32.BIP32Factory(ecc);
 
 /**
- * Service for Bitcoin wallet operations with improved progress indicators
+ * Service for Bitcoin wallet operations
  */
 export class BitcoinService {
   public readonly rpc: BitcoinRpcClient;
@@ -63,7 +62,6 @@ export class BitcoinService {
       );
 
       // Try the direct RPC call first with a more compatible format
-      const spinner = ora("Creating wallet...").start();
       try {
         const result = await this.rpc.callRpc("createwallet", [
           name, // wallet_name
@@ -74,7 +72,6 @@ export class BitcoinService {
           descriptorWallet, // descriptors
           true, // load_on_startup
         ]);
-        spinner.succeed(`Wallet "${name}" created successfully`);
         return result;
       } catch (error: any) {
         // If the above fails, try with named parameters
@@ -82,7 +79,9 @@ export class BitcoinService {
           error.message.includes("unknown named parameter") ||
           error.message.includes("incorrect number of parameters")
         ) {
-          spinner.warn("Using alternative wallet creation method");
+          console.log(
+            colors.warning("Using alternative wallet creation method"),
+          );
 
           // Create params object for named parameters
           const params: any = {
@@ -97,17 +96,15 @@ export class BitcoinService {
           }
 
           const result = await this.rpc.callRpc("createwallet", [params]);
-          spinner.succeed(`Wallet "${name}" created successfully`);
           return result;
         } else {
           // Last resort: try the core createWallet method with fewer parameters
-          spinner.warn("Using simplified wallet creation");
+          console.log(colors.warning("Using simplified wallet creation"));
           const result = await this.rpc.createWallet(
             name,
             disablePrivateKeys,
             blank,
           );
-          spinner.succeed(`Wallet "${name}" created successfully`);
           return result;
         }
       }
@@ -122,9 +119,7 @@ export class BitcoinService {
    */
   async getWalletInfo(wallet: string): Promise<any> {
     try {
-      const spinner = ora(`Getting info for wallet "${wallet}"...`).start();
       const info = await this.rpc.getWalletInfo(wallet);
-      spinner.succeed("Wallet info retrieved");
       return info;
     } catch (error) {
       console.error(
@@ -140,11 +135,7 @@ export class BitcoinService {
    */
   async getNewAddress(wallet: string, label = ""): Promise<string> {
     try {
-      const spinner = ora(
-        `Generating address for wallet "${wallet}"...`,
-      ).start();
       const address = await this.rpc.getNewAddress(wallet, label);
-      spinner.succeed(`Address generated: ${address}`);
       return address;
     } catch (error) {
       console.error(
@@ -160,9 +151,7 @@ export class BitcoinService {
    */
   async getAddressInfo(wallet: string, address: string): Promise<any> {
     try {
-      const spinner = ora(`Getting info for address ${address}...`).start();
       const info = await this.rpc.getAddressInfo(wallet, address);
-      spinner.succeed("Address information retrieved");
       return info;
     } catch (error) {
       console.error(
@@ -180,9 +169,7 @@ export class BitcoinService {
    */
   async listWallets(): Promise<string[]> {
     try {
-      const spinner = ora("Listing available wallets...").start();
       const wallets = await this.rpc.listWallets();
-      spinner.succeed(`Found ${wallets.length} wallet(s)`);
       return wallets;
     } catch (error) {
       console.error(formatError("Error listing wallets:"), error);
@@ -195,11 +182,7 @@ export class BitcoinService {
    */
   async listUnspent(wallet: string, addresses: string[] = []): Promise<UTXO[]> {
     try {
-      const spinner = ora(
-        `Listing unspent outputs for wallet "${wallet}"...`,
-      ).start();
       const utxos = await this.rpc.listUnspent(wallet, 0, 9999999, addresses);
-      spinner.succeed(`Found ${utxos.length} unspent output(s)`);
       return utxos;
     } catch (error) {
       console.error(
@@ -215,11 +198,7 @@ export class BitcoinService {
    */
   async getTransaction(wallet: string, txid: string): Promise<any> {
     try {
-      const spinner = ora(
-        `Getting transaction ${truncate(txid, 10)}...`,
-      ).start();
       const tx = await this.rpc.getTransaction(wallet, txid);
-      spinner.succeed("Transaction retrieved");
       return tx;
     } catch (error) {
       console.error(
@@ -239,15 +218,11 @@ export class BitcoinService {
     amount: number,
   ): Promise<string> {
     try {
-      const spinner = ora(
-        `Sending ${formatBitcoin(amount)} to ${address}...`,
-      ).start();
       const txid: any = await this.rpc.callRpc(
         "sendtoaddress",
         [address, amount],
         wallet,
       );
-      spinner.succeed(`Transaction sent successfully (${truncate(txid, 10)})`);
       return txid;
     } catch (error) {
       console.error(
@@ -262,9 +237,6 @@ export class BitcoinService {
 
   /**
    * Create a wallet with a known private key (for testing)
-   * NOTE DOES NMOT WORK AS:Bitcoin Core is rejecting the creation of legacy wallets (BDB wallets)
-   * which are required for the importprivkey command.
-   * This is because newer versions of Bitcoin Core (v0.21+) have moved away from BDB wallets to descriptor wallets by default.
    */
   async createPrivateKeyWallet(
     name: string,
@@ -272,14 +244,11 @@ export class BitcoinService {
   ): Promise<{ wallet: string; wif: string; address: string }> {
     try {
       // Create the wallet
-      const createSpinner = ora(`Creating wallet "${name}"...`).start();
       await this.createWallet(name, {
         disablePrivateKeys: false,
         blank: false,
         descriptorWallet: false, // Explicitly create a legacy wallet that supports importprivkey
       });
-
-      createSpinner.succeed(`Wallet "${name}" created`);
 
       let keyPair;
       if (wif) {
@@ -293,17 +262,13 @@ export class BitcoinService {
 
       // Import the private key
       const privateKey = wif;
-      const keySpinner = ora("Importing private key...").start();
-
       try {
         await this.rpc.callRpc(
           "importprivkey",
           [privateKey, "imported", false],
           name,
         );
-        keySpinner.succeed("Private key imported");
       } catch (error) {
-        keySpinner.fail("Failed to import private key");
         console.error(
           formatError(`Error importing private key to wallet ${name}:`),
           error,
@@ -312,9 +277,7 @@ export class BitcoinService {
       }
 
       // Get new address from the wallet for verification
-      const addrSpinner = ora("Generating address...").start();
       const address = await this.getNewAddress(name);
-      addrSpinner.succeed(`Address generated: ${address}`);
 
       return { wallet: name, wif: privateKey, address };
     } catch (error) {
@@ -334,10 +297,6 @@ export class BitcoinService {
     path = "m/44'/1'/0'",
   ): Promise<{ xpub: string; path: string; rootFingerprint?: string }> {
     try {
-      const spinner = ora(
-        `Getting extended public key for wallet "${wallet}"...`,
-      ).start();
-
       // For regtest, we'll manually derive the xpub from seed
       try {
         const dumpResult = await this.rpc.callRpc(
@@ -347,7 +306,6 @@ export class BitcoinService {
         );
 
         // Extract seed or private key info from the wallet dump
-        // This is simplified and would need more robust error handling in practice
         // @ts-ignore
         const seed = Buffer.from(dumpResult, "hex");
         const node = BIP32.fromSeed(seed, this.network);
@@ -362,10 +320,9 @@ export class BitcoinService {
         // @ts-ignore
         const rootFingerprint = node.fingerprint.toString("hex");
 
-        spinner.succeed("Extended public key retrieved");
         return { xpub, path, rootFingerprint };
       } catch (error) {
-        spinner.warn("Using alternative method to get xpub");
+        console.log(colors.warning("Using alternative method to get xpub"));
 
         // Fallback to a more direct method
         try {
@@ -374,11 +331,8 @@ export class BitcoinService {
             [`wpkh(${path})`],
             wallet,
           );
-          // @ts-ignore
-          spinner.succeed("Extended public key retrieved");
           return { xpub: result.descriptor, path };
         } catch (fallbackError) {
-          spinner.fail("Could not retrieve extended public key");
           console.error("Fallback also failed:", fallbackError);
           throw error;
         }
@@ -407,28 +361,17 @@ export class BitcoinService {
   }> {
     // Create a wallet with private keys
     const walletName = `${name}_key`;
-    const createSpinner = ora(
-      `Creating Caravan key wallet "${walletName}"...`,
-    ).start();
     await this.createWallet(walletName);
-    createSpinner.succeed(`Wallet "${walletName}" created`);
 
     // Generate HD seed
-    const seedSpinner = ora("Setting HD seed...").start();
     await this.rpc.callRpc("sethdseed", [true], walletName);
-    seedSpinner.succeed("HD seed set");
 
     // Get the xpub information
-    const xpubSpinner = ora(
-      `Getting extended public key for path ${path}...`,
-    ).start();
     const xpubInfo = await this.getExtendedPubKey(walletName, path);
-    xpubSpinner.succeed("Extended public key retrieved");
 
     // For the demo, we can also extract a private key
     let wif;
     try {
-      const keySpinner = ora("Getting sample private key...").start();
       const address = await this.getNewAddress(walletName);
       const dumpResult = await this.rpc.callRpc(
         "dumpprivkey",
@@ -436,7 +379,6 @@ export class BitcoinService {
         walletName,
       );
       wif = dumpResult;
-      keySpinner.succeed("Sample private key retrieved");
     } catch (error) {
       console.warn(
         formatWarning(`Could not dump private key for ${walletName}:`),
@@ -460,11 +402,7 @@ export class BitcoinService {
    */
   async dumpPrivateKey(wallet: string, address: string): Promise<string> {
     try {
-      const spinner = ora(
-        `Extracting private key for address ${address}...`,
-      ).start();
       const key: any = await this.rpc.callRpc("dumpprivkey", [address], wallet);
-      spinner.succeed("Private key extracted");
       return key;
     } catch (error) {
       console.error(
@@ -485,11 +423,7 @@ export class BitcoinService {
     address: string,
   ): Promise<string[]> {
     try {
-      const spinner = ora(
-        `Mining ${numBlocks} block(s) to address ${address}...`,
-      ).start();
       const hashes = await this.rpc.generateToAddress(numBlocks, address);
-      spinner.succeed(`Successfully mined ${hashes.length} block(s)`);
       return hashes;
     } catch (error) {
       console.error(

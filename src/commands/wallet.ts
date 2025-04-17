@@ -1,8 +1,9 @@
+//@ts-nocheck
 import { BitcoinService } from "../core/bitcoin";
 import { Network } from "../types/caravan";
 import { input, confirm, select } from "@inquirer/prompts";
 import chalk from "chalk";
-import ora from "ora";
+import ora, { Ora } from "ora";
 import {
   colors,
   displayCommandTitle,
@@ -17,6 +18,9 @@ import {
   divider,
 } from "../utils/terminal";
 
+// Back option constant
+const BACK_OPTION = "__BACK__";
+
 /**
  * Wallet commands for managing Bitcoin wallets
  */
@@ -28,15 +32,86 @@ export class WalletCommands {
   }
 
   /**
+   * Add a back option to selection choices
+   */
+  private addBackOption(choices: any[], backLabel = "Back to menu"): any[] {
+    return [...choices, { name: colors.muted(backLabel), value: BACK_OPTION }];
+  }
+
+  /**
+   * Check if a value is the back option
+   */
+  private isBackOption(value: string): boolean {
+    return value === BACK_OPTION;
+  }
+
+  /**
+   * Custom text input with back option (using 'q' to go back)
+   */
+  private async inputWithBack(options: {
+    message: string;
+    default?: string;
+    validate?: (input: string) => boolean | string;
+  }): Promise<string> {
+    const message = options.message + " (or 'q' to go back)";
+
+    const result = await input({
+      message,
+      default: options.default,
+      validate: (input) => {
+        if (input.toLowerCase() === "q") return true;
+        if (options.validate) return options.validate(input);
+        return true;
+      },
+    });
+
+    if (result.toLowerCase() === "q") {
+      return BACK_OPTION;
+    }
+
+    return result;
+  }
+
+  /**
+   * Handle spinner errors and return false to indicate operation should be canceled
+   */
+  private handleSpinnerError(
+    spinner: Ora,
+    errorMessage: string,
+    error: any,
+  ): false {
+    spinner.stop();
+    // Clear the spinner line completely
+    process.stdout.write("\r\x1b[K");
+    console.error(formatError(errorMessage));
+    if (error && error.message) {
+      console.error(formatError(`Details: ${error.message}`));
+    }
+
+    console.log(colors.info("Press Enter to return to menu..."));
+    return false;
+  }
+
+  /**
    * List all wallets on the node
    */
-  async listWallets(): Promise<string[]> {
+  async listWallets(): Promise<string[] | false> {
     displayCommandTitle("Available Wallets");
 
     try {
       const spinner = ora("Fetching wallets...").start();
-      const wallets = await this.bitcoinService.listWallets();
-      spinner.succeed("Wallets fetched successfully");
+      let wallets;
+
+      try {
+        wallets = await this.bitcoinService.listWallets();
+        spinner.succeed("Wallets fetched successfully");
+      } catch (error) {
+        return this.handleSpinnerError(
+          spinner,
+          "Error fetching wallets",
+          error,
+        );
+      }
 
       if (wallets.length === 0) {
         console.log(formatWarning("No wallets found."));
@@ -89,40 +164,54 @@ export class WalletCommands {
       return wallets;
     } catch (error) {
       console.error(formatError("Error listing wallets:"), error);
-      return [];
+      return false;
     }
   }
 
   /**
    * Create a new wallet
    */
-  async createWallet(): Promise<string | null> {
+  async createWallet(): Promise<string | false | null> {
     displayCommandTitle("Create New Wallet");
 
     try {
-      const walletName = await input({
+      // Get wallet name with back option
+      const walletName = await this.inputWithBack({
         message: "Enter a name for the new wallet:",
         validate: (input) =>
           input.trim() !== "" ? true : "Please enter a valid wallet name",
       });
 
+      // Check if user wants to go back
+      if (this.isBackOption(walletName)) {
+        return false;
+      }
+
+      // Add back option to wallet type selection
+      const walletTypeChoices = [
+        {
+          name: colors.highlight("Standard wallet (with private keys)"),
+          value: "standard",
+        },
+        {
+          name: colors.highlight("Watch-only wallet (no private keys)"),
+          value: "watch-only",
+        },
+        {
+          name: colors.highlight("Blank wallet (no keys or addresses)"),
+          value: "blank",
+        },
+      ];
+
       const walletType = await select({
         message: "What type of wallet would you like to create?",
-        choices: [
-          {
-            name: colors.highlight("Standard wallet (with private keys)"),
-            value: "standard",
-          },
-          {
-            name: colors.highlight("Watch-only wallet (no private keys)"),
-            value: "watch-only",
-          },
-          {
-            name: colors.highlight("Blank wallet (no keys or addresses)"),
-            value: "blank",
-          },
-        ],
+        choices: this.addBackOption(walletTypeChoices),
       });
+
+      // Check if user wants to go back
+      if (this.isBackOption(walletType)) {
+        return false;
+      }
 
       const disablePrivateKeys =
         walletType === "watch-only" || walletType === "blank";
@@ -133,11 +222,17 @@ export class WalletCommands {
       );
 
       const spinner = ora("Creating wallet...").start();
-      const result = await this.bitcoinService.createWallet(walletName, {
-        disablePrivateKeys,
-        blank,
-      });
-      spinner.succeed("Wallet created");
+      let result;
+
+      try {
+        result = await this.bitcoinService.createWallet(walletName, {
+          disablePrivateKeys,
+          blank,
+        });
+        spinner.succeed("Wallet created");
+      } catch (error) {
+        return this.handleSpinnerError(spinner, "Error creating wallet", error);
+      }
 
       if (result) {
         console.log(
@@ -150,15 +245,24 @@ export class WalletCommands {
         // Generate a new address if the wallet has private keys
         if (walletType === "standard") {
           const addressSpinner = ora("Generating address...").start();
-          const address = await this.bitcoinService.getNewAddress(walletName);
-          addressSpinner.succeed("Address generated");
+          try {
+            const address = await this.bitcoinService.getNewAddress(walletName);
+            addressSpinner.succeed("Address generated");
 
-          console.log(
-            boxText(
-              `Wallet: ${colors.highlight(walletName)}\nAddress: ${colors.highlight(address)}`,
-              { title: "Generated Address", titleColor: colors.info },
-            ),
-          );
+            console.log(
+              boxText(
+                `Wallet: ${colors.highlight(walletName)}\nAddress: ${colors.highlight(address)}`,
+                { title: "Generated Address", titleColor: colors.info },
+              ),
+            );
+          } catch (error) {
+            addressSpinner.fail("Could not generate address");
+            console.log(
+              formatWarning(
+                "This wallet might not support address generation.",
+              ),
+            );
+          }
         }
 
         return walletName;
@@ -167,183 +271,75 @@ export class WalletCommands {
       return null;
     } catch (error) {
       console.error(formatError("Error creating wallet:"), error);
-      return null;
-    }
-  }
-
-  /**
-   * Create a wallet with a known private key (for testing)
-   */
-  async createPrivateKeyWallet(): Promise<{
-    wallet: string;
-    wif: string;
-    address: string;
-  } | null> {
-    displayCommandTitle("Create Wallet with Private Key");
-
-    try {
-      const walletName = await input({
-        message: "Enter a name for the new wallet:",
-        validate: (input) =>
-          input.trim() !== "" ? true : "Please enter a valid wallet name",
-      });
-
-      const useExistingKey = await confirm({
-        message: "Do you want to use an existing private key?",
-        default: false,
-      });
-
-      let wif: string | undefined;
-      if (useExistingKey) {
-        wif = await input({
-          message: "Enter the private key (WIF format):",
-          validate: (input) =>
-            input.trim() !== "" ? true : "Please enter a valid private key",
-        });
-      }
-
-      console.log(
-        colors.info(
-          `\nCreating wallet "${walletName}" with ${wif ? "specified" : "random"} private key...`,
-        ),
-      );
-
-      const spinner = ora("Creating wallet with private key...").start();
-      const result = await this.bitcoinService.createPrivateKeyWallet(
-        walletName,
-        wif,
-      );
-      spinner.succeed("Wallet created successfully");
-
-      if (result) {
-        console.log(
-          boxText(
-            `Wallet: ${colors.highlight(result.wallet)}\nAddress: ${colors.highlight(result.address)}\nPrivate key (WIF): ${colors.code(result.wif)}`,
-            { title: "Wallet Created", titleColor: colors.success },
-          ),
-        );
-
-        console.log(
-          formatWarning(
-            "\nKeep this private key secure! Anyone with this key can spend funds.",
-          ),
-        );
-
-        return result;
-      }
-
-      return null;
-    } catch (error) {
-      console.error(
-        formatError("Error creating wallet with private key:"),
-        error,
-      );
-      return null;
-    }
-  }
-
-  /**
-   * Create a HD wallet for Caravan multisig (with xpub)
-   */
-  async createCaravanKeyWallet(): Promise<any> {
-    displayCommandTitle("Create Caravan Key Wallet");
-
-    try {
-      const walletName = await input({
-        message: "Enter a base name for the wallet:",
-        validate: (input) =>
-          input.trim() !== "" ? true : "Please enter a valid wallet name",
-      });
-
-      const network = await select({
-        message: "Which network?",
-        choices: [
-          { name: colors.highlight("Regtest"), value: Network.REGTEST },
-          { name: colors.highlight("Testnet"), value: Network.TESTNET },
-        ],
-        default: Network.REGTEST,
-      });
-
-      console.log(
-        colors.info(`\nCreating Caravan key wallet "${walletName}_key"...`),
-      );
-
-      // Different derivation paths for different networks
-      let derivationPath =
-        network === Network.REGTEST ? "m/84'/1'/0'" : "m/84'/1'/0'";
-
-      const spinner = ora("Creating Caravan key wallet...").start();
-      const result = await this.bitcoinService.createCaravanKeyWallet(
-        walletName,
-        derivationPath,
-      );
-      spinner.succeed("Caravan key wallet created");
-
-      if (result) {
-        // Format output
-        const outputText = `
-Wallet: ${colors.highlight(result.wallet)}
-Extended Public Key (xpub): ${colors.code(truncate(result.xpub, 15))}
-Derivation Path: ${colors.code(result.path)}
-Root Fingerprint: ${colors.code(result.rootFingerprint)}
-${result.wif ? `\nSample Private Key (WIF): ${colors.code(result.wif)}` : ""}`;
-
-        console.log(
-          boxText(outputText, {
-            title: "Caravan Key Wallet Created",
-            titleColor: colors.success,
-          }),
-        );
-
-        if (result.wif) {
-          console.log(
-            formatWarning(
-              "\nWARNING: Keep these keys secure! Anyone with these keys can spend funds.",
-            ),
-          );
-        }
-
-        return result;
-      }
-
-      return null;
-    } catch (error) {
-      console.error(formatError("Error creating Caravan key wallet:"), error);
-      return null;
+      return false;
     }
   }
 
   /**
    * Show wallet details
    */
-  async showWalletDetails(walletName?: string): Promise<any> {
+  async showWalletDetails(walletName?: string): Promise<any | false> {
     displayCommandTitle("Wallet Details");
 
-    if (!walletName) {
-      const walletsSpinner = ora("Loading wallets...").start();
-      const wallets = await this.listWallets();
-      walletsSpinner.succeed("Wallets loaded");
+    try {
+      if (!walletName) {
+        const walletsSpinner = ora("Loading wallets...").start();
+        let wallets;
 
-      if (wallets.length === 0) {
-        console.log(formatWarning("No wallets found."));
-        return null;
-      }
+        try {
+          wallets = await this.listWallets();
+          walletsSpinner.succeed("Wallets loaded");
 
-      walletName = await select({
-        message: "Select a wallet to view:",
-        choices: wallets.map((w) => ({
+          // Check if listing wallets was cancelled or failed
+          if (wallets === false) {
+            return false;
+          }
+        } catch (error) {
+          return this.handleSpinnerError(
+            walletsSpinner,
+            "Error loading wallets",
+            error,
+          );
+        }
+
+        if (wallets.length === 0) {
+          console.log(formatWarning("No wallets found."));
+          return false;
+        }
+
+        // Add back option to wallet selection
+        const walletChoices = wallets.map((w) => ({
           name: colors.highlight(w),
           value: w,
-        })),
-      });
-    }
+        }));
 
-    console.log(colors.info(`\nFetching details for wallet: ${walletName}`));
+        walletName = await select({
+          message: "Select a wallet to view:",
+          choices: this.addBackOption(walletChoices),
+        });
 
-    try {
+        // Check if user wants to go back
+        if (this.isBackOption(walletName)) {
+          return false;
+        }
+      }
+
+      console.log(colors.info(`\nFetching details for wallet: ${walletName}`));
+
+      // Get wallet info with proper error handling
       const spinner = ora("Loading wallet information...").start();
-      const walletInfo = await this.bitcoinService.getWalletInfo(walletName);
-      spinner.succeed("Wallet information loaded");
+      let walletInfo;
+
+      try {
+        walletInfo = await this.bitcoinService.getWalletInfo(walletName);
+        spinner.succeed("Wallet information loaded");
+      } catch (error) {
+        return this.handleSpinnerError(
+          spinner,
+          "Error loading wallet information",
+          error,
+        );
+      }
 
       // Format the wallet information
       const infoText = `
@@ -362,19 +358,39 @@ ${keyValue("Key Pool Size", walletInfo.keypoolsize)}`;
         }),
       );
 
-      // Generate a new address
-      const generateAddress = await confirm({
+      // Show options with back option
+      const generateOptions = [
+        { name: colors.highlight("Yes, generate address"), value: "yes" },
+        { name: colors.highlight("No, skip"), value: "no" },
+      ];
+
+      const generateOption = await select({
         message: "Generate a new address?",
-        default: true,
+        choices: this.addBackOption(generateOptions),
       });
 
-      if (generateAddress) {
-        const addressSpinner = ora("Generating new address...").start();
-        // Wallet name is now guaranteed to be a string here
-        const address = await this.bitcoinService.getNewAddress(walletName);
-        addressSpinner.succeed("Address generated");
+      // Check if user wants to go back
+      if (this.isBackOption(generateOption)) {
+        return false;
+      }
 
-        // Get address info
+      if (generateOption === "yes") {
+        const addressSpinner = ora("Generating new address...").start();
+        let address;
+
+        try {
+          // Wallet name is now guaranteed to be a string here
+          address = await this.bitcoinService.getNewAddress(walletName);
+          addressSpinner.succeed("Address generated");
+        } catch (error) {
+          return this.handleSpinnerError(
+            addressSpinner,
+            `Error generating address for wallet ${walletName}`,
+            error,
+          );
+        }
+
+        // Get address info with proper error handling
         try {
           const infoSpinner = ora("Fetching address information...").start();
           const addressInfo = await this.bitcoinService.getAddressInfo(
@@ -382,7 +398,7 @@ ${keyValue("Key Pool Size", walletInfo.keypoolsize)}`;
             address,
           );
           infoSpinner.succeed("Address information loaded");
-          console.log(colors.info(`testing:${addressInfo})`));
+
           // Format address information
           const addressText = `
 ${keyValue("Address", addressInfo.address || "N/A")}
@@ -398,55 +414,86 @@ ${keyValue("Public Key", addressInfo.pubkey ? truncate(addressInfo.pubkey, 10) :
           );
         } catch (error) {
           console.error(
-            formatWarning("Could not retrieve address info:"),
-            error,
+            formatWarning("Could not retrieve detailed address info"),
           );
+          console.log(colors.info(`Address generated: ${address}`));
         }
       }
 
       return walletInfo;
     } catch (error) {
       console.error(
-        formatError(`Error getting wallet details for ${walletName}:`),
-        error,
+        formatError(`Error getting wallet details: ${error.message}`),
       );
-      return null;
+      return false;
     }
   }
 
   /**
    * Fund a wallet with new coins (using mining)
    */
-  async fundWallet(walletName?: string): Promise<any> {
+  async fundWallet(walletName?: string): Promise<any | false> {
     displayCommandTitle("Fund Wallet");
 
-    if (!walletName) {
-      const walletsSpinner = ora("Loading wallets...").start();
-      const wallets = await this.listWallets();
-      walletsSpinner.succeed("Wallets loaded");
+    try {
+      if (!walletName) {
+        const walletsSpinner = ora("Loading wallets...").start();
+        let wallets;
 
-      if (wallets.length === 0) {
-        console.log(formatWarning("No wallets found."));
-        return null;
+        try {
+          wallets = await this.listWallets();
+          walletsSpinner.succeed("Wallets loaded");
+
+          // Check if listing wallets was cancelled
+          if (wallets === false) {
+            return false;
+          }
+        } catch (error) {
+          return this.handleSpinnerError(
+            walletsSpinner,
+            "Error loading wallets",
+            error,
+          );
+        }
+
+        if (wallets.length === 0) {
+          console.log(formatWarning("No wallets found."));
+          return false;
+        }
+
+        // Add back option to wallet selection
+        walletName = await select({
+          message: "Select a wallet to fund:",
+          choices: this.addBackOption(
+            wallets.map((w) => ({
+              name: colors.highlight(w),
+              value: w,
+            })),
+          ),
+        });
+
+        // Check if user wants to go back
+        if (this.isBackOption(walletName)) {
+          return false;
+        }
       }
 
-      walletName = await select({
-        message: "Select a wallet to fund:",
-        choices: wallets.map((w) => ({
-          name: colors.highlight(w),
-          value: w,
-        })),
-      });
-    }
+      console.log(colors.info(`\nPreparing to fund wallet: ${walletName}`));
 
-    console.log(colors.info(`\nPreparing to fund wallet: ${walletName}`));
-
-    try {
-      // Check wallet balance before
+      // Check wallet balance with proper error handling
       const infoSpinner = ora("Checking current balance...").start();
-      const walletInfoBefore =
-        await this.bitcoinService.getWalletInfo(walletName);
-      infoSpinner.succeed("Balance checked");
+      let walletInfoBefore;
+
+      try {
+        walletInfoBefore = await this.bitcoinService.getWalletInfo(walletName);
+        infoSpinner.succeed("Balance checked");
+      } catch (error) {
+        return this.handleSpinnerError(
+          infoSpinner,
+          "Error checking wallet balance",
+          error,
+        );
+      }
 
       console.log(
         keyValue("Current balance", formatBitcoin(walletInfoBefore.balance)),
@@ -458,30 +505,47 @@ ${keyValue("Public Key", addressInfo.pubkey ? truncate(addressInfo.pubkey, 10) :
         ),
       );
 
-      // Get a new address to mine to
+      // Get a new address with proper error handling
       const addressSpinner = ora("Generating address for mining...").start();
-      const address = await this.bitcoinService.getNewAddress(walletName);
-      addressSpinner.succeed(`Using address: ${address}`);
+      let address;
 
-      // Allow user to specify amount rather than blocks
+      try {
+        address = await this.bitcoinService.getNewAddress(walletName);
+        addressSpinner.succeed(`Using address: ${address}`);
+      } catch (error) {
+        return this.handleSpinnerError(
+          addressSpinner,
+          "Error generating address",
+          error,
+        );
+      }
+
+      // Allow user to specify amount with back option
+      const fundingMethodChoices = [
+        {
+          name: colors.highlight("By number of blocks"),
+          value: "blocks",
+        },
+        {
+          name: colors.highlight("By target amount (approximate)"),
+          value: "amount",
+        },
+      ];
+
       const fundingMethod = await select({
         message: "How would you like to specify mining?",
-        choices: [
-          {
-            name: colors.highlight("By number of blocks"),
-            value: "blocks",
-          },
-          {
-            name: colors.highlight("By target amount (approximate)"),
-            value: "amount",
-          },
-        ],
+        choices: this.addBackOption(fundingMethodChoices),
       });
+
+      // Check if user wants to go back
+      if (this.isBackOption(fundingMethod)) {
+        return false;
+      }
 
       let numBlocks;
 
       if (fundingMethod === "blocks") {
-        const blocks = await input({
+        const blocks = await this.inputWithBack({
           message: "How many blocks to mine?",
           default: "1",
           validate: (input) => {
@@ -491,9 +555,15 @@ ${keyValue("Public Key", addressInfo.pubkey ? truncate(addressInfo.pubkey, 10) :
               : "Please enter a positive number";
           },
         });
+
+        // Check if user wants to go back
+        if (this.isBackOption(blocks)) {
+          return false;
+        }
+
         numBlocks = parseInt(blocks);
       } else {
-        const targetAmount = await input({
+        const targetAmount = await this.inputWithBack({
           message: "How much BTC would you like to mine (approximate)?",
           default: "50",
           validate: (input) => {
@@ -503,6 +573,12 @@ ${keyValue("Public Key", addressInfo.pubkey ? truncate(addressInfo.pubkey, 10) :
               : "Please enter a positive number";
           },
         });
+
+        // Check if user wants to go back
+        if (this.isBackOption(targetAmount)) {
+          return false;
+        }
+
         // Each block gives ~50 BTC in regtest mode
         numBlocks = Math.ceil(parseFloat(targetAmount) / 50);
         console.log(
@@ -517,13 +593,25 @@ ${keyValue("Public Key", addressInfo.pubkey ? truncate(addressInfo.pubkey, 10) :
         colors.info(`Mining ${numBlocks} block(s) to address ${address}...`),
       );
 
-      // Mine the blocks
+      // Mine the blocks with proper error handling
       const miningSpinner = ora(`Mining ${numBlocks} blocks...`).start();
-      const blockHashes = await this.bitcoinService.generateToAddress(
-        numBlocks,
-        address,
-      );
-      miningSpinner.succeed(`Successfully mined ${blockHashes.length} blocks!`);
+      let blockHashes;
+
+      try {
+        blockHashes = await this.bitcoinService.generateToAddress(
+          numBlocks,
+          address,
+        );
+        miningSpinner.succeed(
+          `Successfully mined ${blockHashes.length} blocks!`,
+        );
+      } catch (error) {
+        return this.handleSpinnerError(
+          miningSpinner,
+          "Error mining blocks",
+          error,
+        );
+      }
 
       console.log(
         keyValue(
@@ -532,11 +620,20 @@ ${keyValue("Public Key", addressInfo.pubkey ? truncate(addressInfo.pubkey, 10) :
         ),
       );
 
-      // Check wallet balance after
+      // Check updated wallet balance
       const afterSpinner = ora("Checking updated balance...").start();
-      const walletInfoAfter =
-        await this.bitcoinService.getWalletInfo(walletName);
-      afterSpinner.succeed("Balance updated");
+      let walletInfoAfter;
+
+      try {
+        walletInfoAfter = await this.bitcoinService.getWalletInfo(walletName);
+        afterSpinner.succeed("Balance updated");
+      } catch (error) {
+        return this.handleSpinnerError(
+          afterSpinner,
+          "Error checking updated balance",
+          error,
+        );
+      }
 
       // Format results
       const resultText = `
@@ -560,45 +657,78 @@ ${keyValue("Added (immature)", formatBitcoin(walletInfoAfter.immature_balance - 
 
       return { blockHashes, newBalance: walletInfoAfter.balance };
     } catch (error) {
-      console.error(formatError(`Error funding wallet ${walletName}:`), error);
-      return null;
+      console.error(formatError(`Error funding wallet: ${error.message}`));
+      return false;
     }
   }
 
   /**
    * Send funds between wallets
    */
-  async sendFunds(): Promise<any> {
+  async sendFunds(): Promise<any | false> {
     displayCommandTitle("Send Funds");
 
-    const walletsSpinner = ora("Loading wallets...").start();
-    const wallets = await this.listWallets();
-    walletsSpinner.succeed("Wallets loaded");
-
-    if (wallets.length < 1) {
-      console.log(
-        formatWarning(
-          "Not enough wallets found. You need at least one wallet.",
-        ),
-      );
-      return null;
-    }
-
     try {
-      // Select source wallet
+      const walletsSpinner = ora("Loading wallets...").start();
+      let wallets;
+
+      try {
+        wallets = await this.listWallets();
+        walletsSpinner.succeed("Wallets loaded");
+
+        // Check if listing wallets was cancelled
+        if (wallets === false) {
+          return false;
+        }
+      } catch (error) {
+        return this.handleSpinnerError(
+          walletsSpinner,
+          "Error loading wallets",
+          error,
+        );
+      }
+
+      if (wallets.length < 1) {
+        console.log(
+          formatWarning(
+            "Not enough wallets found. You need at least one wallet.",
+          ),
+        );
+        return false;
+      }
+
+      // Select source wallet with back option
       const sourceWallet = await select({
         message: "Select source wallet:",
-        choices: wallets.map((w) => ({
-          name: colors.highlight(w),
-          value: w,
-        })),
+        choices: this.addBackOption(
+          wallets.map((w) => ({
+            name: colors.highlight(w),
+            value: w,
+          })),
+        ),
       });
 
+      // Check if user wants to go back
+      if (this.isBackOption(sourceWallet)) {
+        return false;
+      }
+
+      // Get wallet info with proper error handling
       const infoSpinner = ora(
         `Loading information for ${sourceWallet}...`,
       ).start();
-      const sourceInfo = await this.bitcoinService.getWalletInfo(sourceWallet);
-      infoSpinner.succeed("Wallet information loaded");
+      let sourceInfo;
+
+      try {
+        sourceInfo = await this.bitcoinService.getWalletInfo(sourceWallet);
+        infoSpinner.succeed("Wallet information loaded");
+      } catch (error) {
+        return this.handleSpinnerError(
+          infoSpinner,
+          "Error loading wallet information",
+          error,
+        );
+      }
 
       console.log(
         keyValue("Source wallet balance", formatBitcoin(sourceInfo.balance)),
@@ -608,17 +738,24 @@ ${keyValue("Added (immature)", formatBitcoin(walletInfoAfter.immature_balance - 
         console.log(
           formatWarning("Source wallet has no funds. Please fund it first."),
         );
-        return null;
+        return false;
       }
 
-      // Ask for destination - either address or internal wallet
+      // Ask for destination with back option
+      const destTypeChoices = [
+        { name: colors.highlight("Another wallet"), value: "wallet" },
+        { name: colors.highlight("External address"), value: "address" },
+      ];
+
       const destType = await select({
         message: "Send to:",
-        choices: [
-          { name: colors.highlight("Another wallet"), value: "wallet" },
-          { name: colors.highlight("External address"), value: "address" },
-        ],
+        choices: this.addBackOption(destTypeChoices),
       });
+
+      // Check if user wants to go back
+      if (this.isBackOption(destType)) {
+        return false;
+      }
 
       let destinationAddress: string;
 
@@ -632,36 +769,61 @@ ${keyValue("Added (immature)", formatBitcoin(walletInfoAfter.immature_balance - 
               "No other wallets found. Create another wallet first.",
             ),
           );
-          return null;
+          return false;
         }
 
+        // Select destination wallet with back option
         const destWallet = await select({
           message: "Select destination wallet:",
-          choices: destWallets.map((w) => ({
-            name: colors.highlight(w),
-            value: w,
-          })),
+          choices: this.addBackOption(
+            destWallets.map((w) => ({
+              name: colors.highlight(w),
+              value: w,
+            })),
+          ),
         });
+
+        // Check if user wants to go back
+        if (this.isBackOption(destWallet)) {
+          return false;
+        }
 
         // Get a new address from the destination wallet
         const addressSpinner = ora(
           `Generating address from wallet ${destWallet}...`,
         ).start();
-        destinationAddress =
-          await this.bitcoinService.getNewAddress(destWallet);
-        addressSpinner.succeed("Address generated");
+
+        try {
+          destinationAddress =
+            await this.bitcoinService.getNewAddress(destWallet);
+          addressSpinner.succeed("Address generated");
+        } catch (error) {
+          return this.handleSpinnerError(
+            addressSpinner,
+            "Error generating address",
+            error,
+          );
+        }
 
         console.log(keyValue("Generated address", destinationAddress));
       } else {
-        destinationAddress = await input({
+        // Get external address with back option
+        const address = await this.inputWithBack({
           message: "Enter destination address:",
           validate: (input) =>
             input.trim() !== "" ? true : "Please enter a valid address",
         });
+
+        // Check if user wants to go back
+        if (this.isBackOption(address)) {
+          return false;
+        }
+
+        destinationAddress = address;
       }
 
-      // Ask for amount
-      const amount = await input({
+      // Ask for amount with back option
+      const amount = await this.inputWithBack({
         message: "Enter amount to send (BTC):",
         validate: (input) => {
           const num = parseFloat(input);
@@ -675,6 +837,11 @@ ${keyValue("Added (immature)", formatBitcoin(walletInfoAfter.immature_balance - 
         },
       });
 
+      // Check if user wants to go back
+      if (this.isBackOption(amount)) {
+        return false;
+      }
+
       const amountNum = parseFloat(amount);
 
       console.log(
@@ -683,14 +850,24 @@ ${keyValue("Added (immature)", formatBitcoin(walletInfoAfter.immature_balance - 
         ),
       );
 
-      // Send the transaction
+      // Send transaction with proper error handling
       const txSpinner = ora("Sending transaction...").start();
-      const txid = await this.bitcoinService.sendToAddress(
-        sourceWallet,
-        destinationAddress,
-        amountNum,
-      );
-      txSpinner.succeed("Transaction sent successfully");
+      let txid;
+
+      try {
+        txid = await this.bitcoinService.sendToAddress(
+          sourceWallet,
+          destinationAddress,
+          amountNum,
+        );
+        txSpinner.succeed("Transaction sent successfully");
+      } catch (error) {
+        return this.handleSpinnerError(
+          txSpinner,
+          "Error sending transaction",
+          error,
+        );
+      }
 
       console.log(
         boxText(`${keyValue("Transaction ID", truncate(txid, 15))}`, {
@@ -699,34 +876,62 @@ ${keyValue("Added (immature)", formatBitcoin(walletInfoAfter.immature_balance - 
         }),
       );
 
-      // Ask if user wants to mine a block to confirm the transaction
-      const mine = await confirm({
+      // Ask about mining with back option
+      const mineOptions = [
+        { name: colors.highlight("Yes, mine a block"), value: "yes" },
+        { name: colors.highlight("No, skip mining"), value: "no" },
+      ];
+
+      const mineBlock = await select({
         message: "Mine a block to confirm the transaction?",
-        default: true,
+        choices: this.addBackOption(mineOptions),
       });
 
-      if (mine) {
+      // Check if user wants to go back
+      if (this.isBackOption(mineBlock)) {
+        return false;
+      }
+
+      if (mineBlock === "yes") {
         // Use the source wallet for mining
         const mineAddressSpinner = ora(
           "Generating address for mining...",
         ).start();
-        const address = await this.bitcoinService.getNewAddress(sourceWallet);
-        mineAddressSpinner.succeed("Address generated for mining");
+        let address;
 
+        try {
+          address = await this.bitcoinService.getNewAddress(sourceWallet);
+          mineAddressSpinner.succeed("Address generated for mining");
+        } catch (error) {
+          return this.handleSpinnerError(
+            mineAddressSpinner,
+            "Error generating mining address",
+            error,
+          );
+        }
+
+        // Mine block with proper error handling
         const mineSpinner = ora("Mining block...").start();
-        const blockHashes = await this.bitcoinService.generateToAddress(
-          1,
-          address,
-        );
-        mineSpinner.succeed("Block mined successfully");
+        let blockHashes;
+
+        try {
+          blockHashes = await this.bitcoinService.generateToAddress(1, address);
+          mineSpinner.succeed("Block mined successfully");
+        } catch (error) {
+          return this.handleSpinnerError(
+            mineSpinner,
+            "Error mining block",
+            error,
+          );
+        }
 
         console.log(keyValue("Block hash", blockHashes[0]));
       }
 
       return { txid };
     } catch (error) {
-      console.error(chalk.red("\nError sending funds:"), error);
-      return null;
+      console.error(formatError(`Error sending funds: ${error.message}`));
+      return false;
     }
   }
 }

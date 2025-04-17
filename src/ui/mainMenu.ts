@@ -473,6 +473,9 @@ export class MainMenu {
           );
       }
     } catch (error) {
+      // Make sure all spinners are stopped here too
+      ora().stop();
+      process.stdout.write("\r\x1b[K");
       await this.handleError(
         error,
         `${this.getCategoryTitle(category)} > ${action}`,
@@ -509,9 +512,15 @@ export class MainMenu {
 
     if (action === "mine-to-wallet") {
       // List wallets to select from
-      const wallets = await this.withSpinner("Loading wallets", async () => {
-        return await this.app.walletCommands.listWallets();
-      });
+      const walletsResult = await this.withSpinner(
+        "Loading wallets",
+        async () => {
+          return await this.app.walletCommands.listWallets();
+        },
+      );
+
+      // Check if we got a valid array of wallets
+      const wallets = Array.isArray(walletsResult) ? walletsResult : [];
 
       if (wallets.length === 0) {
         console.log(

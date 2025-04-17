@@ -73,22 +73,22 @@ program
   });
 
 // Create private key wallet command
-program
-  .command("create-key-wallet")
-  .description("Create a wallet with a known private key")
-  .option("-n, --name <n>", "Name for the new wallet")
-  .option("-k, --key <key>", "Private key in WIF format (optional)")
-  .action(async (options) => {
-    const spinner = ora("Initializing...").start();
-    const app = new CaravanRegtestManager();
-    spinner.succeed("Initialized");
+// program
+//   .command("create-key-wallet")
+//   .description("Create a wallet with a known private key")
+//   .option("-n, --name <n>", "Name for the new wallet")
+//   .option("-k, --key <key>", "Private key in WIF format (optional)")
+//   .action(async (options) => {
+//     const spinner = ora("Initializing...").start();
+//     const app = new CaravanRegtestManager();
+//     spinner.succeed("Initialized");
 
-    try {
-      await app.walletCommands.createPrivateKeyWallet();
-    } catch (error) {
-      console.error(formatError("Error creating private key wallet:"), error);
-    }
-  });
+//     try {
+//       await app.walletCommands.createPrivateKeyWallet();
+//     } catch (error) {
+//       console.error(formatError("Error creating private key wallet:"), error);
+//     }
+//   });
 
 // List Caravan wallets command
 program
