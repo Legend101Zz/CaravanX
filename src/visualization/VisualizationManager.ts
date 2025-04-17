@@ -590,6 +590,7 @@ document.addEventListener('DOMContentLoaded', init);
 
       if (openBrowser) {
         console.log(chalk.cyan("Opening visualization in browser..."));
+        //@ts-expect-error
         await open(`http://localhost:${this.port}/`);
       }
     } catch (error) {

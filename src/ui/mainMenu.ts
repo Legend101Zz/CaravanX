@@ -31,6 +31,7 @@ export class MainMenu {
     { name: colors.header("🏦 Bitcoin Wallets"), value: "bitcoin-wallets" },
     { name: colors.header("🔐 Caravan Multisig"), value: "caravan-multisig" },
     { name: colors.header("💸 Transactions"), value: "transactions" },
+    { name: colors.header("  Visualization"), value: "visualization" },
     { name: colors.header("⚙️ System"), value: "system" },
     { name: colors.header("❓ Help"), value: "help" },
     { name: colors.header("🚪 Exit"), value: "exit" },
@@ -107,6 +108,21 @@ export class MainMenu {
       {
         name: colors.commandName("Finalize and broadcast PSBT"),
         value: "finalize-psbt",
+      },
+      { name: colors.muted("Back to main menu"), value: "back" },
+    ],
+    visualization: [
+      {
+        name: colors.commandName("Start blockchain visualization"),
+        value: "start-visualization",
+      },
+      {
+        name: colors.commandName("Stop blockchain visualization"),
+        value: "stop-visualization",
+      },
+      {
+        name: colors.commandName("Simulate blockchain activity"),
+        value: "simulate-blockchain",
       },
       { name: colors.muted("Back to main menu"), value: "back" },
     ],
@@ -452,6 +468,17 @@ export class MainMenu {
           break;
         case "finalize-psbt":
           await this.app.transactionCommands.finalizeAndBroadcastPSBT();
+          break;
+
+        // Visualization
+        case "start-visualization":
+          await this.app.visualizationCommands.startVisualization();
+          break;
+        case "stop-visualization":
+          await this.app.visualizationCommands.stopVisualization();
+          break;
+        case "simulate-blockchain":
+          await this.app.visualizationCommands.simulateBlockchain();
           break;
 
         // System

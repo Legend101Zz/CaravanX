@@ -447,6 +447,69 @@ program
     }
   });
 
+// Visualization commands
+program
+  .command("start-visualization")
+  .description("Start the blockchain visualization server")
+  .option(
+    "-p, --port <port>",
+    "Port to use for the visualization server",
+    "3000",
+  )
+  .option("-n, --no-browser", "Don't open browser automatically")
+  .action(async (options) => {
+    const spinner = ora("Initializing...").start();
+    const app = new CaravanRegtestManager();
+    spinner.succeed("Initialized");
+
+    try {
+      // Force the port to be a number
+      const port = parseInt(options.port);
+
+      // Start visualization with browser option
+      await app.visualizationCommands.startVisualization();
+    } catch (error) {
+      console.error(formatError("Error starting visualization:"), error);
+    }
+  });
+
+program
+  .command("stop-visualization")
+  .description("Stop the blockchain visualization server")
+  .action(async () => {
+    const spinner = ora("Initializing...").start();
+    const app = new CaravanRegtestManager();
+    spinner.succeed("Initialized");
+
+    try {
+      await app.visualizationCommands.stopVisualization();
+    } catch (error) {
+      console.error(formatError("Error stopping visualization:"), error);
+    }
+  });
+
+program
+  .command("simulate-blockchain")
+  .description("Simulate blockchain activity for testing")
+  .option("-b, --blocks <number>", "Number of blocks to generate", "1")
+  .option(
+    "-t, --transactions <number>",
+    "Number of transactions to create",
+    "3",
+  )
+  .option("-w, --wallet <name>", "Wallet to use for mining")
+  .action(async (options) => {
+    const spinner = ora("Initializing...").start();
+    const app = new CaravanRegtestManager();
+    spinner.succeed("Initialized");
+
+    try {
+      await app.visualizationCommands.simulateBlockchain();
+    } catch (error) {
+      console.error(formatError("Error simulating blockchain:"), error);
+    }
+  });
+
 // Start the interactive app (default command)
 program
   .command("start", { isDefault: true })

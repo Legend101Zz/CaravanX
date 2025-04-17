@@ -6,6 +6,7 @@ import { TransactionService } from "./core/transaction";
 import { WalletCommands } from "./commands/wallet";
 import { MultisigCommands } from "./commands/multisig";
 import { TransactionCommands } from "./commands/transaction";
+import { VisualizationCommands } from "./commands/visualizations";
 import { MainMenu } from "./ui/mainMenu";
 
 import { confirm, input, number } from "@inquirer/prompts";
@@ -24,6 +25,7 @@ export class CaravanRegtestManager {
   public walletCommands: WalletCommands;
   public multisigCommands: MultisigCommands;
   public transactionCommands: TransactionCommands;
+  public visualizationCommands: VisualizationCommands;
 
   constructor() {
     // Initialize configuration
@@ -56,6 +58,11 @@ export class CaravanRegtestManager {
     this.transactionCommands = new TransactionCommands(
       this.transactionService,
       this.caravanService,
+      this.bitcoinService,
+    );
+    this.visualizationCommands = new VisualizationCommands(
+      this.configManager,
+      this.bitcoinRpcClient,
       this.bitcoinService,
     );
   }
