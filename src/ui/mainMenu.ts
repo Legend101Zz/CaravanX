@@ -3,6 +3,7 @@ import chalk from "chalk";
 import { CaravanRegtestManager } from "../index";
 import figlet from "figlet";
 import * as fs from "fs-extra";
+import gradient from "gradient-string";
 import ora from "ora";
 
 // Define a consistent color scheme
@@ -129,21 +130,48 @@ export class MainMenu {
    * Display the Caravan logo
    */
   private displayLogo(): void {
-    const caravanLogo = `
-    ${colors.primary("   ______                                    ")}
-    ${colors.primary("  / ____/___ __________ __   _____ ____     ")}
-    ${colors.primary(" / /   / __ \`/ ___/ __ \`/ | / / _ \\/ __ \\   ")}
-    ${colors.primary("/ /___/ /_/ / /  / /_/ /| |/ / /_/ / / / /   ")}
-    ${colors.primary("\\____/\\__,_/_/   \\__,_/ |___/\\__,_/_/ /_/    ")}
+    try {
+      // Create a gradient using Bitcoin orange to blue
+      const logoGradient = gradient(["#F7931A", "#F7931A", "#00ACED"]);
 
-    ${colors.accent("========== R E G T E S T   M O D E ==========")}
-    `;
+      // Generate the figlet text
+      const figletText = figlet.textSync("Caravan", {
+        font: "Big",
+        horizontalLayout: "default",
+        verticalLayout: "default",
+        width: 80,
+        whitespaceBreak: true,
+      });
 
-    console.log(caravanLogo);
-    console.log(
-      colors.muted("A terminal-based utility for Caravan in regtest mode\n"),
-    );
+      // Apply the gradient to the figlet text
+      const gradientText = logoGradient(figletText);
+
+      // Output the gradient text
+      console.log(gradientText);
+
+      // Add the subtitle with accent color
+      console.log(
+        colors.accent("========== R E G T E S T   M O D E =========="),
+      );
+      console.log(
+        colors.muted("A terminal-based utility for Caravan in regtest mode\n"),
+      );
+    } catch (error) {
+      // If figlet fails, fall back to the original ASCII art
+      console.log(this.originalCaravanLogo);
+    }
   }
+
+  // Add this as a backup
+  private originalCaravanLogo = `
+       ${colors.primary("   ______                                    ")}
+       ${colors.primary("  / ____/___ __________ __   _____ ____     ")}
+       ${colors.primary(" / /   / __ \`/ ___/ __ \`/ | / / _ \\/ __ \\   ")}
+       ${colors.primary("/ /___/ /_/ / /  / /_/ /| |/ / /_/ / / / /   ")}
+       ${colors.primary("\\____/\\__,_/_/   \\__,_/ |___/\\__,_/_/ /_/    ")}
+
+       ${colors.accent("========== R E G T E S T   M O D E ==========")}
+   `;
 
   /**
    * Execute an async task with a loading spinner
