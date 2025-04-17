@@ -5,7 +5,7 @@ import {
   MempoolInfo,
   NetworkInfo,
   ChainInfo,
-} from "./types";
+} from "../types/types";
 
 /**
  * Service for fetching blockchain data for visualization
