@@ -127,6 +127,53 @@ export class MainMenu {
   }
 
   /**
+   * Centralized error handling method
+   * Displays error to user and provides option to return to main menu
+   */
+  private async handleError(error: any, context: string): Promise<void> {
+    console.clear();
+    console.log(this.getErrorBox(error, context));
+    await input({ message: "Press Enter to return to main menu..." });
+  }
+
+  /**
+   * Create a formatted error box
+   */
+  private getErrorBox(error: any, context: string): string {
+    const errorMessage = error.message || String(error);
+    const lines = [
+      colors.error(`⚠️ Error in ${context}`),
+      "",
+      colors.error(errorMessage),
+      "",
+      colors.muted("Check your inputs and Bitcoin Core connection"),
+      colors.muted("Press Enter to return to the main menu"),
+    ];
+
+    // Calculate box width based on the longest line
+    const width = Math.max(...lines.map((line) => line.length)) + 4;
+
+    // Create the box
+    let box = "\n" + "╔" + "═".repeat(width) + "╗\n";
+
+    // Add each line to the box
+    lines.forEach((line) => {
+      const padding = " ".repeat(Math.floor((width - line.length) / 2));
+      box +=
+        "║" +
+        padding +
+        line +
+        " ".repeat(width - line.length - padding.length) +
+        "║\n";
+    });
+
+    // Close the box
+    box += "╚" + "═".repeat(width) + "╝\n";
+
+    return box;
+  }
+
+  /**
    * Display the Caravan logo
    */
   private displayLogo(): void {
@@ -179,6 +226,7 @@ export class MainMenu {
   private async withSpinner<T>(
     message: string,
     task: () => Promise<T>,
+    context: string = "operation",
   ): Promise<T> {
     const spinner = ora({
       text: message,
@@ -191,6 +239,7 @@ export class MainMenu {
       return result;
     } catch (error) {
       spinner.fail(colors.error(message + " - Failed"));
+      await this.handleError(error, context);
       throw error;
     }
   }
@@ -280,8 +329,7 @@ export class MainMenu {
         // Show submenu for selected category
         await this.showSubMenu(category);
       } catch (error) {
-        console.error(colors.error("Error:"), error);
-        await input({ message: "Press Enter to continue..." });
+        await this.handleError(error, "main menu");
       }
     }
   }
@@ -290,29 +338,33 @@ export class MainMenu {
    * Show submenu for a selected category
    */
   private async showSubMenu(category: string): Promise<void> {
-    //@ts-ignore
-    const subMenu = this.subMenus[category];
+    try {
+      //@ts-ignore
+      const subMenu = this.subMenus[category];
 
-    if (!subMenu) return;
+      if (!subMenu) return;
 
-    console.clear();
-    this.displayLogo();
-    console.log(
-      colors.header(`\n=== ${this.getCategoryTitle(category)} ===\n`),
-    );
+      console.clear();
+      this.displayLogo();
+      console.log(
+        colors.header(`\n=== ${this.getCategoryTitle(category)} ===\n`),
+      );
 
-    const action = await select({
-      message: "Select an action:",
-      pageSize: 10,
-      choices: subMenu,
-    });
+      const action = await select({
+        message: "Select an action:",
+        pageSize: 10,
+        choices: subMenu,
+      });
 
-    if (action === "back") return;
-    //@ts-ignore
-    await this.processAction(action);
+      if (action === "back") return;
+      //@ts-ignore
+      await this.processAction(action, category);
 
-    // Wait for user to press Enter before showing the menu again
-    await input({ message: "Press Enter to continue..." });
+      // Wait for user to press Enter before showing the menu again
+      await input({ message: "Press Enter to continue..." });
+    } catch (error) {
+      await this.handleError(error, this.getCategoryTitle(category));
+    }
   }
 
   /**
@@ -336,7 +388,7 @@ export class MainMenu {
   /**
    * Process the selected menu action
    */
-  private async processAction(action: string): Promise<void> {
+  private async processAction(action: string, category: string): Promise<void> {
     try {
       switch (action) {
         // Bitcoin Wallets
@@ -421,7 +473,10 @@ export class MainMenu {
           );
       }
     } catch (error) {
-      console.error(colors.error("\nError executing command:"), error);
+      await this.handleError(
+        error,
+        `${this.getCategoryTitle(category)} > ${action}`,
+      );
     }
   }
 
@@ -523,7 +578,7 @@ export class MainMenu {
           ),
         );
       } catch (error) {
-        console.error(colors.error("\nError mining blocks:"), error);
+        await this.handleError(error, "mining menu");
       }
     }
   }
@@ -532,59 +587,59 @@ export class MainMenu {
    * Export menu
    */
   private async exportMenu(): Promise<void> {
-    console.clear();
-    this.displayLogo();
-    console.log(colors.header("\n=== Export Options ===\n"));
+    try {
+      console.clear();
+      this.displayLogo();
+      console.log(colors.header("\n=== Export Options ===\n"));
 
-    const action = await select({
-      message: "Select export option:",
-      choices: [
-        {
-          name: colors.commandName("Export Caravan wallet configuration"),
-          value: "export-caravan",
-        },
-        { name: colors.commandName("Export key data"), value: "export-keys" },
-        { name: colors.muted("Back to main menu"), value: "back" },
-      ],
-    });
+      const action = await select({
+        message: "Select export option:",
+        choices: [
+          {
+            name: colors.commandName("Export Caravan wallet configuration"),
+            value: "export-caravan",
+          },
+          { name: colors.commandName("Export key data"), value: "export-keys" },
+          { name: colors.muted("Back to main menu"), value: "back" },
+        ],
+      });
 
-    if (action === "back") {
-      return;
-    }
-
-    if (action === "export-caravan") {
-      const wallets = await this.withSpinner(
-        "Loading Caravan wallets",
-        async () => {
-          return await this.app.multisigCommands.listCaravanWallets();
-        },
-      );
-
-      if (wallets.length === 0) {
-        console.log(colors.warning("\nNo Caravan wallets found."));
+      if (action === "back") {
         return;
       }
 
-      const walletIndex = await select({
-        message: "Select a Caravan wallet to export:",
-        choices: wallets.map((w, i) => ({ name: w.name, value: i })),
-      });
+      if (action === "export-caravan") {
+        const wallets = await this.withSpinner(
+          "Loading Caravan wallets",
+          async () => {
+            return await this.app.multisigCommands.listCaravanWallets();
+          },
+        );
 
-      const selectedWallet = wallets[walletIndex];
-      const filename = await input({
-        message: "Enter export file name:",
-        default: `${selectedWallet.name.replace(/\s+/g, "_")}_export.json`,
-      });
+        if (wallets.length === 0) {
+          console.log(colors.warning("\nNo Caravan wallets found."));
+          return;
+        }
 
-      try {
+        const walletIndex = await select({
+          message: "Select a Caravan wallet to export:",
+          choices: wallets.map((w, i) => ({ name: w.name, value: i })),
+        });
+
+        const selectedWallet = wallets[walletIndex];
+        const filename = await input({
+          message: "Enter export file name:",
+          default: `${selectedWallet.name.replace(/\s+/g, "_")}_export.json`,
+        });
+
         await this.withSpinner(`Exporting wallet to ${filename}`, async () => {
           await fs.writeJson(filename, selectedWallet, { spaces: 2 });
           return true;
         });
         console.log(colors.success(`\nCaravan wallet exported to ${filename}`));
-      } catch (error) {
-        console.error(colors.error("\nError exporting wallet:"), error);
       }
+    } catch (error) {
+      await this.handleError(error, "export menu");
     }
   }
 
@@ -592,34 +647,34 @@ export class MainMenu {
    * Import menu
    */
   private async importMenu(): Promise<void> {
-    console.clear();
-    this.displayLogo();
-    console.log(colors.header("\n=== Import Options ===\n"));
+    try {
+      console.clear();
+      this.displayLogo();
+      console.log(colors.header("\n=== Import Options ===\n"));
 
-    const action = await select({
-      message: "Select import option:",
-      choices: [
-        {
-          name: colors.commandName("Import Caravan wallet configuration"),
-          value: "import-caravan",
-        },
-        { name: colors.commandName("Import key data"), value: "import-keys" },
-        { name: colors.muted("Back to main menu"), value: "back" },
-      ],
-    });
-
-    if (action === "back") {
-      return;
-    }
-
-    if (action === "import-caravan") {
-      const filename = await input({
-        message: "Enter path to Caravan wallet JSON file:",
-        validate: (input) =>
-          fs.existsSync(input) ? true : "File does not exist",
+      const action = await select({
+        message: "Select import option:",
+        choices: [
+          {
+            name: colors.commandName("Import Caravan wallet configuration"),
+            value: "import-caravan",
+          },
+          { name: colors.commandName("Import key data"), value: "import-keys" },
+          { name: colors.muted("Back to main menu"), value: "back" },
+        ],
       });
 
-      try {
+      if (action === "back") {
+        return;
+      }
+
+      if (action === "import-caravan") {
+        const filename = await input({
+          message: "Enter path to Caravan wallet JSON file:",
+          validate: (input) =>
+            fs.existsSync(input) ? true : "File does not exist",
+        });
+
         const config = await this.withSpinner(
           "Reading wallet configuration",
           async () => {
@@ -660,17 +715,13 @@ export class MainMenu {
         if (createWatch) {
           await this.app.multisigCommands.createWatchWallet(config);
         }
-      } catch (error) {
-        console.error(colors.error("\nError importing Caravan wallet:"), error);
-      }
-    } else if (action === "import-keys") {
-      const filename = await input({
-        message: "Enter path to key data JSON file:",
-        validate: (input) =>
-          fs.existsSync(input) ? true : "File does not exist",
-      });
+      } else if (action === "import-keys") {
+        const filename = await input({
+          message: "Enter path to key data JSON file:",
+          validate: (input) =>
+            fs.existsSync(input) ? true : "File does not exist",
+        });
 
-      try {
         const keyData = await this.withSpinner("Reading key data", async () => {
           return await fs.readJson(filename);
         });
@@ -702,9 +753,9 @@ export class MainMenu {
           console.log(colors.warning("Import the wallet configuration first."));
           return;
         }
-      } catch (error) {
-        console.error(colors.error("\nError importing key data:"), error);
       }
+    } catch (error) {
+      await this.handleError(error, "import menu");
     }
   }
 
@@ -712,70 +763,78 @@ export class MainMenu {
    * Settings menu
    */
   private async settingsMenu(): Promise<void> {
-    console.clear();
-    this.displayLogo();
-    console.log(colors.header("\n=== Settings ===\n"));
+    try {
+      console.clear();
+      this.displayLogo();
+      console.log(colors.header("\n=== Settings ===\n"));
 
-    const action = await select({
-      message: "Settings options:",
-      choices: [
-        {
-          name: colors.commandName("Update Bitcoin Core connection settings"),
-          value: "update-bitcoin",
-        },
-        {
-          name: colors.commandName("Change application directories"),
-          value: "update-dirs",
-        },
-        {
-          name: colors.commandName("View current configuration"),
-          value: "view-config",
-        },
-        { name: colors.muted("Back to main menu"), value: "back" },
-      ],
-    });
+      const action = await select({
+        message: "Settings options:",
+        choices: [
+          {
+            name: colors.commandName("Update Bitcoin Core connection settings"),
+            value: "update-bitcoin",
+          },
+          {
+            name: colors.commandName("Change application directories"),
+            value: "update-dirs",
+          },
+          {
+            name: colors.commandName("View current configuration"),
+            value: "view-config",
+          },
+          { name: colors.muted("Back to main menu"), value: "back" },
+        ],
+      });
 
-    if (action === "back") return;
+      if (action === "back") return;
 
-    if (action === "update-bitcoin") {
-      await this.app.setupBitcoinConfig();
-    } else if (action === "update-dirs") {
-      await this.updateAppDirectories();
-    } else if (action === "view-config") {
-      this.displayCurrentConfig();
+      if (action === "update-bitcoin") {
+        await this.app.setupBitcoinConfig();
+      } else if (action === "update-dirs") {
+        await this.updateAppDirectories();
+      } else if (action === "view-config") {
+        this.displayCurrentConfig();
+      }
+    } catch (error) {
+      await this.handleError(error, "settings menu");
     }
   }
 
   private async updateAppDirectories(): Promise<void> {
-    const config = this.app.configManager.getConfig();
+    try {
+      const config = this.app.configManager.getConfig();
 
-    console.log(colors.header("\n=== Update Application Directories ===\n"));
+      console.log(colors.header("\n=== Update Application Directories ===\n"));
 
-    const appDir = await input({
-      message: "Enter application directory:",
-      default: config.appDir,
-    });
-
-    const caravanDir = await input({
-      message: "Enter Caravan wallets directory:",
-      default: config.caravanDir,
-    });
-
-    const keysDir = await input({
-      message: "Enter keys directory:",
-      default: config.keysDir,
-    });
-
-    await this.withSpinner("Updating directories", async () => {
-      await this.app.configManager.updateDirectories({
-        appDir,
-        caravanDir,
-        keysDir,
+      const appDir = await input({
+        message: "Enter application directory:",
+        default: config.appDir,
       });
-      return true;
-    });
 
-    console.log(colors.success("\nDirectories updated successfully!"));
+      const caravanDir = await input({
+        message: "Enter Caravan wallets directory:",
+        default: config.caravanDir,
+      });
+
+      const keysDir = await input({
+        message: "Enter keys directory:",
+        default: config.keysDir,
+      });
+
+      await this.withSpinner("Updating directories", async () => {
+        await this.app.configManager.updateDirectories({
+          appDir,
+          caravanDir,
+          keysDir,
+        });
+        return true;
+      });
+
+      console.log(colors.success("\nDirectories updated successfully!"));
+    } catch (error) {
+      await this.handleError(error, "directory update");
+    }
   }
 
   private displayCurrentConfig(): void {
@@ -802,63 +861,80 @@ export class MainMenu {
    * Show help information
    */
   private async showHelp(): Promise<void> {
-    console.clear();
-    this.displayLogo();
-    console.log(colors.header("\n=== Caravan Regtest Manager Help ===\n"));
+    try {
+      console.clear();
+      this.displayLogo();
+      console.log(colors.header("\n=== Caravan Regtest Manager Help ===\n"));
 
-    console.log(colors.header("\n🏦 Bitcoin Wallets:"));
-    console.log(
-      colors.info("- Manage regular Bitcoin wallets in regtest mode"),
-    );
-    console.log(colors.info("- Create wallets, check balances, send funds"));
-    console.log(colors.info("- Fund wallets by mining new blocks"));
+      console.log(colors.header("\n🏦 Bitcoin Wallets:"));
+      console.log(
+        colors.info("- Manage regular Bitcoin wallets in regtest mode"),
+      );
+      console.log(colors.info("- Create wallets, check balances, send funds"));
+      console.log(colors.info("- Fund wallets by mining new blocks"));
 
-    console.log(colors.header("\n🔐 Caravan Multisig:"));
-    console.log(
-      colors.info("- Create and manage Caravan multisig wallet configurations"),
-    );
-    console.log(
-      colors.info("- Set up watch-only wallets for multisig addresses"),
-    );
-    console.log(colors.info("- Configure private keys for signing"));
+      console.log(colors.header("\n🔐 Caravan Multisig:"));
+      console.log(
+        colors.info(
+          "- Create and manage Caravan multisig wallet configurations",
+        ),
+      );
+      console.log(
+        colors.info("- Set up watch-only wallets for multisig addresses"),
+      );
+      console.log(colors.info("- Configure private keys for signing"));
 
-    console.log(colors.header("\n💸 Transactions:"));
-    console.log(colors.info("- Create, sign, and broadcast transactions"));
-    console.log(
-      colors.info("- Work with PSBTs (Partially Signed Bitcoin Transactions)"),
-    );
-    console.log(colors.info("- Sign with wallets or individual private keys"));
+      console.log(colors.header("\n💸 Transactions:"));
+      console.log(colors.info("- Create, sign, and broadcast transactions"));
+      console.log(
+        colors.info(
+          "- Work with PSBTs (Partially Signed Bitcoin Transactions)",
+        ),
+      );
+      console.log(
+        colors.info("- Sign with wallets or individual private keys"),
+      );
 
-    console.log(colors.header("\n⚠️ Important Notes:"));
-    console.log(
-      colors.warning(
-        "1. This tool is designed for regtest mode only (not for mainnet)",
-      ),
-    );
-    console.log(
-      colors.warning("2. Bitcoin Core must be running in regtest mode"),
-    );
-    console.log(colors.warning("3. Private keys should be kept secure"));
-    console.log(
-      colors.warning("4. Use Caravan for real multisig wallet management"),
-    );
+      console.log(colors.header("\n⚠️ Important Notes:"));
+      console.log(
+        colors.warning(
+          "1. This tool is designed for regtest mode only (not for mainnet)",
+        ),
+      );
+      console.log(
+        colors.warning("2. Bitcoin Core must be running in regtest mode"),
+      );
+      console.log(colors.warning("3. Private keys should be kept secure"));
+      console.log(
+        colors.warning("4. Use Caravan for real multisig wallet management"),
+      );
 
-    console.log(colors.header("\n📚 Useful Resources:"));
-    console.log(
-      colors.info("- Caravan: https://github.com/caravan-bitcoin/caravan"),
-    );
-    console.log(
-      colors.info("- Bitcoin Core: https://bitcoin.org/en/bitcoin-core/"),
-    );
-    console.log(
-      colors.info("- Bitcoin Development: https://bitcoin.org/en/development"),
-    );
+      console.log(colors.header("\n📚 Useful Resources:"));
+      console.log(
+        colors.info("- Caravan: https://github.com/caravan-bitcoin/caravan"),
+      );
+      console.log(
+        colors.info("- Bitcoin Core: https://bitcoin.org/en/bitcoin-core/"),
+      );
+      console.log(
+        colors.info(
+          "- Bitcoin Development: https://bitcoin.org/en/development",
+        ),
+      );
+    } catch (error) {
+      await this.handleError(error, "help menu");
+    }
   }
 
   /**
    * Start the main menu interface
    */
   async start(): Promise<void> {
-    await this.showMainMenu();
+    try {
+      await this.showMainMenu();
+    } catch (error) {
+      await this.handleError(error, "application startup");
+      process.exit(1);
+    }
   }
 }
