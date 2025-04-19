@@ -67,7 +67,8 @@
     "ora": "^8.2.0",
     "string-width": "^7.2.0",
     "terminal-link": "^4.0.0",
-    "tiny-secp256k1": "^2.2.3"
+    "tiny-secp256k1": "^2.2.3",
+    "vm2": "^3.9.19"
   },
   "devDependencies": {
     "@types/figlet": "^1.7.0",
