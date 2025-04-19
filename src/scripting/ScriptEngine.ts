@@ -58,4 +58,37 @@ export class ScriptEngine extends EventEmitter {
     );
     fs.ensureDirSync(this.templatesDir);
   }
+
+  /**
+   * Get the template directory path
+   */
+  getTemplatesDir(): string {
+    return this.templatesDir;
+  }
+
+  /**
+   * Load a script from file
+   */
+  async loadScript(filePath: string): Promise<string | DeclarativeScript> {
+    try {
+      // Check if file exists
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`Script file not found: ${filePath}`);
+      }
+
+      // Read the file
+      const fileContent = await fs.readFile(filePath, "utf8");
+
+      // Determine the script type based on file extension
+      if (filePath.endsWith(".json")) {
+        // Parse as JSON
+        return JSON.parse(fileContent) as DeclarativeScript;
+      } else {
+        // Return as JavaScript
+        return fileContent;
+      }
+    } catch (error: any) {
+      throw new Error(`Failed to load script: ${error.message}`);
+    }
+  }
 }
