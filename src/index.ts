@@ -9,7 +9,6 @@ import { TransactionCommands } from "./commands/transaction";
 import { VisualizationCommands } from "./commands/visualizations";
 import { ScriptCommands } from "./commands/scripts";
 import { MainMenu } from "./ui/mainMenu";
-import { addScriptCommandsToCLI } from "./scripting/cli-integration";
 
 import { confirm, input, number } from "@inquirer/prompts";
 import chalk from "chalk";
