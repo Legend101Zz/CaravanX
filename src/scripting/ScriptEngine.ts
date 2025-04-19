@@ -8,6 +8,7 @@ import { CaravanService } from "../core/caravan";
 import { TransactionService } from "../core/transaction";
 import { ConfigManager } from "../core/config";
 import { BitcoinRpcClient } from "../core/rpc";
+import { MultisigCommands } from "../commands/multisig";
 import {
   formatBitcoin,
   truncate,
@@ -35,6 +36,7 @@ export class ScriptEngine extends EventEmitter {
   private readonly transactionService: TransactionService;
   private readonly configManager: ConfigManager;
   private readonly rpcClient: BitcoinRpcClient;
+  private readonly multisigCommands: MultisigCommands;
   private templatesDir: string;
 
   constructor(
@@ -43,6 +45,7 @@ export class ScriptEngine extends EventEmitter {
     transactionService: TransactionService,
     configManager: ConfigManager,
     rpcClient: BitcoinRpcClient,
+    multisigCommands: MultisigCommands,
   ) {
     super();
     this.bitcoinService = bitcoinService;
@@ -50,6 +53,7 @@ export class ScriptEngine extends EventEmitter {
     this.transactionService = transactionService;
     this.configManager = configManager;
     this.rpcClient = rpcClient;
+    this.multisigCommands = multisigCommands;
 
     // Set up templates directory
     this.templatesDir = path.join(
@@ -840,6 +844,7 @@ export class ScriptEngine extends EventEmitter {
         transactionService: this.transactionService,
         configManager: this.configManager,
         rpcClient: this.rpcClient,
+        multisigCommands: this.multisigCommands,
         variables: { ...(options.params || {}) },
         wallets: {},
         transactions: {},
@@ -924,6 +929,7 @@ export class ScriptEngine extends EventEmitter {
           transactionService: context.transactionService,
           configManager: context.configManager,
           rpcClient: context.rpcClient,
+          multisigCommands: context.multisigCommands,
           variables: context.variables,
           wallets: context.wallets,
           transactions: context.transactions,
@@ -973,7 +979,7 @@ export class ScriptEngine extends EventEmitter {
 
       // Execute the script
       await vm.run(script);
-    } catch (error) {
+    } catch (error: any) {
       throw new Error(`Script execution failed: ${error.message}`);
     }
   }
@@ -1064,7 +1070,7 @@ export class ScriptEngine extends EventEmitter {
               context.log(JSON.stringify(actionResult.result, null, 2));
             }
           }
-        } catch (error) {
+        } catch (error: any) {
           actionResult.status = "failed";
           actionResult.error = error;
 
@@ -1082,8 +1088,565 @@ export class ScriptEngine extends EventEmitter {
         // Add the step to the result
         result.steps.push(actionResult);
       }
-    } catch (error) {
+    } catch (error: any) {
       throw new Error(`Script execution failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Execute a single action
+   */
+  private async executeAction(
+    type: ActionType,
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    switch (type) {
+      case ActionType.CREATE_WALLET:
+        return this.executeCreateWallet(params, context);
+
+      case ActionType.MINE_BLOCKS:
+        return this.executeMineBlocks(params, context);
+
+      case ActionType.CREATE_TRANSACTION:
+        return this.executeCreateTransaction(params, context);
+
+      case ActionType.REPLACE_TRANSACTION:
+        return this.executeReplaceTransaction(params, context);
+
+      case ActionType.SIGN_TRANSACTION:
+        return this.executeSignTransaction(params, context);
+
+      case ActionType.BROADCAST_TRANSACTION:
+        return this.executeBroadcastTransaction(params, context);
+
+      case ActionType.CREATE_MULTISIG:
+        return this.executeCreateMultisig(params, context);
+
+      case ActionType.WAIT:
+        return this.executeWait(params);
+
+      case ActionType.ASSERT:
+        return this.executeAssert(params, context);
+
+      case ActionType.CUSTOM:
+        return this.executeCustom(params, context);
+
+      default:
+        throw new Error(`Unknown action type: ${type}`);
+    }
+  }
+
+  /**
+   * Execute CUSTOM action
+   */
+  private async executeCustom(
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    try {
+      const { code } = params;
+
+      if (!code || typeof code !== "string") {
+        throw new Error("CUSTOM action requires a code parameter as a string");
+      }
+
+      // Use Function constructor to create a function that can access the context
+      const executeFunction = new Function(
+        "context",
+        `
+        return (async () => {
+          try {
+            ${code}
+          } catch (error) {
+            console.error("Error in custom code:", error.message);
+            throw error;
+          }
+        })();
+      `,
+      );
+
+      // Execute the function with the context
+      const result = await executeFunction(context);
+
+      // Set variable if name is provided
+      if (params.variableName && result !== undefined) {
+        context.variables[params.variableName] = result;
+      }
+
+      return result;
+    } catch (error: any) {
+      context.log(`Error executing custom code: ${error.message}`);
+      throw new Error(`Custom code execution failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Process variable references in parameters
+   */
+  private processVariableReferences(
+    params: any,
+    variables: Record<string, any>,
+  ): any {
+    if (typeof params === "string") {
+      // Replace variable references in strings
+      return params.replace(/\${([^}]+)}/g, (match, varName) => {
+        return variables[varName] !== undefined ? variables[varName] : match;
+      });
+    } else if (Array.isArray(params)) {
+      // Process array elements
+      return params.map((item) =>
+        this.processVariableReferences(item, variables),
+      );
+    } else if (params !== null && typeof params === "object") {
+      // Process object properties
+      const result: Record<string, any> = {};
+      for (const key in params) {
+        result[key] = this.processVariableReferences(params[key], variables);
+      }
+      return result;
+    }
+
+    // Return primitive values as is
+    return params;
+  }
+
+  /**
+   * Execute CREATE_WALLET action
+   */
+  private async executeCreateWallet(
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    const { name, options = {} } = params;
+
+    // Create the wallet
+    const result = await context.bitcoinService.createWallet(name, options);
+
+    // Store wallet info in context
+    context.wallets[name] = { name, created: new Date() };
+
+    // Set variable if name is provided
+    if (params.variableName) {
+      context.variables[params.variableName] = name;
+    }
+
+    return result;
+  }
+
+  /**
+   * Execute MINE_BLOCKS action
+   */
+  private async executeMineBlocks(
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    const { count, toWallet, toAddress } = params;
+
+    let address: string;
+
+    if (toAddress) {
+      // Use provided address
+      address = toAddress;
+    } else if (toWallet) {
+      // Generate address from wallet
+      address = await context.bitcoinService.getNewAddress(toWallet);
+    } else {
+      throw new Error("Either toWallet or toAddress parameter is required");
+    }
+
+    // Mine blocks
+    const blockHashes = await context.bitcoinService.generateToAddress(
+      count,
+      address,
+    );
+
+    // Add block hashes to context
+    context.blocks.push(...blockHashes);
+
+    // Set variable if name is provided
+    if (params.variableName) {
+      context.variables[params.variableName] = blockHashes;
+    }
+
+    return { blockHashes, count, address };
+  }
+
+  /**
+   * Execute CREATE_TRANSACTION action
+   */
+  private async executeCreateTransaction(
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    const { fromWallet, outputs, feeRate } = params;
+
+    // Create PSBT
+    const psbt = await context.transactionService.createPSBT(
+      fromWallet,
+      outputs,
+    );
+
+    // Generate a txid for reference
+    const txid = `pending_${Math.random().toString(36).substring(2, 15)}`;
+
+    // Store transaction info in context
+    context.transactions[txid] = {
+      psbt,
+      fromWallet,
+      outputs,
+      feeRate,
+      status: "created",
+      created: new Date(),
+    };
+
+    // Set variable if name is provided
+    if (params.variableName) {
+      context.variables[params.variableName] = { txid, psbt };
+    }
+
+    return { txid, psbt };
+  }
+
+  /**
+   * Execute REPLACE_TRANSACTION action (RBF)
+   */
+  private async executeReplaceTransaction(
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    const { txid, newOutputs, newFeeRate } = params;
+
+    // Get the original transaction
+    const tx = context.transactions[txid];
+    if (!tx) {
+      throw new Error(`Transaction not found: ${txid}`);
+    }
+
+    // Create a new PSBT with increased fee rate
+    const newPsbt = await context.transactionService.createPSBT(
+      tx.fromWallet,
+      newOutputs || tx.outputs,
+      { rbf: true, feeRate: newFeeRate },
+    );
+
+    // Generate a new txid for reference
+    const newTxid = `pending_${Math.random().toString(36).substring(2, 15)}`;
+
+    // Store new transaction info in context
+    context.transactions[newTxid] = {
+      psbt: newPsbt,
+      fromWallet: tx.fromWallet,
+      outputs: newOutputs || tx.outputs,
+      feeRate: newFeeRate,
+      replacesTransaction: txid,
+      status: "created",
+      created: new Date(),
+    };
+
+    // Update original transaction status
+    context.transactions[txid].status = "replaced";
+    context.transactions[txid].replacedBy = newTxid;
+
+    // Set variable if name is provided
+    if (params.variableName) {
+      context.variables[params.variableName] = { txid: newTxid, psbt: newPsbt };
+    }
+
+    return { txid: newTxid, psbt: newPsbt, replacedTxid: txid };
+  }
+
+  /**
+   * Execute SIGN_TRANSACTION action
+   */
+  private async executeSignTransaction(
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    const { txid, wallet, privateKey } = params;
+
+    // Get the transaction
+    const tx = context.transactions[txid];
+    if (!tx) {
+      throw new Error(`Transaction not found: ${txid}`);
+    }
+
+    let signedPsbt: string;
+
+    if (wallet) {
+      // Sign with wallet
+      signedPsbt = await context.transactionService.processPSBT(
+        wallet,
+        tx.psbt,
+      );
+    } else if (privateKey) {
+      // Sign with private key
+      signedPsbt = await context.transactionService.signPSBTWithPrivateKey(
+        tx.psbt,
+        privateKey,
+      );
+    } else {
+      throw new Error("Either wallet or privateKey parameter is required");
+    }
+
+    // Update transaction info in context
+    context.transactions[txid].psbt = signedPsbt;
+    context.transactions[txid].status = "signed";
+    context.transactions[txid].signedAt = new Date();
+
+    // Set variable if name is provided
+    if (params.variableName) {
+      context.variables[params.variableName] = signedPsbt;
+    }
+
+    return { txid, signedPsbt };
+  }
+
+  /**
+   * Execute BROADCAST_TRANSACTION action
+   */
+  private async executeBroadcastTransaction(
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    const { txid, psbt } = params;
+
+    let transactionPsbt: string;
+
+    if (psbt) {
+      // Use provided PSBT
+      transactionPsbt = psbt;
+    } else if (txid) {
+      // Get the transaction from context
+      const tx = context.transactions[txid];
+      if (!tx) {
+        throw new Error(`Transaction not found: ${txid}`);
+      }
+      transactionPsbt = tx.psbt;
+    } else {
+      throw new Error("Either txid or psbt parameter is required");
+    }
+
+    // Finalize the PSBT
+    const finalized =
+      await context.transactionService.finalizePSBT(transactionPsbt);
+
+    if (!finalized.complete) {
+      throw new Error("PSBT is not complete, cannot broadcast");
+    }
+
+    // Broadcast the transaction
+    const broadcastTxid = await context.transactionService.broadcastTransaction(
+      finalized.hex,
+    );
+
+    // Update transaction info in context if we have it
+    if (txid && context.transactions[txid]) {
+      context.transactions[txid].status = "broadcasted";
+      context.transactions[txid].broadcastedAt = new Date();
+      context.transactions[txid].broadcastTxid = broadcastTxid;
+    }
+
+    // Add the new transaction if we don't have it
+    if (!txid || !context.transactions[txid]) {
+      context.transactions[broadcastTxid] = {
+        psbt: transactionPsbt,
+        status: "broadcasted",
+        broadcastedAt: new Date(),
+        finalHex: finalized.hex,
+      };
+    }
+
+    // Set variable if name is provided
+    if (params.variableName) {
+      context.variables[params.variableName] = broadcastTxid;
+    }
+
+    return { broadcastTxid, hex: finalized.hex };
+  }
+
+  /**
+   * Execute CREATE_MULTISIG action
+   */
+  private async executeCreateMultisig(
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    // Create the multisig wallet
+    const wallet = await context.multisigCommands.createCaravanWallet();
+
+    // Set variable if name is provided
+    if (params.variableName) {
+      context.variables[params.variableName] = wallet;
+    }
+
+    return wallet;
+  }
+
+  /**
+   * Execute WAIT action
+   */
+  private async executeWait(params: any): Promise<any> {
+    const { seconds } = params;
+
+    if (typeof seconds !== "number" || seconds <= 0) {
+      throw new Error("WAIT action requires a positive seconds parameter");
+    }
+
+    // Wait for the specified number of seconds
+    await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+
+    return { seconds };
+  }
+
+  /**
+   * Execute ASSERT action
+   */
+  private async executeAssert(
+    params: any,
+    context: ScriptExecutionContext,
+  ): Promise<any> {
+    const { condition, message } = params;
+
+    let result: boolean;
+
+    if (typeof condition === "string") {
+      // Evaluate the condition in the context
+      try {
+        // Replace variable references
+        const processedCondition = this.processVariableReferences(
+          condition,
+          context.variables,
+        );
+        // Use Function constructor to evaluate the condition
+        result = new Function(
+          "context",
+          `with(context) { return ${processedCondition}; }`,
+        )(context);
+      } catch (error: any) {
+        throw new Error(
+          `Failed to evaluate assertion condition: ${error.message}`,
+        );
+      }
+    } else if (typeof condition === "boolean") {
+      result = condition;
+    } else {
+      throw new Error("Assertion condition must be a string or boolean");
+    }
+
+    if (!result) {
+      throw new Error(message || "Assertion failed");
+    }
+
+    return { result: true };
+  }
+
+  /**
+   * Get all available script templates
+   */
+  async getScriptTemplates(): Promise<
+    { name: string; path: string; description: string }[]
+  > {
+    try {
+      const files = await fs.readdir(this.templatesDir);
+      const templates = [];
+
+      for (const file of files) {
+        const filePath = path.join(this.templatesDir, file);
+        const stat = await fs.stat(filePath);
+
+        if (stat.isFile() && (file.endsWith(".js") || file.endsWith(".json"))) {
+          try {
+            const content = await fs.readFile(filePath, "utf8");
+            let description = "";
+
+            if (file.endsWith(".json")) {
+              // Extract description from JSON
+              const json = JSON.parse(content);
+              description = json.description || "";
+            } else {
+              // Extract first comment block as description
+              const match = content.match(/\/\*\*([\s\S]*?)\*\//);
+              if (match) {
+                description = match[1].replace(/\*/g, "").trim();
+              }
+            }
+
+            templates.push({
+              name: file,
+              path: filePath,
+              description,
+            });
+          } catch (error) {
+            console.error(`Error reading template ${file}:`, error);
+          }
+        }
+      }
+
+      return templates;
+    } catch (error) {
+      console.error("Error reading script templates:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Create a new script template
+   */
+  async createScriptTemplate(
+    name: string,
+    content: string,
+    type: ScriptType,
+  ): Promise<string> {
+    try {
+      // Generate filename based on name and type
+      const filename = `${name.replace(/\s+/g, "_").toLowerCase()}.${type === ScriptType.JAVASCRIPT ? "js" : "json"}`;
+      const filePath = path.join(this.templatesDir, filename);
+
+      // Check if file already exists
+      if (await fs.pathExists(filePath)) {
+        throw new Error(`Template already exists: ${filename}`);
+      }
+
+      // Write the template file
+      await fs.writeFile(filePath, content);
+
+      return filePath;
+    } catch (error: any) {
+      throw new Error(`Failed to create script template: ${error.message}`);
+    }
+  }
+
+  /**
+   * Save a script to a file
+   */
+  async saveScript(
+    name: string,
+    content: string | DeclarativeScript,
+    type: ScriptType,
+  ): Promise<string> {
+    try {
+      // Generate filename based on name and type
+      const filename = `${name.replace(/\s+/g, "_").toLowerCase()}.${type === ScriptType.JAVASCRIPT ? "js" : "json"}`;
+      const filePath = path.join(
+        this.configManager.getConfig().appDir,
+        "scripts",
+        filename,
+      );
+
+      // Ensure the scripts directory exists
+      await fs.ensureDir(path.dirname(filePath));
+
+      // Write the script file
+      if (typeof content === "string") {
+        await fs.writeFile(filePath, content);
+      } else {
+        await fs.writeJson(filePath, content, { spaces: 2 });
+      }
+
+      return filePath;
+    } catch (error: any) {
+      throw new Error(`Failed to save script: ${error.message}`);
     }
   }
 }

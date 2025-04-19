@@ -3,6 +3,7 @@ import { CaravanService } from "../core/caravan";
 import { TransactionService } from "../core/transaction";
 import { BitcoinRpcClient } from "../core/rpc";
 import { ConfigManager } from "../core/config";
+import { MultisigCommands } from "../commands/multisig";
 
 /**
  * Status of a script execution
@@ -78,6 +79,7 @@ export interface ScriptExecutionContext {
   transactionService: TransactionService;
   configManager: ConfigManager;
   rpcClient: BitcoinRpcClient;
+  multisigCommands: MultisigCommands;
   variables: Record<string, any>;
   wallets: Record<string, any>;
   transactions: Record<string, any>;
