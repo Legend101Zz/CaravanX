@@ -1,0 +1,150 @@
+{
+  "name": "Timelock Transaction Demo",
+  "description": "This script demonstrates absolute and relative timelocks in Bitcoin transactions, showing how funds can be locked until a specific block height or time.",
+  "version": "1.0.0",
+  "variables": {
+    "senderWallet": "timelock_sender",
+    "receiverWallet": "timelock_receiver",
+    "lockBlocks": 5,
+    "amount": 1.0
+  },
+  "actions": [
+    {
+      "type": "CREATE_WALLET",
+      "description": "Create a sender wallet",
+      "params": {
+        "name": "${senderWallet}",
+        "options": {
+          "disablePrivateKeys": false,
+          "descriptorWallet": true
+        },
+        "variableName": "sender"
+      }
+    },
+    {
+      "type": "CREATE_WALLET",
+      "description": "Create a receiver wallet",
+      "params": {
+        "name": "${receiverWallet}",
+        "options": {
+          "disablePrivateKeys": false,
+          "descriptorWallet": true
+        },
+        "variableName": "receiver"
+      }
+    },
+    {
+      "type": "MINE_BLOCKS",
+      "description": "Mine blocks to fund sender wallet",
+      "params": {
+        "toWallet": "${senderWallet}",
+        "count": 5,
+        "variableName": "fundingBlocks"
+      }
+    },
+    {
+      "type": "CUSTOM",
+      "description": "Get current block height",
+      "params": {
+        "code": "const info = await context.rpcClient.callRpc('getblockchaininfo'); context.variables.currentHeight = info.blocks;",
+        "variableName": "currentHeight"
+      }
+    },
+    {
+      "type": "CUSTOM",
+      "description": "Calculate lock height",
+      "params": {
+        "code": "context.variables.lockHeight = context.variables.currentHeight + context.variables.lockBlocks;",
+        "variableName": "lockHeight"
+      }
+    },
+    {
+      "type": "CUSTOM",
+      "description": "Create an absolute timelock transaction (nLockTime)",
+      "params": {
+        "code": "const receiverAddress = await context.bitcoinService.getNewAddress(context.variables.receiverWallet); const txResult = await context.rpcClient.callRpc('createrawtransaction', [[], { [receiverAddress]: context.variables.amount }]); const fundResult = await context.rpcClient.callRpc('fundrawtransaction', [txResult, { locktime: context.variables.lockHeight }], context.variables.senderWallet); const signResult = await context.rpcClient.callRpc('signrawtransactionwithwallet', [fundResult.hex], context.variables.senderWallet); context.variables.timelockTx = signResult.hex; context.variables.receiverAddress = receiverAddress; return { hex: signResult.hex, lockHeight: context.variables.lockHeight, receiverAddress };",
+        "variableName": "timelockTxResult"
+      }
+    },
+    {
+      "type": "CUSTOM",
+      "description": "Broadcast timelock transaction",
+      "params": {
+        "code": "try { const txid = await context.rpcClient.callRpc('sendrawtransaction', [context.variables.timelockTx]); context.transactions[txid] = { hex: context.variables.timelockTx, status: 'broadcasted', lockHeight: context.variables.lockHeight }; return txid; } catch (error) { console.log('Cannot broadcast timelock transaction yet: ' + error.message); return null; }",
+        "variableName": "timelockTxid"
+      }
+    },
+    {
+      "type": "WAIT",
+      "description": "Wait briefly",
+      "params": {
+        "seconds": 1
+      }
+    },
+    {
+      "type": "CUSTOM",
+      "description": "Attempt to verify transaction is in mempool (should fail due to timelock)",
+      "params": {
+        "code": "try { if (!context.variables.timelockTxid) throw new Error('Transaction was not broadcast'); const mempoolTxs = await context.rpcClient.callRpc('getrawmempool'); return mempoolTxs.includes(context.variables.timelockTxid); } catch (error) { console.log('Transaction not in mempool as expected: ' + error.message); return false; }",
+        "variableName": "inMempool"
+      }
+    },
+    {
+      "type": "ASSERT",
+      "description": "Verify transaction is not in mempool due to timelock",
+      "params": {
+        "condition": "!context.variables.inMempool",
+        "message": "Transaction should not be in mempool due to timelock"
+      }
+    },
+    {
+      "type": "MINE_BLOCKS",
+      "description": "Mine blocks until timelock expires",
+      "params": {
+        "toWallet": "${senderWallet}",
+        "count": "${lockBlocks + 1}",
+        "variableName": "maturingBlocks"
+      }
+    },
+    {
+      "type": "CUSTOM",
+      "description": "Broadcast timelock transaction now that locktime is reached",
+      "params": {
+        "code": "try { const txid = await context.rpcClient.callRpc('sendrawtransaction', [context.variables.timelockTx]); context.transactions[txid] = { hex: context.variables.timelockTx, status: 'broadcasted', lockHeight: context.variables.lockHeight }; return txid; } catch (error) { console.log('Error broadcasting: ' + error.message); return null; }",
+        "variableName": "finalTxid"
+      }
+    },
+    {
+      "type": "WAIT",
+      "description": "Wait briefly for transaction to propagate",
+      "params": {
+        "seconds": 1
+      }
+    },
+    {
+      "type": "MINE_BLOCKS",
+      "description": "Mine a block to confirm the transaction",
+      "params": {
+        "toWallet": "${receiverWallet}",
+        "count": 1,
+        "variableName": "confirmationBlock"
+      }
+    },
+    {
+      "type": "CUSTOM",
+      "description": "Verify receiver wallet received the funds",
+      "params": {
+        "code": "const walletInfo = await context.bitcoinService.getWalletInfo(context.variables.receiverWallet); return walletInfo.balance > 0;",
+        "variableName": "receiverHasFunds"
+      }
+    },
+    {
+      "type": "ASSERT",
+      "description": "Confirm receiver got the funds after timelock expired",
+      "params": {
+        "condition": "context.variables.receiverHasFunds",
+        "message": "Receiver wallet should have received funds after timelock expired"
+      }
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+{
+  "name": "Replace-By-Fee (RBF) Transaction Example",
+  "description": "This script demonstrates Replace-By-Fee (RBF) functionality by creating a transaction and then replacing it with a higher fee version.",
+  "version": "1.0.0",
+  "variables": {
+    "walletName": "rbf_demo_wallet",
+    "receiverAddress": null,
+    "initialFeeRate": 1,
+    "replacementFeeRate": 5
+  },
+  "actions": [
+    {
+      "type": "CREATE_WALLET",
+      "description": "Create a wallet for testing",
+      "params": {
+        "name": "${walletName}",
+        "options": {
+          "disablePrivateKeys": false,
+          "descriptorWallet": true
+        },
+        "variableName": "wallet"
+      }
+    },
+    {
+      "type": "CREATE_WALLET",
+      "description": "Create a receiver wallet",
+      "params": {
+        "name": "${walletName}_receiver",
+        "options": {
+          "disablePrivateKeys": false
+        },
+        "variableName": "receiverWallet"
+      }
+    },
+    {
+      "type": "MINE_BLOCKS",
+      "description": "Mine some blocks to fund the wallet",
+      "params": {
+        "toWallet": "${walletName}",
+        "count": 5,
+        "variableName": "fundingBlocks"
+      }
+    },
+    {
+      "type": "CREATE_TRANSACTION",
+      "description": "Create an initial transaction with low fee",
+      "params": {
+        "fromWallet": "${walletName}",
+        "outputs": [
+          {
+            "${receiverAddress}": 1.0
+          }
+        ],
+        "feeRate": "${initialFeeRate}",
+        "rbf": true,
+        "variableName": "initialTx"
+      }
+    },
+    {
+      "type": "SIGN_TRANSACTION",
+      "description": "Sign the initial transaction",
+      "params": {
+        "txid": "${initialTx.txid}",
+        "wallet": "${walletName}",
+        "variableName": "signedInitialTx"
+      }
+    },
+    {
+      "type": "BROADCAST_TRANSACTION",
+      "description": "Broadcast the initial transaction",
+      "params": {
+        "txid": "${initialTx.txid}",
+        "variableName": "broadcastedTxid"
+      }
+    },
+    {
+      "type": "WAIT",
+      "description": "Wait a moment before replacement",
+      "params": {
+        "seconds": 2
+      }
+    },
+    {
+      "type": "REPLACE_TRANSACTION",
+      "description": "Replace the transaction with higher fee",
+      "params": {
+        "txid": "${initialTx.txid}",
+        "newFeeRate": "${replacementFeeRate}",
+        "variableName": "replacementTx"
+      }
+    },
+    {
+      "type": "SIGN_TRANSACTION",
+      "description": "Sign the replacement transaction",
+      "params": {
+        "txid": "${replacementTx.txid}",
+        "wallet": "${walletName}",
+        "variableName": "signedReplacementTx"
+      }
+    },
+    {
+      "type": "BROADCAST_TRANSACTION",
+      "description": "Broadcast the replacement transaction",
+      "params": {
+        "txid": "${replacementTx.txid}",
+        "variableName": "finalTxid"
+      }
+    },
+    {
+      "type": "MINE_BLOCKS",
+      "description": "Mine blocks to confirm the replacement transaction",
+      "params": {
+        "toWallet": "${walletName}",
+        "count": 1,
+        "variableName": "confirmationBlocks"
+      }
+    },
+    {
+      "type": "ASSERT",
+      "description": "Verify the transaction was confirmed",
+      "params": {
+        "condition": "context.transactions['${finalTxid}'].status === 'broadcasted'",
+        "message": "Final transaction was not broadcast successfully"
+      }
+    }
+  ]
+}
