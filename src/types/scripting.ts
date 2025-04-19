@@ -36,6 +36,7 @@ export enum ActionType {
   CREATE_MULTISIG = "create_multisig",
   WAIT = "wait",
   ASSERT = "assert",
+  CUSTOM = "custom",
 }
 
 /**
