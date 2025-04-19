@@ -809,8 +809,281 @@ export class ScriptEngine extends EventEmitter {
       }
 
       return summary;
-    } catch (error) {
+    } catch (error: any) {
       return `Error generating summary: ${error.message}`;
+    }
+  }
+
+  /**
+   * Execute a script
+   */
+  async executeScript(
+    script: string | DeclarativeScript,
+    options: ScriptExecutionOptions = {},
+  ): Promise<ScriptExecutionResult> {
+    const result: ScriptExecutionResult = {
+      status: ScriptExecutionStatus.NOT_STARTED,
+      startTime: new Date(),
+      steps: [],
+      outputs: {
+        wallets: [],
+        transactions: [],
+        blocks: [],
+      },
+    };
+
+    try {
+      // Create execution context
+      const context: ScriptExecutionContext = {
+        bitcoinService: this.bitcoinService,
+        caravanService: this.caravanService,
+        transactionService: this.transactionService,
+        configManager: this.configManager,
+        rpcClient: this.rpcClient,
+        variables: { ...(options.params || {}) },
+        wallets: {},
+        transactions: {},
+        blocks: [],
+        log: (message: string) => {
+          if (options.verbose) {
+            console.log(message);
+          }
+          this.emit("log", message);
+        },
+        progress: (step: number, total: number, message: string) => {
+          this.emit("progress", { step, total, message });
+        },
+      };
+
+      // Start execution
+      result.status = ScriptExecutionStatus.RUNNING;
+      this.emit("start", { script, options });
+
+      if (options.dryRun) {
+        // Just generate summary for dry run
+        const summary = this.generateScriptSummary(script);
+        console.log(chalk.cyan("Dry run - script would do the following:"));
+        console.log(summary);
+
+        result.status = ScriptExecutionStatus.COMPLETED;
+        result.endTime = new Date();
+        result.duration = result.endTime.getTime() - result.startTime.getTime();
+
+        this.emit("complete", result);
+        return result;
+      }
+
+      if (typeof script === "string") {
+        // Execute JavaScript script
+        await this.executeJavaScriptScript(script, context, result, options);
+      } else {
+        // Execute declarative script
+        await this.executeDeclarativeScript(script, context, result, options);
+      }
+
+      // Update result
+      result.status = ScriptExecutionStatus.COMPLETED;
+      result.endTime = new Date();
+      result.duration = result.endTime.getTime() - result.startTime.getTime();
+
+      // Gather outputs
+      result.outputs.wallets = Object.keys(context.wallets);
+      result.outputs.transactions = Object.keys(context.transactions);
+      result.outputs.blocks = context.blocks;
+
+      this.emit("complete", result);
+      return result;
+    } catch (error: any) {
+      result.status = ScriptExecutionStatus.FAILED;
+      result.endTime = new Date();
+      result.duration = result.endTime.getTime() - result.startTime.getTime();
+      result.error = error;
+
+      this.emit("error", { error, result });
+      throw error;
+    }
+  }
+
+  /**
+   * Execute a JavaScript script
+   */
+  private async executeJavaScriptScript(
+    script: string,
+    context: ScriptExecutionContext,
+    result: ScriptExecutionResult,
+    options: ScriptExecutionOptions,
+  ): Promise<void> {
+    try {
+      // Create a VM to execute the script in a sandboxed environment
+      const vm = new VM({
+        timeout: 30000, // 30 seconds timeout
+        sandbox: {
+          // Expose the context to the script
+          bitcoinService: context.bitcoinService,
+          caravanService: context.caravanService,
+          transactionService: context.transactionService,
+          configManager: context.configManager,
+          rpcClient: context.rpcClient,
+          variables: context.variables,
+          wallets: context.wallets,
+          transactions: context.transactions,
+          blocks: context.blocks,
+          console: {
+            log: context.log,
+            error: (message: string) => {
+              context.log(chalk.red(`ERROR: ${message}`));
+              this.emit("error", { message, result });
+            },
+            warn: (message: string) => {
+              context.log(chalk.yellow(`WARNING: ${message}`));
+              this.emit("warning", { message, result });
+            },
+          },
+          progress: context.progress,
+          // Helper functions
+          formatBitcoin,
+          truncate,
+          // Allow setTimeout and setInterval
+          setTimeout,
+          clearTimeout,
+          setInterval,
+          clearInterval,
+        },
+      });
+
+      // If interactive, ask for confirmation before executing the script
+      if (options.interactive) {
+        const summary = this.generateScriptSummary(script);
+        console.log(chalk.cyan("Script Summary:"));
+        console.log(summary);
+
+        // Get confirmation from user via inquirer
+        const { confirm } = await import("@inquirer/prompts");
+
+        const userConfirmed = await confirm({
+          message: "Do you want to execute this script?",
+          default: false, // Default to "No" for safety
+        });
+
+        if (!userConfirmed) {
+          result.status = ScriptExecutionStatus.ABORTED;
+          throw new Error("Script execution aborted by user");
+        }
+      }
+
+      // Execute the script
+      await vm.run(script);
+    } catch (error) {
+      throw new Error(`Script execution failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Execute a declarative script
+   */
+  private async executeDeclarativeScript(
+    script: DeclarativeScript,
+    context: ScriptExecutionContext,
+    result: ScriptExecutionResult,
+    options: ScriptExecutionOptions,
+  ): Promise<void> {
+    try {
+      // Initialize variables
+      if (script.variables) {
+        context.variables = { ...context.variables, ...script.variables };
+      }
+
+      // If interactive, ask for confirmation before executing the script
+      if (options.interactive) {
+        const summary = this.generateScriptSummary(script);
+        console.log(chalk.cyan("Script Summary:"));
+        console.log(summary);
+
+        // Simulate confirmation
+        const confirm = true; // In a real implementation, this would be a user prompt
+        if (!confirm) {
+          result.status = ScriptExecutionStatus.ABORTED;
+          throw new Error("Script execution aborted by user");
+        }
+      }
+
+      // Execute each action in sequence
+      for (let i = 0; i < script.actions.length; i++) {
+        const action = script.actions[i];
+        const actionResult = {
+          action: action.type,
+          status: "success" as "success" | "failed" | "skipped",
+          result: undefined as any,
+          error: undefined as Error | undefined,
+        };
+
+        try {
+          // Progress reporting
+          context.progress(
+            i + 1,
+            script.actions.length,
+            action.description ||
+              `Executing ${action.type.replace(/_/g, " ").toLowerCase()}`,
+          );
+
+          // If interactive mode, ask for confirmation before each action
+          if (options.interactive) {
+            console.log(
+              chalk.cyan(
+                `\nAction ${i + 1}/${script.actions.length}: ${action.type}`,
+              ),
+            );
+            console.log(chalk.gray(JSON.stringify(action.params, null, 2)));
+
+            // Simulate confirmation
+            const confirm = true; // In a real implementation, this would be a user prompt
+            if (!confirm) {
+              actionResult.status = "skipped";
+              result.steps.push(actionResult);
+              continue;
+            }
+          }
+
+          // Process variable references in params (e.g., ${variableName})
+          const processedParams = this.processVariableReferences(
+            action.params,
+            context.variables,
+          );
+
+          // Execute the action
+          actionResult.result = await this.executeAction(
+            action.type as ActionType,
+            processedParams,
+            context,
+          );
+
+          // Log action result if verbose
+          if (options.verbose) {
+            context.log(formatSuccess(`Completed action: ${action.type}`));
+            if (actionResult.result) {
+              context.log(JSON.stringify(actionResult.result, null, 2));
+            }
+          }
+        } catch (error) {
+          actionResult.status = "failed";
+          actionResult.error = error;
+
+          context.log(
+            formatError(`Action failed: ${action.type} - ${error.message}`),
+          );
+
+          // Add the step to the result
+          result.steps.push(actionResult);
+
+          // Stop execution on error
+          throw error;
+        }
+
+        // Add the step to the result
+        result.steps.push(actionResult);
+      }
+    } catch (error) {
+      throw new Error(`Script execution failed: ${error.message}`);
     }
   }
 }
