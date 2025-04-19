@@ -552,4 +552,265 @@ export class ScriptEngine extends EventEmitter {
       }
     }
   }
+  /**
+   * Generate a summary of what a script will do
+   */
+  generateScriptSummary(script: string | DeclarativeScript): string {
+    try {
+      let summary = "";
+
+      if (typeof script === "string") {
+        // JavaScript script
+        // Extract comments as a basic summary
+        const comments = script.match(/\/\*\*([\s\S]*?)\*\//g) || [];
+        const descriptionComment = comments.find((c) =>
+          c.includes("@description"),
+        );
+
+        summary += chalk.bold.cyan("JavaScript Script Summary\n");
+
+        if (descriptionComment) {
+          const description = descriptionComment
+            .replace(/\/\*\*|\*\/|\*/g, "")
+            .trim();
+          summary += `${description}\n\n`;
+        }
+
+        // Extract name and version
+        const nameComment = comments.find((c) => c.includes("@name"));
+        const versionComment = comments.find((c) => c.includes("@version"));
+
+        if (nameComment) {
+          const name = nameComment.match(/@name\s+(.*?)(\r?\n|$)/)?.[1]?.trim();
+          if (name) summary += `Name: ${name}\n`;
+        }
+
+        if (versionComment) {
+          const version = versionComment
+            .match(/@version\s+(.*?)(\r?\n|$)/)?.[1]
+            ?.trim();
+          if (version) summary += `Version: ${version}\n\n`;
+        }
+
+        // Count certain API calls to give a rough idea of what the script does
+        const createWalletCount = (script.match(/createWallet/g) || []).length;
+        const mineBlocksCount = (
+          script.match(/generateToAddress|generateBlock/g) || []
+        ).length;
+        const createTxCount = (script.match(/createPSBT|sendToAddress/g) || [])
+          .length;
+        const signTxCount = (
+          script.match(/signPSBT|processPSBT|signTransaction/g) || []
+        ).length;
+        const broadcastCount = (
+          script.match(/broadcastTransaction|sendRawTransaction/g) || []
+        ).length;
+
+        summary += `This script includes approximately:\n`;
+        summary += `- ${createWalletCount} wallet creation operations\n`;
+        summary += `- ${mineBlocksCount} block generation operations\n`;
+        summary += `- ${createTxCount} transaction creation operations\n`;
+        summary += `- ${signTxCount} transaction signing operations\n`;
+        summary += `- ${broadcastCount} transaction broadcast operations\n`;
+
+        // Look for complex operations
+        if (script.includes("multisig") || script.includes("quorum")) {
+          summary += `- Multisig wallet operations\n`;
+        }
+
+        if (
+          script.includes("replaceFee") ||
+          script.includes("rbf") ||
+          script.includes("replaceByFee") ||
+          script.includes("REPLACE_TRANSACTION")
+        ) {
+          summary += `- Replace-by-fee (RBF) operations\n`;
+        }
+
+        if (
+          script.includes("cpfp") ||
+          script.includes("childPaysForParent") ||
+          script.includes("Child Pays For Parent")
+        ) {
+          summary += `- Child-pays-for-parent (CPFP) operations\n`;
+        }
+
+        if (
+          script.includes("timelock") ||
+          script.includes("nLockTime") ||
+          script.includes("checkSequenceVerify") ||
+          script.includes("CSV") ||
+          script.includes("checkLockTimeVerify") ||
+          script.includes("CLTV")
+        ) {
+          summary += `- Timelock operations\n`;
+        }
+
+        // Warn about potentially destructive operations
+        if (
+          script.includes("deleteWallet") ||
+          script.includes("removeWallet")
+        ) {
+          summary += chalk.yellow(
+            "\n⚠️ Warning: This script contains wallet deletion operations\n",
+          );
+        }
+
+        if (
+          script.includes("abandonTransaction") ||
+          script.includes("abandon transaction")
+        ) {
+          summary += chalk.yellow(
+            "\n⚠️ Warning: This script contains transaction abandonment operations\n",
+          );
+        }
+
+        if (
+          script.includes("invalidateBlock") ||
+          script.includes("invalidate block")
+        ) {
+          summary += chalk.yellow(
+            "\n⚠️ Warning: This script contains block invalidation operations\n",
+          );
+        }
+      } else {
+        // Declarative script
+        summary += chalk.bold.cyan(`Script: ${script.name}\n`);
+        summary += `${script.description || "No description provided"}\n\n`;
+        summary += `Version: ${script.version || "1.0.0"}\n`;
+        summary += `Contains ${script.actions.length} actions:\n\n`;
+
+        // Group by action type for a more compact summary
+        const actionCounts = script.actions.reduce(
+          (acc, action) => {
+            acc[action.type] = (acc[action.type] || 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>,
+        );
+
+        Object.entries(actionCounts).forEach(([type, count]) => {
+          summary += `- ${count} ${type.replace(/_/g, " ").toLowerCase()} operations\n`;
+        });
+
+        // List each action with its description
+        summary += "\nDetailed action list:\n";
+        script.actions.forEach((action, index) => {
+          const desc =
+            action.description ||
+            `Execute ${action.type.replace(/_/g, " ").toLowerCase()}`;
+          summary += `${index + 1}. ${desc}\n`;
+
+          // Add details for specific action types
+          switch (action.type) {
+            case ActionType.CREATE_WALLET:
+              summary += `   Create wallet "${action.params.name}"\n`;
+              if (action.params.options) {
+                const options = [];
+                if (action.params.options.disablePrivateKeys)
+                  options.push("without private keys");
+                if (action.params.options.blank) options.push("blank");
+                if (action.params.options.descriptorWallet)
+                  options.push("descriptor wallet");
+
+                if (options.length > 0) {
+                  summary += `   Options: ${options.join(", ")}\n`;
+                }
+              }
+              break;
+
+            case ActionType.MINE_BLOCKS:
+              const target = action.params.toWallet
+                ? `to wallet "${action.params.toWallet}"`
+                : `to address "${action.params.toAddress}"`;
+              summary += `   Mine ${action.params.count} blocks ${target}\n`;
+              break;
+
+            case ActionType.CREATE_TRANSACTION:
+              let outputSummary = "";
+              if (
+                action.params.outputs &&
+                Array.isArray(action.params.outputs)
+              ) {
+                action.params.outputs.forEach((output: any) => {
+                  const address = Object.keys(output)[0];
+                  const amount = output[address];
+                  if (outputSummary) outputSummary += ", ";
+                  outputSummary += `${formatBitcoin(amount)} to ${truncate(address, 8)}`;
+                });
+              }
+              summary += `   Send from "${action.params.fromWallet}": ${outputSummary}\n`;
+
+              if (action.params.feeRate) {
+                summary += `   With fee rate: ${action.params.feeRate} sat/vB\n`;
+              }
+
+              if (action.params.rbf) {
+                summary += `   Enabled for RBF (Replace-By-Fee)\n`;
+              }
+              break;
+
+            case ActionType.SIGN_TRANSACTION:
+              if (action.params.wallet) {
+                summary += `   Sign with wallet "${action.params.wallet}"\n`;
+              } else if (action.params.privateKey) {
+                summary += `   Sign with private key\n`;
+              }
+              break;
+
+            case ActionType.BROADCAST_TRANSACTION:
+              if (action.params.txid) {
+                summary += `   Broadcast transaction with ID: ${truncate(action.params.txid, 10)}\n`;
+              } else if (action.params.psbt) {
+                summary += `   Broadcast PSBT transaction\n`;
+              }
+              break;
+
+            case ActionType.REPLACE_TRANSACTION:
+              summary += `   Replace transaction "${truncate(action.params.txid, 8)}"\n`;
+              if (action.params.newFeeRate) {
+                summary += `   With new fee rate: ${action.params.newFeeRate} sat/vB\n`;
+              }
+              if (action.params.newOutputs) {
+                summary += `   And ${action.params.newOutputs.length} new output(s)\n`;
+              }
+              break;
+
+            case ActionType.CREATE_MULTISIG:
+              summary += `   Create ${action.params.requiredSigners}-of-${action.params.totalSigners} multisig wallet\n`;
+              summary += `   Using address type: ${action.params.addressType}\n`;
+              break;
+
+            case ActionType.WAIT:
+              summary += `   Wait for ${action.params.seconds} seconds\n`;
+              break;
+
+            case ActionType.ASSERT:
+              summary += `   Verify: ${
+                typeof action.params.condition === "string"
+                  ? action.params.condition
+                  : "condition is met"
+              }\n`;
+              summary += `   Error if not: "${action.params.message}"\n`;
+              break;
+
+            case ActionType.CUSTOM:
+              summary += `   Execute custom code\n`;
+              // Optionally show a snippet of the code (first line or limited chars)
+              if (action.params.code) {
+                const codePreview = action.params.code
+                  .split("\n")[0]
+                  .substring(0, 50);
+                summary += `   Code snippet: ${codePreview}${action.params.code.length > 50 ? "..." : ""}\n`;
+              }
+              break;
+          }
+        });
+      }
+
+      return summary;
+    } catch (error) {
+      return `Error generating summary: ${error.message}`;
+    }
+  }
 }
