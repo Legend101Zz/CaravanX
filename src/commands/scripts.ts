@@ -69,6 +69,13 @@ export class ScriptCommands {
   }
 
   /**
+   * Get the script engine instance
+   */
+  getScriptEngine(): ScriptEngine {
+    return this.scriptEngine;
+  }
+
+  /**
    * Add a back option to selection choices
    */
   private addBackOption(choices: any[], backLabel = "Back to menu"): any[] {

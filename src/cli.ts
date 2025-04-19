@@ -12,6 +12,7 @@ import {
   formatError,
   boxText,
 } from "./utils/terminal";
+import { addScriptCommandsToCLI } from "./scripting/cli-integration";
 
 // Display the Caravan logo
 console.log(caravanLogo);
@@ -518,6 +519,13 @@ program
     const spinner = ora("Starting Caravan Regtest Manager...").start();
     const app = new CaravanRegtestManager();
     spinner.succeed("Caravan Regtest Manager started");
+
+    // Add script commands to CLI if launched from CLI
+    if (process.argv.length > 2 && process.argv[1].includes("cli")) {
+      // Create a ScriptEngine instance and add commands to CLI
+      const scriptEngine = app.scriptCommands.getScriptEngine(); // You'll need to add this method
+      addScriptCommandsToCLI(program, scriptEngine);
+    }
 
     try {
       await app.start();

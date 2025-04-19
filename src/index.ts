@@ -9,6 +9,7 @@ import { TransactionCommands } from "./commands/transaction";
 import { VisualizationCommands } from "./commands/visualizations";
 import { ScriptCommands } from "./commands/scripts";
 import { MainMenu } from "./ui/mainMenu";
+import { addScriptCommandsToCLI } from "./scripting/cli-integration";
 
 import { confirm, input, number } from "@inquirer/prompts";
 import chalk from "chalk";
@@ -236,6 +237,7 @@ export class CaravanRegtestManager {
 // When run directly
 if (require.main === module) {
   const app = new CaravanRegtestManager();
+
   app.start().catch((error) => {
     console.error(chalk.red("\nError starting application:"), error);
     process.exit(1);
