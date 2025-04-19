@@ -31,7 +31,7 @@ export class MainMenu {
     { name: colors.header("🏦 Bitcoin Wallets"), value: "bitcoin-wallets" },
     { name: colors.header("🔐 Caravan Multisig"), value: "caravan-multisig" },
     { name: colors.header("💸 Transactions"), value: "transactions" },
-    { name: colors.header("  Visualization"), value: "visualization" },
+    { name: colors.header("₿ Visualization"), value: "visualization" },
     { name: colors.header("⚙️ System"), value: "system" },
     { name: colors.header("❓ Help"), value: "help" },
     { name: colors.header("🚪 Exit"), value: "exit" },
