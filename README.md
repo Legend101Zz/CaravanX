@@ -1,5 +1,7 @@
 # Caravan Regtest Manager
 
+![Caravan-X](../../assets/Caravan-X.png)
+
 A terminal-based utility for managing Caravan multisig wallets in regtest mode. This tool simplifies development and testing with Caravan by providing an easy-to-use interface for:
 
 - Managing Bitcoin wallets in regtest mode
