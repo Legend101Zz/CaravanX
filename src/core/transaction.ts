@@ -30,9 +30,35 @@ export class TransactionService {
   async createPSBT(
     wallet: string,
     outputs: Record<string, number>[],
+    options?: { rbf?: boolean; feeRate?: number; includeWatching?: boolean },
   ): Promise<string> {
     try {
-      const result = await this.rpc.createPSBT(wallet, outputs);
+      // Build options for the RPC call
+      const rpcOptions: any = {};
+
+      if (options) {
+        if (options.rbf !== undefined) {
+          rpcOptions.replaceable = options.rbf;
+        }
+        if (options.feeRate !== undefined) {
+          rpcOptions.fee_rate = options.feeRate;
+        }
+        if (options.includeWatching !== undefined) {
+          rpcOptions.includeWatching = options.includeWatching;
+        }
+      }
+
+      // Default includeWatching to true if not specified
+      if (rpcOptions.includeWatching === undefined) {
+        rpcOptions.includeWatching = true;
+      }
+
+      const result: any = await this.rpc.callRpc(
+        "walletcreatefundedpsbt",
+        [[], outputs, 0, rpcOptions],
+        wallet,
+      );
+
       return result.psbt;
     } catch (error) {
       console.error(`Error creating PSBT in wallet "${wallet}":`, error);
