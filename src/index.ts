@@ -7,6 +7,7 @@ import { WalletCommands } from "./commands/wallet";
 import { MultisigCommands } from "./commands/multisig";
 import { TransactionCommands } from "./commands/transaction";
 import { VisualizationCommands } from "./commands/visualizations";
+import { ScriptCommands } from "./commands/scripts";
 import { MainMenu } from "./ui/mainMenu";
 
 import { confirm, input, number } from "@inquirer/prompts";
@@ -26,6 +27,7 @@ export class CaravanRegtestManager {
   public multisigCommands: MultisigCommands;
   public transactionCommands: TransactionCommands;
   public visualizationCommands: VisualizationCommands;
+  public scriptCommands: ScriptCommands;
 
   constructor() {
     // Initialize configuration
@@ -64,6 +66,15 @@ export class CaravanRegtestManager {
       this.configManager,
       this.bitcoinRpcClient,
       this.bitcoinService,
+    );
+
+    this.scriptCommands = new ScriptCommands(
+      this.configManager,
+      this.bitcoinService,
+      this.caravanService,
+      this.transactionService,
+      this.bitcoinRpcClient,
+      this.multisigCommands,
     );
   }
 

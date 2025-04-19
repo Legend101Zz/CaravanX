@@ -31,6 +31,7 @@ export class MainMenu {
     { name: colors.header("🏦 Bitcoin Wallets"), value: "bitcoin-wallets" },
     { name: colors.header("🔐 Caravan Multisig"), value: "caravan-multisig" },
     { name: colors.header("💸 Transactions"), value: "transactions" },
+    { name: colors.header("📜 Blockchain Scripts"), value: "scripts" },
     { name: colors.header("₿ Visualization"), value: "visualization" },
     { name: colors.header("⚙️ System"), value: "system" },
     { name: colors.header("❓ Help"), value: "help" },
@@ -108,6 +109,22 @@ export class MainMenu {
       {
         name: colors.commandName("Finalize and broadcast PSBT"),
         value: "finalize-psbt",
+      },
+      { name: colors.muted("Back to main menu"), value: "back" },
+    ],
+    scripts: [
+      {
+        name: colors.commandName("Browse script templates"),
+        value: "list-templates",
+      },
+      {
+        name: colors.commandName("Create a new script"),
+        value: "create-script",
+      },
+      { name: colors.commandName("Run a script"), value: "run-script" },
+      {
+        name: colors.commandName("Manage saved scripts"),
+        value: "manage-scripts",
       },
       { name: colors.muted("Back to main menu"), value: "back" },
     ],
@@ -468,6 +485,20 @@ export class MainMenu {
           break;
         case "finalize-psbt":
           await this.app.transactionCommands.finalizeAndBroadcastPSBT();
+          break;
+
+        // Blockchain Scripts
+        case "list-templates":
+          await this.app.scriptCommands.listScriptTemplates();
+          break;
+        case "create-script":
+          await this.app.scriptCommands.createNewScript();
+          break;
+        case "run-script":
+          await this.app.scriptCommands.runCustomScript();
+          break;
+        case "manage-scripts":
+          await this.app.scriptCommands.manageScripts();
           break;
 
         // Visualization
