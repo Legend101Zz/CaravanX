@@ -5,6 +5,7 @@ import { BitcoinRpcClient } from "../core/rpc";
 import { BlockchainDataService } from "./data/blockchain-data";
 import { VisualizationServer } from "./server/http-server";
 import { ConfigManager } from "../core/config";
+import { Canvas } from "canvas";
 import chalk from "chalk";
 
 /**
@@ -42,7 +43,253 @@ export class VisualizationManager {
   }
 
   /**
-   * Ensure that visualization files are available
+   * Creates the Minecraft-style visualization files
+   */
+  private async createMinecraftVisualization(): Promise<void> {
+    try {
+      // Create directories
+      await fs.ensureDir(path.join(this.staticDir, "js"));
+      await fs.ensureDir(path.join(this.staticDir, "assets/blocks"));
+      await fs.ensureDir(path.join(this.staticDir, "assets/characters"));
+      await fs.ensureDir(path.join(this.staticDir, "assets/items"));
+      await fs.ensureDir(path.join(this.staticDir, "assets/environment"));
+      await fs.ensureDir(path.join(this.staticDir, "assets/fonts"));
+      await fs.ensureDir(path.join(this.staticDir, "styles"));
+
+      // Copy main HTML file
+      const htmlContent = fs.readFileSync(
+        path.join(__dirname, "minecraft/index.html"),
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(this.staticDir, "index-minecraft.html"),
+        htmlContent,
+      );
+
+      // Copy CSS file
+      const cssContent = fs.readFileSync(
+        path.join(__dirname, "minecraft/styles/minecraft-style.css"),
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(this.staticDir, "styles/minecraft-style.css"),
+        cssContent,
+      );
+
+      // Copy JavaScript files
+      const voxelEngineContent = fs.readFileSync(
+        path.join(__dirname, "minecraft/js/voxel-engine.js"),
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(this.staticDir, "js/voxel-engine.js"),
+        voxelEngineContent,
+      );
+
+      const characterSystemContent = fs.readFileSync(
+        path.join(__dirname, "minecraft/js/character-system.js"),
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(this.staticDir, "js/character-system.js"),
+        characterSystemContent,
+      );
+
+      const blockchainIntegrationContent = fs.readFileSync(
+        path.join(__dirname, "minecraft/js/blockchain-game-integration.js"),
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(this.staticDir, "js/blockchain-game-integration.js"),
+        blockchainIntegrationContent,
+      );
+
+      // Create assets
+      await this.createMinecraftAssets();
+
+      console.log(
+        chalk.green("Minecraft-style visualization created successfully"),
+      );
+    } catch (error) {
+      console.error("Error creating Minecraft visualization:", error);
+    }
+  }
+
+  /**
+   * Creates placeholder assets for the Minecraft visualization
+   */
+  private async createMinecraftAssets(): Promise<void> {
+    // Helper function to create a simple colored rectangle as a placeholder
+    const createPlaceholderImage = async (
+      filename: string,
+      color: string,
+      width: number,
+      height: number,
+    ) => {
+      try {
+        const canvas = new Canvas(width, height);
+        const ctx = canvas.getContext("2d");
+
+        // Fill background
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, width, height);
+
+        // Add some pixel-art detail
+        ctx.fillStyle = "rgba(255,255,255,0.3)";
+        for (let x = 0; x < width; x += 4) {
+          for (let y = 0; y < height; y += 4) {
+            if (Math.random() > 0.8) {
+              ctx.fillRect(x, y, 2, 2);
+            }
+          }
+        }
+
+        const buffer = canvas.toBuffer("image/png");
+        await fs.writeFile(path.join(this.staticDir, filename), buffer);
+      } catch (error) {
+        console.error(`Error creating placeholder image ${filename}:`, error);
+
+        // Fallback for environments without Canvas support
+        const buffer = Buffer.from([
+          0x89,
+          0x50,
+          0x4e,
+          0x47,
+          0x0d,
+          0x0a,
+          0x1a,
+          0x0a, // PNG signature
+          0x00,
+          0x00,
+          0x00,
+          0x0d, // IHDR chunk length
+          0x49,
+          0x48,
+          0x44,
+          0x52, // "IHDR"
+          0x00,
+          0x00,
+          0x00,
+          0x10, // width: 16
+          0x00,
+          0x00,
+          0x00,
+          0x10, // height: 16
+          0x08,
+          0x02,
+          0x00,
+          0x00,
+          0x00, // bit depth, color type, compression, filter, interlace
+          0x90,
+          0x1b,
+          0xd9,
+          0x28, // CRC
+          0x00,
+          0x00,
+          0x00,
+          0x01, // IDAT chunk length
+          0x49,
+          0x44,
+          0x41,
+          0x54, // "IDAT"
+          0x08, // 8 bit data
+          0xd7,
+          0x64,
+          0xc3,
+          0xd7, // CRC
+          0x00,
+          0x00,
+          0x00,
+          0x00, // IEND chunk length
+          0x49,
+          0x45,
+          0x4e,
+          0x44, // "IEND"
+          0xae,
+          0x42,
+          0x60,
+          0x82, // CRC
+        ]);
+
+        await fs.writeFile(path.join(this.staticDir, filename), buffer);
+      }
+    };
+
+    // Create block textures
+    await createPlaceholderImage("assets/blocks/grass.png", "#55AA55", 16, 16);
+    await createPlaceholderImage("assets/blocks/stone.png", "#888888", 16, 16);
+    await createPlaceholderImage("assets/blocks/gold.png", "#FFCC00", 16, 16);
+    await createPlaceholderImage(
+      "assets/blocks/building.png",
+      "#AA8866",
+      16,
+      16,
+    );
+
+    // Create character textures
+    await createPlaceholderImage(
+      "assets/characters/miner.png",
+      "#FFAA00",
+      16,
+      32,
+    );
+    await createPlaceholderImage(
+      "assets/characters/transaction.png",
+      "#00AAFF",
+      16,
+      32,
+    );
+    await createPlaceholderImage(
+      "assets/characters/trader.png",
+      "#AA00FF",
+      16,
+      32,
+    );
+    await createPlaceholderImage(
+      "assets/characters/validator.png",
+      "#00FFAA",
+      16,
+      32,
+    );
+
+    // Create item textures
+    await createPlaceholderImage("assets/items/pickaxe.png", "#8B4513", 16, 16);
+    await createPlaceholderImage("assets/items/shovel.png", "#A9A9A9", 16, 16);
+    await createPlaceholderImage("assets/items/axe.png", "#CD853F", 16, 16);
+    await createPlaceholderImage("assets/items/sword.png", "#C0C0C0", 16, 16);
+    await createPlaceholderImage("assets/items/compass.png", "#FF4500", 16, 16);
+    await createPlaceholderImage("assets/items/coin.png", "#FFD700", 16, 16);
+
+    // Create environment textures
+    await createPlaceholderImage(
+      "assets/environment/sky.png",
+      "#87CEEB",
+      64,
+      64,
+    );
+    await createPlaceholderImage(
+      "assets/environment/ground.png",
+      "#556B2F",
+      16,
+      16,
+    );
+    await createPlaceholderImage(
+      "assets/environment/cloud.png",
+      "#FFFFFF",
+      32,
+      16,
+    );
+
+    // Create a placeholder font file
+    const emptyFont = Buffer.from([0]);
+    await fs.writeFile(
+      path.join(this.staticDir, "assets/fonts/minecraft.woff2"),
+      emptyFont,
+    );
+  }
+
+  /**
+   * Update the existing ensureVisualizationFiles method to include Minecraft visualization
    */
   private async ensureVisualizationFiles(): Promise<void> {
     try {
@@ -50,8 +297,14 @@ export class VisualizationManager {
       if (!(await fs.pathExists(this.staticDir))) {
         await fs.ensureDir(this.staticDir);
 
-        // Copy advanced visualization files
+        // Copy standard visualization files
         await this.createAdvancedVisualizationFiles();
+
+        // Create pixel art visualization files
+        await this.createPixelArtVisualization();
+
+        // Create Minecraft-style visualization files
+        await this.createMinecraftVisualization();
       } else {
         // Check if we need to update existing files to the new version
         const indexHtmlPath = path.join(this.staticDir, "index.html");
@@ -69,11 +322,1157 @@ export class VisualizationManager {
               ),
             );
             await this.createAdvancedVisualizationFiles();
+            await this.createPixelArtVisualization();
+            await this.createMinecraftVisualization();
           }
+        }
+
+        // Check if Minecraft visualization exists
+        const minecraftHtmlPath = path.join(
+          this.staticDir,
+          "index-minecraft.html",
+        );
+        if (!(await fs.pathExists(minecraftHtmlPath))) {
+          console.log(chalk.yellow("Adding Minecraft-style visualization..."));
+          await this.createMinecraftVisualization();
         }
       }
     } catch (error) {
       console.error("Error ensuring visualization files:", error);
+    }
+  }
+
+  /**
+   * Creates the pixel art visualization files
+   */
+  private async createPixelArtVisualization(): Promise<void> {
+    try {
+      // Create necessary directories
+      await fs.ensureDir(path.join(this.staticDir, "assets/buildings"));
+      await fs.ensureDir(path.join(this.staticDir, "assets/characters"));
+      await fs.ensureDir(path.join(this.staticDir, "assets/environment"));
+      await fs.ensureDir(path.join(this.staticDir, "assets/items"));
+      await fs.ensureDir(path.join(this.staticDir, "sounds"));
+      await fs.ensureDir(path.join(this.staticDir, "js"));
+
+      // Create index-pixel.html for the pixel art visualization
+      const pixelHtml = `
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Blockchain Pixel City</title>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/6.5.2/browser/pixi.min.js"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js"></script>
+      <style>
+          body, html {
+              margin: 0;
+              padding: 0;
+              overflow: hidden;
+              background-color: #0a0a1a;
+              font-family: 'Courier New', monospace;
+          }
+
+          #game-container {
+              position: absolute;
+              top: 0;
+              left: 0;
+              width: 100vw;
+              height: 100vh;
+              z-index: 1;
+          }
+
+          #ui-overlay {
+              position: absolute;
+              top: 0;
+              left: 0;
+              width: 100vw;
+              height: 100vh;
+              pointer-events: none;
+              z-index: 2;
+          }
+
+          #stats-panel {
+              position: absolute;
+              top: 10px;
+              left: 10px;
+              background-color: rgba(0, 0, 0, 0.7);
+              border: 2px solid #f7931a;
+              border-radius: 5px;
+              padding: 10px;
+              color: #fff;
+              font-size: 12px;
+              pointer-events: auto;
+          }
+
+          #controls {
+              position: absolute;
+              bottom: 10px;
+              right: 10px;
+              display: flex;
+              gap: 5px;
+              pointer-events: auto;
+          }
+
+          .pixel-button {
+              background-color: #f7931a;
+              border: none;
+              color: white;
+              padding: 8px 16px;
+              font-family: 'Courier New', monospace;
+              font-size: 10px;
+              cursor: pointer;
+              position: relative;
+              image-rendering: pixelated;
+          }
+
+          .loading-screen {
+              position: fixed;
+              top: 0;
+              left: 0;
+              width: 100vw;
+              height: 100vh;
+              background-color: #0a0a1a;
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
+              align-items: center;
+              z-index: 100;
+          }
+
+          .loading-bar-container {
+              width: 200px;
+              height: 20px;
+              background-color: #333;
+              border: 2px solid #f7931a;
+              margin-top: 20px;
+          }
+
+          .loading-bar {
+              height: 100%;
+              width: 0%;
+              background-color: #f7931a;
+              transition: width 0.2s;
+          }
+
+          .pixel-title {
+              color: #f7931a;
+              font-size: 24px;
+              margin-bottom: 20px;
+              text-shadow: 4px 4px 0px rgba(0,0,0,0.8);
+          }
+
+          .tooltip {
+              position: absolute;
+              background-color: #111;
+              border: 2px solid #f7931a;
+              padding: 8px;
+              color: white;
+              font-size: 10px;
+              pointer-events: none;
+              z-index: 10;
+              opacity: 0;
+              transition: opacity 0.2s;
+          }
+
+          #details-panel {
+              position: absolute;
+              right: 10px;
+              top: 10px;
+              width: 300px;
+              background-color: rgba(0, 0, 0, 0.8);
+              border: 2px solid #f7931a;
+              border-radius: 5px;
+              padding: 10px;
+              color: #fff;
+              font-size: 10px;
+              display: none;
+              pointer-events: auto;
+          }
+
+          #details-close {
+              position: absolute;
+              top: 5px;
+              right: 5px;
+              cursor: pointer;
+              font-size: 12px;
+          }
+
+          #time-cycle {
+              position: absolute;
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 100%;
+              background-color: rgba(0, 0, 100, 0.2);
+              z-index: 1;
+              pointer-events: none;
+              opacity: 0;
+              transition: opacity 10s;
+          }
+
+          #compass {
+              position: absolute;
+              bottom: 20px;
+              left: 20px;
+              width: 100px;
+              height: 100px;
+              background-color: rgba(0, 0, 0, 0.5);
+              border: 2px solid #f7931a;
+              border-radius: 50%;
+              pointer-events: auto;
+          }
+
+          #compass-arrow {
+              position: absolute;
+              top: 10px;
+              left: 48px;
+              width: 4px;
+              height: 40px;
+              background-color: #f7931a;
+              transform-origin: bottom center;
+          }
+
+          #compass-label {
+              position: absolute;
+              bottom: 10px;
+              width: 100%;
+              text-align: center;
+              color: white;
+              font-size: 10px;
+          }
+
+          #view-toggle {
+              position: absolute;
+              top: 10px;
+              right: 10px;
+              background-color: #f7931a;
+              color: white;
+              border: none;
+              padding: 8px 16px;
+              font-size: 12px;
+              cursor: pointer;
+              pointer-events: auto;
+          }
+      </style>
+  </head>
+  <body>
+      <div class="loading-screen" id="loading-screen">
+          <div class="pixel-title">BLOCKCHAIN PIXEL CITY</div>
+          <div class="loading-bar-container">
+              <div class="loading-bar" id="loading-bar"></div>
+          </div>
+          <div id="loading-text" style="color: white; margin-top: 10px; font-size: 12px;">Loading resources...</div>
+      </div>
+
+      <div id="game-container"></div>
+
+      <div id="ui-overlay">
+          <button id="view-toggle">Switch to Standard View</button>
+
+          <div id="stats-panel">
+              <div>BLOCKS: <span id="block-count">0</span></div>
+              <div>TXs: <span id="tx-count">0</span></div>
+              <div>MEMPOOL: <span id="mempool-size">0</span></div>
+              <div>TIME: <span id="game-time">00:00</span></div>
+          </div>
+
+          <div id="compass">
+              <div id="compass-arrow"></div>
+              <div id="compass-label">NORTH</div>
+          </div>
+
+          <div id="controls">
+              <button class="pixel-button" id="mine-btn">MINE BLOCK</button>
+              <button class="pixel-button" id="tx-btn">NEW TX</button>
+              <button class="pixel-button" id="zoom-in-btn">ZOOM+</button>
+              <button class="pixel-button" id="zoom-out-btn">ZOOM-</button>
+          </div>
+
+          <div id="details-panel">
+              <div id="details-close">X</div>
+              <div id="details-content"></div>
+          </div>
+
+          <div id="time-cycle"></div>
+      </div>
+
+      <div class="tooltip" id="tooltip"></div>
+
+      <script src="js/pixel-city.js"></script>
+  </body>
+  </html>
+      `;
+
+      await fs.writeFile(
+        path.join(this.staticDir, "index-pixel.html"),
+        pixelHtml,
+      );
+
+      // Create pixel-city.js for the pixel art visualization
+      const pixelCityJs = `// PixelCityBlockchain - A pixel art visualization of the blockchain
+  class PixelCityBlockchain {
+      constructor() {
+          // Initialize PixiJS
+          this.app = new PIXI.Application({
+              width: window.innerWidth,
+              height: window.innerHeight,
+              backgroundColor: 0x0a0a1a,
+              resolution: window.devicePixelRatio || 1,
+          });
+          document.getElementById('game-container').appendChild(this.app.view);
+
+          // Game state
+          this.state = {
+              blocks: [],
+              mempool: [],
+              buildings: [],
+              characters: [],
+              focusedEntity: null,
+              timeOfDay: 0, // 0-24 for day-night cycle
+              gameTime: 0,
+              camera: {
+                  x: 0,
+                  y: 0,
+                  scale: 1,
+                  targetScale: 1,
+                  dragging: false,
+                  lastPosition: null
+              }
+          };
+
+          // Container for all game objects
+          this.worldContainer = new PIXI.Container();
+          this.app.stage.addChild(this.worldContainer);
+
+          // Separate containers for layers
+          this.backgroundLayer = new PIXI.Container();
+          this.buildingLayer = new PIXI.Container();
+          this.characterLayer = new PIXI.Container();
+          this.effectsLayer = new PIXI.Container();
+          this.uiLayer = new PIXI.Container();
+
+          this.worldContainer.addChild(this.backgroundLayer);
+          this.worldContainer.addChild(this.buildingLayer);
+          this.worldContainer.addChild(this.characterLayer);
+          this.worldContainer.addChild(this.effectsLayer);
+          this.app.stage.addChild(this.uiLayer);
+
+          // Connect to WebSocket (socket.io)
+          this.socket = io();
+
+          // Set up event listeners
+          this.setupEventListeners();
+
+          // Start game loop
+          this.app.ticker.add(this.gameLoop.bind(this));
+
+          // Initialize game
+          this.initialize();
+      }
+
+      // Initialize the game
+      async initialize() {
+          try {
+              // Load assets
+              await this.loadAssets();
+
+              // Create the city grid
+              this.createCityGrid();
+
+              // Fetch initial blockchain data
+              await this.fetchBlockchainData();
+
+              // Hide loading screen
+              document.getElementById('loading-screen').style.display = 'none';
+
+              // Add intro animation
+              this.playIntroAnimation();
+          } catch (error) {
+              console.error('Error initializing game:', error);
+              document.getElementById('loading-text').textContent = 'Error loading game: ' + error.message;
+          }
+      }
+
+      // Load game assets
+      async loadAssets() {
+          return new Promise((resolve, reject) => {
+              // For now, we'll resolve immediately without loading real assets
+              // In a real implementation, you would load sprites and textures here
+
+              // Simulate loading progress
+              let progress = 0;
+              const loadingInterval = setInterval(() => {
+                  progress += 10;
+                  document.getElementById('loading-bar').style.width = \`\${progress}%\`;
+                  document.getElementById('loading-text').textContent = \`Loading assets... \${progress}%\`;
+
+                  if (progress >= 100) {
+                      clearInterval(loadingInterval);
+                      resolve();
+                  }
+              }, 200);
+          });
+      }
+
+      // Create the city background grid
+      createCityGrid() {
+          // Create sky background (blue rectangle)
+          const sky = new PIXI.Graphics();
+          sky.beginFill(0x4477aa);
+          sky.drawRect(-window.innerWidth, -window.innerHeight, window.innerWidth * 3, window.innerHeight * 2);
+          sky.endFill();
+          this.backgroundLayer.addChild(sky);
+
+          // Add some clouds
+          for (let i = 0; i < 10; i++) {
+              const cloud = new PIXI.Graphics();
+              cloud.beginFill(0xffffff, 0.8);
+
+              // Cloud shape
+              cloud.drawEllipse(0, 0, 30 + Math.random() * 50, 20 + Math.random() * 20);
+
+              // Position
+              cloud.x = Math.random() * window.innerWidth * 2 - window.innerWidth;
+              cloud.y = Math.random() * 200;
+
+              // Add properties for animation
+              cloud.speed = 0.1 + Math.random() * 0.2;
+
+              this.backgroundLayer.addChild(cloud);
+
+              // Add to an array so we can animate them
+              if (!this.clouds) this.clouds = [];
+              this.clouds.push(cloud);
+          }
+
+          // Create ground
+          const ground = new PIXI.Graphics();
+          ground.beginFill(0x225522);
+          ground.drawRect(-window.innerWidth, 300, window.innerWidth * 3, window.innerHeight);
+          ground.endFill();
+
+          // Add some texture to the ground
+          for (let x = -window.innerWidth; x < window.innerWidth * 2; x += 20) {
+              for (let y = 300; y < window.innerHeight + 300; y += 20) {
+                  if (Math.random() > 0.8) {
+                      const grassTuft = new PIXI.Graphics();
+                      grassTuft.beginFill(0x338833);
+                      grassTuft.drawRect(x, y, 6, 6);
+                      grassTuft.endFill();
+                      ground.addChild(grassTuft);
+                  }
+              }
+          }
+
+          this.backgroundLayer.addChild(ground);
+      }
+
+      // Fetch blockchain data from API
+      async fetchBlockchainData() {
+          try {
+              const response = await fetch('/api/blockchain');
+              const data = await response.json();
+
+              // Update stats display
+              document.getElementById('block-count').textContent = data.stats.blockCount;
+              document.getElementById('tx-count').textContent = data.stats.totalTxCount;
+              document.getElementById('mempool-size').textContent = data.mempool.txCount;
+
+              // Process blocks
+              this.processBlocks(data.blocks);
+
+              // Process mempool
+              this.processMempool(data.mempool);
+
+              return data;
+          } catch (error) {
+              console.error('Error fetching blockchain data:', error);
+              throw error;
+          }
+      }
+
+      // Process block data into buildings
+      processBlocks(blocks) {
+          // Clear existing buildings if needed
+          if (this.state.buildings.length === 0) {
+              // First time - add all blocks as buildings
+              blocks.forEach((block, index) => {
+                  this.addBuilding(block, index);
+              });
+          } else {
+              // Check for new blocks
+              const knownHashes = this.state.blocks.map(b => b.hash);
+
+              blocks.forEach((block, index) => {
+                  if (!knownHashes.includes(block.hash)) {
+                      // New block found - add at the beginning
+                      this.addBuilding(block, 0, true);
+                  }
+              });
+          }
+
+          // Update state
+          this.state.blocks = [...blocks];
+      }
+
+      // Process mempool data into waiting characters
+      processMempool(mempool) {
+          // Clear existing characters
+          this.characterLayer.removeChildren();
+          this.state.characters = [];
+
+          // Add characters for each mempool transaction
+          const centerX = 0;
+          const centerY = 300;
+          const radius = 150;
+
+          mempool.txids.slice(0, 30).forEach((txid, index) => {
+              const angle = (index / 30) * Math.PI * 2;
+              const x = centerX + Math.cos(angle) * radius;
+              const y = centerY + Math.sin(angle) * radius;
+
+              // Add a character for this transaction
+              this.addCharacter(txid, x, y, 'waiting');
+          });
+      }
+
+      // Add a building to represent a block
+      addBuilding(block, position, isNew = false) {
+          // Calculate building size based on block properties
+          const baseWidth = 80;
+          const baseHeight = 120;
+          const sizeMultiplier = 0.5 + (block.txCount / 10) * 0.5; // Size based on tx count
+          const width = baseWidth * sizeMultiplier;
+          const height = baseHeight * sizeMultiplier;
+
+          // Create building (simple rectangle for now)
+          const building = new PIXI.Graphics();
+
+          // Choose color based on block height
+          const colors = [0x8844aa, 0x4488cc, 0xcc8844];
+          const color = colors[block.height % colors.length];
+
+          // Draw building
+          building.beginFill(color);
+          building.drawRect(0, 0, width, height);
+          building.endFill();
+
+          // Draw windows
+          building.beginFill(0xffff88, 0.8);
+          for (let y = 20; y < height - 20; y += 30) {
+              for (let x = 10; x < width - 10; x += 30) {
+                  if (Math.random() > 0.3) {  // Some windows are dark
+                      building.drawRect(x, y, 10, 10);
+                  }
+              }
+          }
+          building.endFill();
+
+          // Position building
+          const gridSpacing = baseWidth * 1.5;
+          building.x = position * gridSpacing;
+          building.y = 300 - height; // Place on ground
+
+          // Store block data with the building
+          building.blockData = block;
+
+          // Add to building layer
+          if (isNew) {
+              this.buildingLayer.addChildAt(building, 0);
+          } else {
+              this.buildingLayer.addChild(building);
+          }
+
+          // Store in state
+          if (isNew) {
+              this.state.buildings.unshift(building);
+          } else {
+              this.state.buildings.push(building);
+          }
+
+          // Add animation for new buildings
+          if (isNew) {
+              building.alpha = 0;
+              building.scale.set(0.1);
+
+              // Animate the building appearing
+              gsap.to(building, {
+                  alpha: 1,
+                  duration: 1
+              });
+
+              gsap.to(building.scale, {
+                  x: 1,
+                  y: 1,
+                  duration: 1,
+                  ease: "elastic.out(1, 0.5)"
+              });
+
+              // Add coin animation
+              for (let i = 0; i < 10; i++) {
+                  const coin = new PIXI.Graphics();
+                  coin.beginFill(0xffcc00);
+                  coin.drawCircle(0, 0, 5);
+                  coin.endFill();
+
+                  coin.x = building.x + building.width / 2;
+                  coin.y = building.y;
+
+                  this.effectsLayer.addChild(coin);
+
+                  // Animate coin
+                  gsap.to(coin, {
+                      x: coin.x + Math.random() * 100 - 50,
+                      y: coin.y - 100 - Math.random() * 100,
+                      alpha: 0,
+                      rotation: Math.random() * Math.PI * 4,
+                      duration: 2,
+                      onComplete: () => {
+                          this.effectsLayer.removeChild(coin);
+                      }
+                  });
+              }
+          }
+
+          // Make building interactive
+          building.interactive = true;
+          building.buttonMode = true;
+
+          // Click event to show block details
+          building.on('pointerdown', () => {
+              this.showBlockDetails(block);
+          });
+
+          // Hover events
+          building.on('pointerover', (event) => {
+              building.tint = 0xffcc00;
+              this.showTooltip(\`Block #\${block.height}\`, event.data.global.x, event.data.global.y);
+          });
+
+          building.on('pointerout', () => {
+              building.tint = 0xffffff;
+              this.hideTooltip();
+          });
+
+          return building;
+      }
+
+      // Add a character to represent a transaction
+      addCharacter(txid, x, y, state = 'waiting') {
+          // Create a simple character (circle for now)
+          const character = new PIXI.Graphics();
+
+          // Choose color based on txid
+          const colors = [0x44aa88, 0xaa4488, 0xaaaa44];
+          const color = colors[parseInt(txid.substring(0, 2), 16) % colors.length];
+
+          character.beginFill(color);
+          character.drawCircle(0, 0, 10);
+          character.endFill();
+
+          // Draw a simple face
+          character.beginFill(0xffffff);
+          character.drawCircle(-3, -2, 2); // Left eye
+          character.drawCircle(3, -2, 2);  // Right eye
+          character.endFill();
+
+          character.beginFill(0x000000);
+          character.drawCircle(-3, -2, 1); // Left pupil
+          character.drawCircle(3, -2, 1);  // Right pupil
+          character.endFill();
+
+          character.lineStyle(1, 0x000000);
+          character.arc(0, 2, 3, 0, Math.PI); // Smile
+
+          // Position character
+          character.x = x;
+          character.y = y;
+
+          // Store transaction data with the character
+          character.txid = txid;
+          character.state = state;
+
+          // Add to character layer
+          this.characterLayer.addChild(character);
+
+          // Add to state
+          this.state.characters.push(character);
+
+          // Add animations based on state
+          if (state === 'waiting') {
+              // Idle animation
+              gsap.to(character, {
+                  y: character.y - 5,
+                  duration: 0.5 + Math.random() * 0.5,
+                  repeat: -1,
+                  yoyo: true
+              });
+          }
+
+          // Make character interactive
+          character.interactive = true;
+          character.buttonMode = true;
+
+          // Click event to show transaction details
+          character.on('pointerdown', () => {
+              this.showTransactionDetails(txid);
+          });
+
+          // Hover events
+          character.on('pointerover', (event) => {
+              character.tint = 0xffcc00;
+              this.showTooltip(\`TX: \${txid.substring(0, 8)}...\`, event.data.global.x, event.data.global.y);
+          });
+
+          character.on('pointerout', () => {
+              character.tint = 0xffffff;
+              this.hideTooltip();
+          });
+
+          return character;
+      }
+
+      // Move a character to a building (for transaction confirmation)
+      moveCharacterToBuilding(character, building) {
+          // Set state to moving
+          character.state = 'moving';
+
+          // Stop any existing animations
+          gsap.killTweensOf(character);
+
+          // Calculate target position
+          const targetX = building.x + building.width / 2;
+          const targetY = building.y + building.height - 20;
+
+          // Animate movement
+          gsap.to(character, {
+              x: targetX,
+              y: targetY,
+              duration: 2,
+              ease: "power1.inOut",
+              onComplete: () => {
+                  // Character reached the building
+                  character.state = 'confirmed';
+
+                  // Fade out and remove
+                  gsap.to(character, {
+                      alpha: 0,
+                      duration: 0.5,
+                      onComplete: () => {
+                          this.characterLayer.removeChild(character);
+                          this.state.characters = this.state.characters.filter(c => c !== character);
+                      }
+                  });
+              }
+          });
+
+          return character;
+      }
+
+      // Show tooltip
+      showTooltip(text, x, y) {
+          const tooltip = document.getElementById('tooltip');
+          tooltip.textContent = text;
+          tooltip.style.left = \`\${x + 10}px\`;
+          tooltip.style.top = \`\${y - 30}px\`;
+          tooltip.style.opacity = '1';
+      }
+
+      // Hide tooltip
+      hideTooltip() {
+          const tooltip = document.getElementById('tooltip');
+          tooltip.style.opacity = '0';
+      }
+
+      // Show block details
+      showBlockDetails(block) {
+          const detailsPanel = document.getElementById('details-panel');
+          const detailsContent = document.getElementById('details-content');
+
+          detailsContent.innerHTML = \`
+              <h3 style="color: #f7931a; margin-top: 0;">BLOCK #\${block.height}</h3>
+              <div>Hash: \${block.hash.substring(0, 20)}...</div>
+              <div>Time: \${new Date(block.time * 1000).toLocaleString()}</div>
+              <div>Transactions: \${block.txCount}</div>
+              <div>Size: \${block.size} bytes</div>
+              <div>Weight: \${block.weight}</div>
+              <div>Difficulty: \${block.difficulty.toFixed(2)}</div>
+          \`;
+
+          detailsPanel.style.display = 'block';
+      }
+
+      // Show transaction details
+      async showTransactionDetails(txid) {
+          const detailsPanel = document.getElementById('details-panel');
+          const detailsContent = document.getElementById('details-content');
+
+          // Show loading
+          detailsContent.innerHTML = \`
+              <h3 style="color: #f7931a; margin-top: 0;">TRANSACTION</h3>
+              <div>Loading transaction details...</div>
+          \`;
+
+          detailsPanel.style.display = 'block';
+
+          try {
+              // Fetch transaction details
+              const response = await fetch(\`/api/tx/\${txid}\`);
+              const tx = await response.json();
+
+              // Update panel with details
+              detailsContent.innerHTML = \`
+                  <h3 style="color: #f7931a; margin-top: 0;">TRANSACTION</h3>
+                  <div>TxID: \${tx.txid.substring(0, 20)}...</div>
+                  <div>Size: \${tx.size} bytes</div>
+                  <div>Inputs: \${tx.vin.length}</div>
+                  <div>Outputs: \${tx.vout.length}</div>
+                  <div>Status: \${tx.confirmations ? \`Confirmed (\${tx.confirmations})\` : 'Unconfirmed'}</div>
+              \`;
+          } catch (error) {
+              detailsContent.innerHTML = \`
+                  <h3 style="color: #f7931a; margin-top: 0;">TRANSACTION</h3>
+                  <div>Error loading transaction: \${error.message}</div>
+              \`;
+          }
+      }
+
+      // Play intro animation
+      playIntroAnimation() {
+          // Camera animation
+          gsap.to(this.state.camera, {
+              x: 200,
+              y: 100,
+              duration: 3,
+              ease: "power2.inOut"
+          });
+
+          gsap.to(this.state.camera, {
+              targetScale: 0.8,
+              duration: 3,
+              ease: "power2.inOut"
+          });
+      }
+
+      // Setup event listeners
+      setupEventListeners() {
+          // Socket events
+          this.socket.on('connect', () => {
+              console.log('Connected to server');
+          });
+
+          this.socket.on('blockchain_update', (data) => {
+              // Update stats display
+              document.getElementById('block-count').textContent = data.stats.blockCount;
+              document.getElementById('tx-count').textContent = data.stats.totalTxCount;
+              document.getElementById('mempool-size').textContent = data.mempool.txCount;
+
+              // Process blocks
+              this.processBlocks(data.blocks);
+
+              // Process mempool
+              this.processMempool(data.mempool);
+          });
+
+          this.socket.on('new_block', (block) => {
+              // Add new block at the beginning
+              this.addBuilding(block, 0, true);
+
+              // Add to state blocks
+              this.state.blocks.unshift(block);
+
+              // Move some characters to the new building
+              const building = this.state.buildings[0];
+
+              // Find characters in waiting state
+              const waitingCharacters = this.state.characters
+                  .filter(char => char.state === 'waiting')
+                  .slice(0, 5); // Limit to 5 characters
+
+              // Move characters to the building
+              waitingCharacters.forEach(character => {
+                  this.moveCharacterToBuilding(character, building);
+              });
+
+              // Update stats display
+              document.getElementById('block-count').textContent =
+                  (parseInt(document.getElementById('block-count').textContent) + 1).toString();
+
+              // Update compass direction
+              this.updateCompassDirection();
+          });
+
+          this.socket.on('new_transaction', (tx) => {
+              // Add new character for the transaction
+              const centerX = 0;
+              const centerY = 300;
+              const radius = 150;
+              const angle = Math.random() * Math.PI * 2;
+              const x = centerX + Math.cos(angle) * radius;
+              const y = centerY + Math.sin(angle) * radius;
+
+              this.addCharacter(tx.txid, x, y, 'waiting');
+
+              // Update stats display
+              document.getElementById('mempool-size').textContent =
+                  (parseInt(document.getElementById('mempool-size').textContent) + 1).toString();
+
+              // Update compass direction
+              this.updateCompassDirection();
+          });
+
+          // UI button events
+          document.getElementById('mine-btn').addEventListener('click', () => {
+              // Send mine block request
+              this.socket.emit('mine_block', { blocks: 1 });
+          });
+
+          document.getElementById('tx-btn').addEventListener('click', async () => {
+              // Create a random transaction
+              try {
+                  const wallets = await this.getWallets();
+
+                  if (wallets.length < 2) {
+                      alert('Need at least 2 wallets to create a transaction');
+                      return;
+                  }
+
+                  // Find a wallet with funds
+                  const sourceWallet = wallets[0];
+                  const destWallet = wallets[1];
+
+                  // Get destination address
+                  const response = await fetch(\`/api/new-address?wallet=\${destWallet}\`);
+                  const data = await response.json();
+                  const address = data.address;
+
+                  // Create transaction
+                  this.socket.emit('create_transaction', {
+                      fromWallet: sourceWallet,
+                      toAddress: address,
+                      amount: 0.001 + Math.random() * 0.01
+                  });
+              } catch (error) {
+                  console.error('Error creating transaction:', error);
+                  alert('Error creating transaction: ' + error.message);
+              }
+          });
+
+          document.getElementById('zoom-in-btn').addEventListener('click', () => {
+              this.state.camera.targetScale = Math.min(2, this.state.camera.targetScale + 0.2);
+          });
+
+          document.getElementById('zoom-out-btn').addEventListener('click', () => {
+              this.state.camera.targetScale = Math.max(0.5, this.state.camera.targetScale - 0.2);
+          });
+
+          // Close details panel
+          document.getElementById('details-close').addEventListener('click', () => {
+              document.getElementById('details-panel').style.display = 'none';
+          });
+
+          // View toggle button
+          document.getElementById('view-toggle').addEventListener('click', () => {
+              window.location.href = 'index.html';
+          });
+
+          // Dragging functionality
+          this.app.view.addEventListener('mousedown', (e) => {
+              this.state.camera.dragging = true;
+              this.state.camera.lastPosition = { x: e.clientX, y: e.clientY };
+          });
+
+          this.app.view.addEventListener('touchstart', (e) => {
+              this.state.camera.dragging = true;
+              this.state.camera.lastPosition = {
+                  x: e.touches[0].clientX,
+                  y: e.touches[0].clientY
+              };
+          });
+
+          window.addEventListener('mouseup', () => {
+              this.state.camera.dragging = false;
+          });
+
+          window.addEventListener('touchend', () => {
+              this.state.camera.dragging = false;
+          });
+
+          this.app.view.addEventListener('mousemove', (e) => {
+              if (this.state.camera.dragging && this.state.camera.lastPosition) {
+                  const dx = e.clientX - this.state.camera.lastPosition.x;
+                  const dy = e.clientY - this.state.camera.lastPosition.y;
+
+                  this.state.camera.x += dx;
+                  this.state.camera.y += dy;
+
+                  this.state.camera.lastPosition = { x: e.clientX, y: e.clientY };
+              }
+          });
+
+          this.app.view.addEventListener('touchmove', (e) => {
+              if (this.state.camera.dragging && this.state.camera.lastPosition) {
+                  const dx = e.touches[0].clientX - this.state.camera.lastPosition.x;
+                  const dy = e.touches[0].clientY - this.state.camera.lastPosition.y;
+
+                  this.state.camera.x += dx;
+                  this.state.camera.y += dy;
+
+                  this.state.camera.lastPosition = {
+                      x: e.touches[0].clientX,
+                      y: e.touches[0].clientY
+                  };
+              }
+          });
+
+          // Window resize
+          window.addEventListener('resize', () => {
+              this.app.renderer.resize(window.innerWidth, window.innerHeight);
+          });
+      }
+
+      // Update compass direction based on recent transaction flow
+      updateCompassDirection() {
+          // Get the compass elements
+          const compassArrow = document.getElementById('compass-arrow');
+          const compassLabel = document.getElementById('compass-label');
+
+          // Determine direction based on recent activity
+          // This is just a placeholder - in a real implementation, you would
+          // analyze the actual transaction flow
+          const direction = Math.random() * 360;
+
+          // Rotate the compass arrow
+          compassArrow.style.transform = \`rotate(\${direction}deg)\`;
+
+          // Update the label
+          const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+          const dirIndex = Math.floor(((direction + 22.5) % 360) / 45);
+          compassLabel.textContent = directions[dirIndex];
+      }
+
+      // Get wallet list
+      async getWallets() {
+          try {
+              const response = await fetch('/api/wallets');
+              const data = await response.json();
+              return data.wallets;
+          } catch (error) {
+              console.error('Error fetching wallets:', error);
+              return [];
+          }
+      }
+
+      // Main game loop
+      gameLoop(delta) {
+          // Update camera
+          this.state.camera.scale += (this.state.camera.targetScale - this.state.camera.scale) * 0.1;
+
+          this.worldContainer.position.set(
+              window.innerWidth / 2 + this.state.camera.x,
+              window.innerHeight / 2 + this.state.camera.y
+          );
+
+          this.worldContainer.scale.set(this.state.camera.scale);
+
+          // Update clouds
+          if (this.clouds) {
+              this.clouds.forEach(cloud => {
+                  cloud.x += cloud.speed;
+
+                  // Wrap around screen
+                  if (cloud.x > window.innerWidth) {
+                      cloud.x = -cloud.width;
+                  }
+              });
+          }
+
+          // Update time of day
+          this.state.gameTime += delta * 0.01;
+          this.state.timeOfDay = (this.state.gameTime % 24);
+
+          // Update time display
+          const hours = Math.floor(this.state.timeOfDay);
+          const minutes = Math.floor((this.state.timeOfDay - hours) * 60);
+          document.getElementById('game-time').textContent =
+              \`\${hours.toString().padStart(2, '0')}:\${minutes.toString().padStart(2, '0')}\`;
+
+          // Day-night cycle
+          const nightOpacity =
+              this.state.timeOfDay > 18 || this.state.timeOfDay < 6
+                  ? Math.min(0.5, Math.abs((this.state.timeOfDay > 18 ? 24 - this.state.timeOfDay : this.state.timeOfDay) - 6) * 0.1)
+                  : 0;
+
+          document.getElementById('time-cycle').style.opacity = nightOpacity.toString();
+      }
+  }
+
+  // When document is loaded, create the game
+  document.addEventListener('DOMContentLoaded', () => {
+      // Setup loading bar first
+      let loadingProgress = 0;
+      const loadingInterval = setInterval(() => {
+          loadingProgress += 5;
+          if (loadingProgress > 100) {
+              clearInterval(loadingInterval);
+              return;
+          }
+          document.getElementById('loading-bar').style.width = \`\${loadingProgress}%\`;
+      }, 100);
+
+      // Create the game
+      window.game = new PixelCityBlockchain();
+  });`;
+
+      await fs.writeFile(
+        path.join(this.staticDir, "js/pixel-city.js"),
+        pixelCityJs,
+      );
+
+      // Create placeholder assets
+      await this.createPixelArtAssets();
+
+      console.log(
+        chalk.green("Pixel art visualization files created successfully."),
+      );
+    } catch (error) {
+      console.error("Error creating pixel art visualization files:", error);
+    }
+  }
+
+  /**
+   * Creates placeholder assets for the pixel art visualization
+   */
+  private async createPixelArtAssets(): Promise<void> {
+    try {
+      // Create empty placeholder files for assets
+      // In a real implementation, you would create actual pixel art assets
+
+      // Create empty sound files
+      const emptyBuffer = Buffer.from([]);
+      await fs.writeFile(
+        path.join(this.staticDir, "sounds/block_mined.mp3"),
+        emptyBuffer,
+      );
+      await fs.writeFile(
+        path.join(this.staticDir, "sounds/transaction.mp3"),
+        emptyBuffer,
+      );
+      await fs.writeFile(
+        path.join(this.staticDir, "sounds/click.mp3"),
+        emptyBuffer,
+      );
+      await fs.writeFile(
+        path.join(this.staticDir, "sounds/blockchain_city_theme.mp3"),
+        emptyBuffer,
+      );
+
+      console.log(chalk.green("Pixel art assets created successfully."));
+    } catch (error) {
+      console.error("Error creating pixel art assets:", error);
     }
   }
 
@@ -365,8 +1764,16 @@ export class VisualizationManager {
                 <button id="refreshBtn" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded">
                     Refresh Data
                 </button>
+                <button id="minecraft-view-btn" class="absolute top-4 right-4 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded flex items-center">
+                  <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"></path>
+                  </svg>
+                  Switch to Minecraft View
+                </button>
             </div>
         </div>
+
+
     </header>
 
     <div class="dashboard">
@@ -463,8 +1870,14 @@ export class VisualizationManager {
     </div>
 
     <div class="tooltip" id="tooltip"></div>
+    <script>
+      document.getElementById('minecraft-view-btn').addEventListener('click', function() {
+        window.location.href = 'index-minecraft.html';
+      });
+    </script>
 
     <script src="js/main.js"></script>
+
 </body>
 </html>`;
 

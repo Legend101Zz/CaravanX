@@ -39,3 +39,4 @@ lib/*.js
 test/*.js
 *.map
 .DS_Store
+dist

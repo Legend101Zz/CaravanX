@@ -54,6 +54,7 @@
     "bip32": "^5.0.0-rc.0",
     "bitcoinjs-lib": "^6.1.7",
     "boxen": "^8.0.1",
+    "canvas": "^3.1.0",
     "chalk": "^5.4.1",
     "chart.js": "^4.4.9",
     "cli-progress": "^3.12.0",

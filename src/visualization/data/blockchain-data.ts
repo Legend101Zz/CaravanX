@@ -142,6 +142,18 @@ export class BlockchainDataService {
   }
 
   /**
+   * Get a new address from a wallet
+   */
+  async getNewAddress(wallet: string): Promise<string> {
+    try {
+      return await this.rpc.callRpc<string>("getnewaddress", [], wallet);
+    } catch (error) {
+      console.error(`Error getting new address for wallet ${wallet}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Get detailed transaction information
    */
   async getTransaction(txid: string): Promise<Transaction> {

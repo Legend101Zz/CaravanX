@@ -328,6 +328,118 @@ export class VisualizationServer {
         res.status(500).json({ error: "Internal server error" });
       }
     });
+
+    // Get a new address from a wallet
+    this.app.get("/api/new-address", async (req: any, res: any) => {
+      try {
+        const wallet = req.query.wallet as string;
+        if (!wallet) {
+          return res
+            .status(400)
+            .json({ error: "Wallet parameter is required" });
+        }
+
+        // Call the Bitcoin service to get a new address
+        const address = await this.blockchainData.getNewAddress(wallet);
+        res.json({ address });
+      } catch (error) {
+        console.error("API error:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
+    // Get wallet list
+    this.app.get("/api/wallets", async (req, res) => {
+      try {
+        const wallets = await this.blockchainData.getWalletList();
+        res.json({ wallets });
+      } catch (error) {
+        console.error("API error:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
+    // API endpoint for mining blocks in Minecraft view
+    this.app.post("/api/minecraft/mine", async (req, res) => {
+      try {
+        const { x, y, z, tool } = req.body;
+
+        // Simulate mining success based on tool and block type
+        const success = Math.random() > 0.3; // 70% success rate
+
+        if (success) {
+          // Return mining result
+          res.json({
+            success: true,
+            material: "stone",
+            amount: Math.floor(Math.random() * 3) + 1,
+          });
+        } else {
+          // Mining failed
+          res.json({
+            success: false,
+            message: "Mining failed. Try a different tool or location.",
+          });
+        }
+      } catch (error) {
+        console.error("API error:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
+    // API endpoint for player inventory
+    this.app.get("/api/minecraft/inventory", (req, res) => {
+      // Return default inventory
+      res.json({
+        bitcoin: 0,
+        tokens: {
+          BlockToken: 10,
+          ChainCoin: 5,
+        },
+        tools: {
+          pickaxe: { level: 1, durability: 100 },
+          shovel: { level: 1, durability: 100 },
+        },
+        materials: {
+          stone: 0,
+          goldOre: 0,
+        },
+      });
+    });
+
+    // API endpoint for quests
+    this.app.get("/api/minecraft/quests", (req, res) => {
+      // Return available quests
+      res.json([
+        {
+          id: "mining_101",
+          title: "Mining 101",
+          description: "Mine your first block to earn a reward",
+          reward: { bitcoin: 0.1 },
+          progress: 0,
+          goal: 1,
+          complete: false,
+        },
+        {
+          id: "transaction_tracker",
+          title: "Transaction Tracker",
+          description: "Interact with 5 transaction characters",
+          reward: { tokens: { ChainCoin: 10 } },
+          progress: 0,
+          goal: 5,
+          complete: false,
+        },
+        {
+          id: "block_explorer",
+          title: "Block Explorer",
+          description: "Visit 10 different block buildings",
+          reward: { materials: { goldOre: 5 } },
+          progress: 0,
+          goal: 10,
+          complete: false,
+        },
+      ]);
+    });
   }
 
   /**
