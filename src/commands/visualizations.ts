@@ -1,4 +1,3 @@
-//@ts-nocheck
 import { input, confirm, select, number } from "@inquirer/prompts";
 import { ConfigManager } from "../core/config";
 import { BitcoinRpcClient } from "../core/rpc";
@@ -62,10 +61,10 @@ export class VisualizationCommands {
       let bitcoinCoreRunning = false;
 
       try {
-        const blockchainInfo =
-          await this.bitcoinRpcClient.callRpc("getblockchaininfo");
-        bitcoinCoreRunning =
-          blockchainInfo && blockchainInfo.chain === "regtest";
+        const blockchainInfo = (await this.bitcoinRpcClient.callRpc(
+          "getblockchaininfo",
+        )) as { chain: string };
+        bitcoinCoreRunning = blockchainInfo.chain === "regtest";
         spinner.succeed("Connected to Bitcoin Core (regtest mode)");
       } catch (error) {
         spinner.fail("Could not connect to Bitcoin Core");
@@ -183,7 +182,7 @@ export class VisualizationCommands {
           console.log(colors.info("Opening visualization in browser..."));
           await open(`http://localhost:${port}/`);
         }
-      } catch (error) {
+      } catch (error: any) {
         startSpinner.fail("Failed to start visualization server");
         console.error(formatError(`Error: ${error.message}`));
       }
@@ -277,7 +276,7 @@ export class VisualizationCommands {
       try {
         wallets = await this.bitcoinService.listWallets();
         walletsSpinner.succeed("Wallets loaded");
-      } catch (error) {
+      } catch (error: any) {
         walletsSpinner.fail("Error loading wallets");
         console.error(formatError(`Error: ${error.message}`));
         return;
@@ -347,7 +346,7 @@ export class VisualizationCommands {
           const address = await this.bitcoinService.getNewAddress(miningWallet);
           await this.bitcoinService.generateToAddress(5, address);
           fundingSpinner.succeed(`Successfully funded wallet: ${miningWallet}`);
-        } catch (error) {
+        } catch (error: any) {
           fundingSpinner.fail("Error mining blocks");
           console.error(formatError(`Error: ${error.message}`));
           return;
@@ -452,7 +451,7 @@ export class VisualizationCommands {
         const address = await this.bitcoinService.getNewAddress(miningWallet);
         await this.bitcoinService.generateToAddress(5, address);
         miningSpinner.succeed("Successfully mined 5 blocks");
-      } catch (error) {
+      } catch (error: any) {
         miningSpinner.fail("Error mining blocks");
         console.error(formatError(`Error: ${error.message}`));
         return;
@@ -497,7 +496,7 @@ export class VisualizationCommands {
         }
 
         txSpinner.succeed("Created 10 random transactions");
-      } catch (error) {
+      } catch (error: any) {
         txSpinner.fail("Error creating transactions");
         console.error(formatError(`Error: ${error.message}`));
         return;
@@ -512,7 +511,7 @@ export class VisualizationCommands {
         const address = await this.bitcoinService.getNewAddress(wallets[0]);
         await this.bitcoinService.generateToAddress(1, address);
         confirmSpinner.succeed("Successfully mined confirmation block");
-      } catch (error) {
+      } catch (error: any) {
         confirmSpinner.fail("Error mining confirmation block");
         console.error(formatError(`Error: ${error.message}`));
       }
@@ -570,21 +569,21 @@ export class VisualizationCommands {
       console.log(colors.info(`Transactions per interval: ${txPerInterval}`));
 
       let elapsedTime = 0;
-      const updateInterval = Math.min(blockInterval, 5); // Update at least every 5 seconds
+      const updateInterval = Math.min(blockInterval!, 5); // Update at least every 5 seconds
       const startTime = Date.now();
 
       const simulationInterval = setInterval(async () => {
         const now = Date.now();
         elapsedTime = Math.floor((now - startTime) / 1000);
 
-        if (elapsedTime >= duration) {
+        if (elapsedTime >= duration!) {
           clearInterval(simulationInterval);
           console.log(formatSuccess("\nContinuous simulation completed!"));
           return;
         }
 
         // Update progress
-        const progress = Math.floor((elapsedTime / duration) * 100);
+        const progress = Math.floor((elapsedTime / duration!) * 100);
         console.log(
           colors.info(
             `Simulation progress: ${progress}% (${elapsedTime}/${duration} seconds)`,
@@ -592,7 +591,7 @@ export class VisualizationCommands {
         );
 
         // Mine block if it's time
-        if (elapsedTime % blockInterval === 0) {
+        if (elapsedTime % blockInterval! === 0) {
           try {
             const address = await this.bitcoinService.getNewAddress(wallets[0]);
             await this.bitcoinService.generateToAddress(1, address);
@@ -617,9 +616,9 @@ export class VisualizationCommands {
               return;
             }
 
-            const amountPerTx = sourceInfo.balance / (txPerInterval * 5); // Ensure enough for future txs
+            const amountPerTx = sourceInfo.balance / (txPerInterval! * 5); // Ensure enough for future txs
 
-            for (let i = 0; i < Math.min(txPerInterval, 5); i++) {
+            for (let i = 0; i < Math.min(txPerInterval!, 5); i++) {
               // Generate a new address
               const destAddress = await this.bitcoinService.getNewAddress(
                 wallets[Math.floor(Math.random() * wallets.length)],
@@ -676,18 +675,18 @@ export class VisualizationCommands {
       let blockInterval = 0;
 
       if (simulateBlocks) {
-        numBlocks = await number({
+        numBlocks = (await number({
           message: "How many blocks would you like to mine?",
           default: 10,
-        });
+        })) as number;
 
-        blockInterval = await number({
+        blockInterval = (await number({
           message: "Interval between blocks (seconds, 0 for all at once):",
           default: 0,
-        });
+        })) as number;
       }
 
-      const simulateTxs = await confirm({
+      let simulateTxs = await confirm({
         message: "Would you like to simulate transactions?",
         default: true,
       });
@@ -696,16 +695,16 @@ export class VisualizationCommands {
       let txInterval = 0;
 
       if (simulateTxs) {
-        numTransactions = await number({
+        numTransactions = (await number({
           message: "How many transactions would you like to create?",
           default: 20,
-        });
+        })) as number;
 
-        txInterval = await number({
+        txInterval = (await number({
           message:
             "Interval between transactions (seconds, 0 for all at once):",
           default: 0,
-        });
+        })) as number;
       }
 
       const confirmFinalBlock = await confirm({
@@ -741,7 +740,7 @@ export class VisualizationCommands {
             try {
               await this.bitcoinService.generateToAddress(5, address);
               spinner.succeed("Mined 5 blocks for funding");
-            } catch (error) {
+            } catch (error: any) {
               spinner.fail("Error mining funding blocks");
               console.error(formatError(`Error: ${error.message}`));
               return;
@@ -765,7 +764,7 @@ export class VisualizationCommands {
             const address = await this.bitcoinService.getNewAddress(wallets[0]);
             await this.bitcoinService.generateToAddress(numBlocks, address);
             spinner.succeed(`Mined ${numBlocks} blocks`);
-          } catch (error) {
+          } catch (error: any) {
             spinner.fail("Error mining blocks");
             console.error(formatError(`Error: ${error.message}`));
             return;
@@ -795,7 +794,7 @@ export class VisualizationCommands {
                   setTimeout(resolve, blockInterval * 1000),
                 );
               }
-            } catch (error) {
+            } catch (error: any) {
               spinner.fail(`Error mining block ${i + 1}`);
               console.error(formatError(`Error: ${error.message}`));
               break;
@@ -838,7 +837,7 @@ export class VisualizationCommands {
             }
 
             spinner.succeed(`Created ${numTransactions} transactions`);
-          } catch (error) {
+          } catch (error: any) {
             spinner.fail("Error creating transactions");
             console.error(formatError(`Error: ${error.message}`));
           }
@@ -891,7 +890,7 @@ export class VisualizationCommands {
                   setTimeout(resolve, txInterval * 1000),
                 );
               }
-            } catch (error) {
+            } catch (error: any) {
               spinner.fail(`Error creating transaction ${i + 1}`);
               console.error(formatError(`Error: ${error.message}`));
               break;
@@ -910,7 +909,7 @@ export class VisualizationCommands {
           const address = await this.bitcoinService.getNewAddress(wallets[0]);
           await this.bitcoinService.generateToAddress(1, address);
           spinner.succeed("Mined confirmation block");
-        } catch (error) {
+        } catch (error: any) {
           spinner.fail("Error mining confirmation block");
           console.error(formatError(`Error: ${error.message}`));
         }
@@ -978,7 +977,7 @@ export class VisualizationCommands {
             // Refresh wallet list
             wallets = await this.bitcoinService.listWallets();
             spinner.succeed(`Now have ${wallets.length} wallets`);
-          } catch (error) {
+          } catch (error: any) {
             spinner.fail("Error creating wallets");
             console.error(formatError(`Error: ${error.message}`));
             return;
@@ -1009,7 +1008,7 @@ export class VisualizationCommands {
             const address = await this.bitcoinService.getNewAddress(wallets[0]);
             await this.bitcoinService.generateToAddress(10, address);
             spinner.succeed("Mined 10 blocks for funding");
-          } catch (error) {
+          } catch (error: any) {
             spinner.fail("Error mining funding blocks");
             console.error(formatError(`Error: ${error.message}`));
             return;
@@ -1029,9 +1028,12 @@ export class VisualizationCommands {
       // Assign roles to wallets
       const minerWallets = wallets.slice(
         0,
-        Math.min(minerCount, wallets.length),
+        Math.min(minerCount!, wallets.length),
       );
-      const userWallets = wallets.slice(0, Math.min(userCount, wallets.length));
+      const userWallets = wallets.slice(
+        0,
+        Math.min(userCount!, wallets.length),
+      );
       const merchantWallet = wallets[wallets.length - 1];
 
       console.log(colors.info(`Miner wallets: ${minerWallets.join(", ")}`));
@@ -1071,7 +1073,7 @@ export class VisualizationCommands {
             await this.bitcoinService.getNewAddress(minerWallets[0]),
           );
         }
-      } catch (error) {
+      } catch (error: any) {
         fundingSpinner.fail("Error distributing funds");
         console.error(formatError(`Error: ${error.message}`));
       }
@@ -1100,7 +1102,7 @@ export class VisualizationCommands {
         const now = Date.now();
         elapsedTime = Math.floor((now - startTime) / 1000);
 
-        if (elapsedTime >= duration) {
+        if (elapsedTime >= duration!) {
           clearInterval(simulationInterval);
           console.log(formatSuccess("\nAgent-based simulation completed!"));
           return;
@@ -1108,7 +1110,7 @@ export class VisualizationCommands {
 
         // Update progress every 10 seconds
         if (elapsedTime % 10 === 0) {
-          const progress = Math.floor((elapsedTime / duration) * 100);
+          const progress = Math.floor((elapsedTime / duration!) * 100);
           console.log(
             colors.info(
               `Simulation progress: ${progress}% (${elapsedTime}/${duration} seconds)`,
