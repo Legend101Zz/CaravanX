@@ -266,8 +266,8 @@ export interface TransactionResult {
  */
 export const API_ROUTES = {
   BLOCKCHAIN: "/api/blockchain",
-  BLOCK: "/api/block/:hash",
-  TRANSACTION: "/api/tx/:txid",
+  BLOCK: "/api/block/:blockHash",
+  TRANSACTION: "/api/tx/:transactionId",
   MEMPOOL: "/api/mempool",
   CHAIN_INFO: "/api/chain-info",
   RECENT_BLOCKS: "/api/recent-blocks",

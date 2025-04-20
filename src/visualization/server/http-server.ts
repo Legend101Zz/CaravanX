@@ -5,6 +5,7 @@ import * as fs from "fs-extra";
 import express from "express";
 import { Server as SocketIOServer } from "socket.io";
 import { BlockchainDataService } from "../data/blockchain-data";
+import { colors } from "../../utils/terminal";
 
 // Content types for different file extensions
 const CONTENT_TYPES: Record<string, string> = {
@@ -19,7 +20,7 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 /**
- * HTTP Server for blockchain visualization using WebSockets
+ * Enhanced HTTP Server for blockchain visualization with WebSockets
  */
 export class VisualizationServer {
   private server: http.Server;
@@ -60,6 +61,17 @@ export class VisualizationServer {
   }
 
   /**
+   * Configure Express middleware
+   */
+  private configureMiddleware(): void {
+    // Serve static files
+    this.app.use(express.static(this.staticDir));
+
+    // Parse JSON body
+    this.app.use(express.json());
+  }
+
+  /**
    * Configure Socket.io events
    */
   private configureSocketEvents(): void {
@@ -81,17 +93,6 @@ export class VisualizationServer {
       // Handle client events
       this.configureClientEvents(socket);
     });
-  }
-
-  /**
-   * Configure Express middleware
-   */
-  private configureMiddleware(): void {
-    // Serve static files
-    this.app.use(express.static(this.staticDir));
-
-    // Parse JSON body
-    this.app.use(express.json());
   }
 
   /**
@@ -181,7 +182,7 @@ export class VisualizationServer {
    */
   private configureRoutes(): void {
     // Get blockchain data
-    this.app.get("/api/blockchain", async (req: any, res: any) => {
+    this.app.get("/api/blockchain", async (req, res) => {
       try {
         const data = await this.blockchainData.getBlockchainVisualizationData();
         res.json(data);
@@ -192,9 +193,10 @@ export class VisualizationServer {
     });
 
     // Get block details
-    this.app.get("/api/block/:hash", async (req: any, res: any) => {
+    this.app.get("/api/block/:hash", async (req, res) => {
       try {
         const block = await this.blockchainData.getBlock(req.params.hash);
+        console.log(colors.info("/api/blockchain2"));
         res.json(block);
       } catch (error) {
         console.error("API error:", error);
@@ -203,9 +205,10 @@ export class VisualizationServer {
     });
 
     // Get transaction details
-    this.app.get("/api/tx/:txid", async (req: any, res: any) => {
+    this.app.get("/api/tx/:txid", async (req, res) => {
       try {
         const tx = await this.blockchainData.getTransaction(req.params.txid);
+        console.log(colors.info("/api/blockchain3"));
         res.json(tx);
       } catch (error) {
         console.error("API error:", error);
@@ -214,7 +217,7 @@ export class VisualizationServer {
     });
 
     // Get mempool data
-    this.app.get("/api/mempool", async (req: any, res: any) => {
+    this.app.get("/api/mempool", async (req, res) => {
       try {
         const txids = await this.blockchainData.getMempoolTransactions();
         const info = await this.blockchainData.getMempoolInfo();
@@ -226,7 +229,7 @@ export class VisualizationServer {
     });
 
     // Get chain info
-    this.app.get("/api/chain-info", async (req: any, res: any) => {
+    this.app.get("/api/chain-info", async (req, res) => {
       try {
         const info = await this.blockchainData.getChainInfo();
         res.json(info);
@@ -237,7 +240,7 @@ export class VisualizationServer {
     });
 
     // Get recent blocks
-    this.app.get("/api/recent-blocks", async (req: any, res: any) => {
+    this.app.get("/api/recent-blocks", async (req, res) => {
       try {
         const count = parseInt((req.query.count as string) || "10");
         const blocks = await this.blockchainData.getRecentBlocks(count);
@@ -324,11 +327,6 @@ export class VisualizationServer {
         console.error("API error:", error);
         res.status(500).json({ error: "Internal server error" });
       }
-    });
-
-    // Fall back to serving the main HTML file for any other route
-    this.app.get("*", (req: any, res: any) => {
-      res.sendFile(path.join(this.staticDir, "index.html"));
     });
   }
 
