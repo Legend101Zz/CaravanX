@@ -139,6 +139,138 @@ export interface BlockchainVisualizationResponse {
     blockCount: number;
     mempoolSize: number;
     connections: number;
+    totalTxCount: number;
   };
+  chainInfo: ChainInfo;
+  networkInfo: NetworkInfo;
+  mempoolInfo: MempoolInfo;
+  miningInfo: any;
+  utxoStats: any;
   timestamp: number;
 }
+
+/**
+ * Visualization Theme
+ */
+export enum VisualizationTheme {
+  DARK = "dark",
+  LIGHT = "light",
+}
+
+/**
+ * Network View Type
+ */
+export enum NetworkViewType {
+  TRANSACTIONS = "transactions",
+  ADDRESSES = "addresses",
+  WALLETS = "wallets",
+}
+
+/**
+ * Mining Activity Log
+ */
+export interface MiningActivityLog {
+  message: string;
+  timestamp: number;
+  type: "info" | "success" | "warning" | "error";
+}
+
+/**
+ * Transaction Network Node
+ */
+export interface NetworkNode {
+  id: string;
+  label: string;
+  group?: string;
+  shape?: string;
+  color?: {
+    background: string;
+    border: string;
+    highlight?: {
+      background: string;
+      border: string;
+    };
+  };
+  font?: {
+    color: string;
+    size?: number;
+  };
+  value?: number;
+  title?: string;
+}
+
+/**
+ * Transaction Network Edge
+ */
+export interface NetworkEdge {
+  from: string;
+  to: string;
+  arrows?: string;
+  color?: {
+    color: string;
+    highlight?: string;
+  };
+  width?: number;
+  dashes?: boolean;
+  title?: string;
+  value?: number;
+}
+
+/**
+ * Socket Message Types
+ */
+export enum SocketMessageType {
+  BLOCKCHAIN_UPDATE = "blockchain_update",
+  NEW_BLOCK = "new_block",
+  NEW_TRANSACTION = "new_transaction",
+  MINING_STARTED = "mining_started",
+  MINING_COMPLETE = "mining_complete",
+  ERROR = "error",
+}
+
+/**
+ * Mining Request
+ */
+export interface MiningRequest {
+  blocks: number;
+  address?: string;
+}
+
+/**
+ * Transaction Creation Request
+ */
+export interface TransactionRequest {
+  fromWallet: string;
+  toAddress: string;
+  amount: number;
+}
+
+/**
+ * Mining Result
+ */
+export interface MiningResult {
+  success: boolean;
+  blockHashes: string[];
+}
+
+/**
+ * Transaction Creation Result
+ */
+export interface TransactionResult {
+  success: boolean;
+  txid: string;
+}
+
+/**
+ * API Routes
+ */
+export const API_ROUTES = {
+  BLOCKCHAIN: "/api/blockchain",
+  BLOCK: "/api/block/:hash",
+  TRANSACTION: "/api/tx/:txid",
+  MEMPOOL: "/api/mempool",
+  CHAIN_INFO: "/api/chain-info",
+  RECENT_BLOCKS: "/api/recent-blocks",
+  MINE_BLOCK: "/api/mine-block",
+  CREATE_TRANSACTION: "/api/create-transaction",
+};
