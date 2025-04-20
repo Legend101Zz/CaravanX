@@ -23,9 +23,31 @@ class VoxelEngine {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
+    // Create a camera container for movement
+    this.cameraContainer = new THREE.Object3D();
+    this.cameraContainer.position.set(0, 5, 10);
+    this.scene.add(this.cameraContainer);
+    this.cameraContainer.add(this.camera);
+
     // Initialize pointer lock controls
-    this.controls = new THREE.PointerLockControls(this.camera, document.body);
-    this.controls.pointerSpeed = 0.2;
+    // Check if PointerLockControls is available, if not use a fallback
+    if (typeof THREE.PointerLockControls === "function") {
+      try {
+        this.controls = new THREE.PointerLockControls(
+          this.camera,
+          document.body,
+        );
+        this.controls.pointerSpeed = 0.2;
+      } catch (error) {
+        console.error("Could not initialize PointerLockControls:", error);
+        this.useFallbackControls();
+      }
+    } else {
+      console.warn(
+        "THREE.PointerLockControls not found, using fallback controls",
+      );
+      this.useFallbackControls();
+    }
 
     // Player physics and movement
     this.playerVelocity = new THREE.Vector3();
@@ -77,7 +99,7 @@ class VoxelEngine {
 
     // Add click event to lock controls
     document.addEventListener("click", () => {
-      if (!this.controls.isLocked) {
+      if (this.controls && this.controls.isLocked === false) {
         this.controls.lock();
       }
     });
@@ -89,6 +111,110 @@ class VoxelEngine {
         return Math.sin(x * 0.1) * Math.cos(y * 0.1) * 0.5;
       },
     };
+  }
+
+  animate() {
+    const delta = this.clock.getDelta();
+
+    // Update the player (movement, physics)
+    this.updatePlayerPosition(delta);
+
+    // Update any mining progress & particles
+    this.updateMiningProgress(delta);
+    if (this.miningParticles) {
+      // you may want to animate your particles here
+      this.miningParticles.children.forEach((p) => {
+        p.position.add(p.userData.velocity.clone().multiplyScalar(delta * 60));
+        p.userData.velocity.y -= this.gravity * delta * 60;
+      });
+    }
+
+    // Render the scene
+    this.renderer.render(this.scene, this.camera);
+
+    // Schedule next frame
+    requestAnimationFrame(this.animate);
+  }
+
+  // Create a fallback control mechanism if PointerLockControls doesn't work
+  useFallbackControls() {
+    this.controls = {
+      isLocked: false,
+      lock: function () {
+        this.isLocked = true;
+        document.body.requestPointerLock =
+          document.body.requestPointerLock ||
+          document.body.mozRequestPointerLock ||
+          document.body.webkitRequestPointerLock;
+        if (document.body.requestPointerLock) {
+          document.body.requestPointerLock();
+        }
+      },
+      unlock: function () {
+        this.isLocked = false;
+        document.exitPointerLock =
+          document.exitPointerLock ||
+          document.mozExitPointerLock ||
+          document.webkitExitPointerLock;
+        if (document.exitPointerLock) {
+          document.exitPointerLock();
+        }
+      },
+      getObject: function () {
+        return this.cameraContainer;
+      }.bind(this),
+    };
+
+    // Add pointer lock event listeners for the fallback controls
+    document.addEventListener(
+      "pointerlockchange",
+      this.onPointerLockChange.bind(this),
+      false,
+    );
+    document.addEventListener(
+      "mozpointerlockchange",
+      this.onPointerLockChange.bind(this),
+      false,
+    );
+    document.addEventListener(
+      "webkitpointerlockchange",
+      this.onPointerLockChange.bind(this),
+      false,
+    );
+
+    // Add mouse movement handler
+    document.addEventListener("mousemove", this.onMouseMove.bind(this), false);
+  }
+
+  onPointerLockChange() {
+    if (
+      document.pointerLockElement === document.body ||
+      document.mozPointerLockElement === document.body ||
+      document.webkitPointerLockElement === document.body
+    ) {
+      this.controls.isLocked = true;
+    } else {
+      this.controls.isLocked = false;
+    }
+  }
+
+  onMouseMove(event) {
+    if (this.controls.isLocked) {
+      const movementX =
+        event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+      const movementY =
+        event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+
+      // Rotate camera based on mouse movement
+      this.camera.rotation.y -= movementX * 0.002; // Horizontal rotation
+      this.camera.rotation.x -= movementY * 0.002; // Vertical rotation
+
+      // Limit vertical rotation to avoid flipping
+      this.camera.rotation.x = Math.max(
+        -Math.PI / 2,
+        Math.min(Math.PI / 2, this.camera.rotation.x),
+      );
+    }
   }
 
   setupLighting() {
@@ -575,11 +701,16 @@ class VoxelEngine {
     const deltaPosition = this.playerVelocity
       .clone()
       .multiplyScalar(delta * 60);
-    this.controls.getObject().position.add(deltaPosition);
+
+    // Get the object to move (either controls object or camera container)
+    const moveObject = this.controls.getObject
+      ? this.controls.getObject()
+      : this.cameraContainer;
+    moveObject.position.add(deltaPosition);
 
     // Check collision with ground
-    if (this.controls.getObject().position.y < this.playerHeight) {
-      this.controls.getObject().position.y = this.playerHeight;
+    if (moveObject.position.y < this.playerHeight) {
+      moveObject.position.y = this.playerHeight;
       this.playerVelocity.y = 0;
       this.playerOnGround = true;
     }
@@ -591,7 +722,11 @@ class VoxelEngine {
 
   checkCollisions() {
     // Simple collision check with blocks
-    const position = this.controls.getObject().position.clone();
+    // Get the object to check (either controls object or camera container)
+    const moveObject = this.controls.getObject
+      ? this.controls.getObject()
+      : this.cameraContainer;
+    const position = moveObject.position.clone();
 
     // Check nearby voxels
     for (
@@ -644,92 +779,5 @@ class VoxelEngine {
         }
       }
     }
-  }
-
-  resolveCollision(position, blockX, blockY, blockZ) {
-    // Calculate overlap and push the player out of the block
-    const playerPos = this.controls.getObject().position;
-
-    // Calculate distance to each face of the block
-    const dx1 = playerPos.x - (blockX - 0.5); // Distance to left face
-    const dx2 = blockX + 0.5 - playerPos.x; // Distance to right face
-    const dy1 = playerPos.y - (blockY - 0.5); // Distance to bottom face
-    const dy2 = blockY + 0.5 - playerPos.y; // Distance to top face
-    const dz1 = playerPos.z - (blockZ - 0.5); // Distance to front face
-    const dz2 = blockZ + 0.5 - playerPos.z; // Distance to back face
-
-    // Find the minimum distance
-    const min = Math.min(dx1, dx2, dy1, dy2, dz1, dz2);
-
-    // Push the player out in the direction of minimum distance
-    if (min === dx1) playerPos.x = blockX - 0.5 - this.playerRadius;
-    if (min === dx2) playerPos.x = blockX + 0.5 + this.playerRadius;
-    if (min === dy1) playerPos.y = blockY - 0.5 - this.playerHeight / 2;
-    if (min === dy2) {
-      playerPos.y = blockY + 0.5 + this.playerHeight / 2;
-      this.playerVelocity.y = 0;
-      this.playerOnGround = true;
-    }
-    if (min === dz1) playerPos.z = blockZ - 0.5 - this.playerRadius;
-    if (min === dz2) playerPos.z = blockZ + 0.5 + this.playerRadius;
-  }
-
-  updateDayNightCycle(delta) {
-    // Update day/night cycle
-    this.gameTime = (this.gameTime || 0) + delta * 0.05; // Speed of day cycle
-    const dayTime = (this.gameTime % 24) / 24; // 0-1 for a full day
-
-    // Move sun position in a circle
-    const angle = dayTime * Math.PI * 2;
-    const radius = 100;
-    this.sunLight.position.x = Math.cos(angle) * radius;
-    this.sunLight.position.y = Math.sin(angle) * radius;
-
-    // Adjust light color and intensity based on time of day
-    if (dayTime > 0.25 && dayTime < 0.75) {
-      // Daytime
-      const intensity = Math.sin((dayTime - 0.25) * Math.PI * 2) * 0.5 + 0.5;
-      this.sunLight.intensity = intensity;
-      this.scene.background = new THREE.Color(0x87ceeb).lerp(
-        new THREE.Color(0x4477aa),
-        1 - intensity,
-      );
-    } else {
-      // Nighttime
-      const intensity = 0.2;
-      this.sunLight.intensity = intensity;
-      this.scene.background = new THREE.Color(0x0a1632);
-    }
-  }
-
-  initWorld() {
-    // Create central platform
-    this.generateTerrain(0, 0, 20);
-
-    // Add a welcome sign
-    for (let y = 1; y <= 3; y++) {
-      this.createBlock(0, y, -5, "building");
-    }
-    this.createBlock(0, 4, -5, "gold");
-
-    console.log("World initialized");
-  }
-
-  animate() {
-    requestAnimationFrame(this.animate);
-
-    const delta = this.clock.getDelta();
-
-    // Update player position
-    this.updatePlayerPosition(delta);
-
-    // Update day/night cycle
-    this.updateDayNightCycle(delta);
-
-    // Update mining progress
-    this.updateMiningProgress(delta);
-
-    // Render scene
-    this.renderer.render(this.scene, this.camera);
   }
 }
