@@ -359,6 +359,16 @@ export class VisualizationServer {
       }
     });
 
+    this.app.get("/api/minecraft/blockchain", async (req, res) => {
+      try {
+        const data = await this.blockchainData.getBlockchainVisualizationData();
+        res.json(data);
+      } catch (error) {
+        console.error("API error:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
     // API endpoint for mining blocks in Minecraft view
     this.app.post("/api/minecraft/mine", async (req, res) => {
       try {

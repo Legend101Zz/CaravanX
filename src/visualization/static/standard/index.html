@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Caravan Regtest Blockchain Explorer</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/standalone/umd/vis-network.min.js"></script>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            :root {
+                --primary-bg: #0f172a;
+                --secondary-bg: #1e293b;
+                --card-bg: #1e293b;
+                --accent-color: #f97316;
+                --text-color: #e2e8f0;
+                --text-secondary: #94a3b8;
+                --border-color: #334155;
+                --highlight-bg: #334155;
+                --transition-speed: 0.3s;
+            }
+
+            .light-theme {
+                --primary-bg: #f8fafc;
+                --secondary-bg: #e2e8f0;
+                --card-bg: #ffffff;
+                --accent-color: #f97316;
+                --text-color: #1e293b;
+                --text-secondary: #64748b;
+                --border-color: #cbd5e1;
+                --highlight-bg: #f1f5f9;
+            }
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: "Inter", sans-serif;
+                background-color: var(--primary-bg);
+                color: var(--text-color);
+                margin: 0;
+                padding: 0;
+                line-height: 1.6;
+                transition:
+                    background-color var(--transition-speed),
+                    color var(--transition-speed);
+            }
+
+            .dashboard {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                grid-template-rows: auto auto;
+                gap: 1.25rem;
+                padding: 1.25rem;
+                max-width: 1800px;
+                margin: 0 auto;
+            }
+
+            .dashboard-header {
+                grid-column: 1 / 3;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 1.5rem;
+                background-color: var(--secondary-bg);
+                border-radius: 0.75rem;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                margin-bottom: 1rem;
+                transition: background-color var(--transition-speed);
+            }
+
+            .card {
+                background-color: var(--card-bg);
+                border-radius: 0.75rem;
+                padding: 1.5rem;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                transition:
+                    all 0.3s ease,
+                    background-color var(--transition-speed);
+                overflow: hidden;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2);
+            }
+
+            .card-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1rem;
+                border-bottom: 1px solid var(--border-color);
+                padding-bottom: 0.75rem;
+                transition: border-color var(--transition-speed);
+            }
+
+            .card-title {
+                font-size: 1.25rem;
+                font-weight: 600;
+                color: var(--accent-color);
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }
+
+            .card-icon {
+                width: 24px;
+                height: 24px;
+                color: var(--accent-color);
+            }
+
+            .card-actions {
+                display: flex;
+                gap: 0.5rem;
+            }
+
+            .card-content {
+                flex: 1;
+                overflow-y: auto;
+                max-height: 400px;
+                padding-right: 0.5rem;
+            }
+
+            .mempool-container {
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+            }
+
+            .transaction {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 0.75rem 1rem;
+                border-radius: 0.5rem;
+                background-color: var(--highlight-bg);
+                margin-bottom: 0.75rem;
+                cursor: pointer;
+                transition:
+                    background-color 0.2s,
+                    transform 0.2s;
+            }
+
+            .transaction:hover {
+                background-color: var(--border-color);
+                transform: translateX(5px);
+            }
+
+            .transaction .txid {
+                font-family: monospace;
+                color: var(--accent-color);
+            }
+
+            .block {
+                display: flex;
+                flex-direction: column;
+                background-color: var(--highlight-bg);
+                border-radius: 0.5rem;
+                padding: 1rem;
+                margin-bottom: 0.75rem;
+                cursor: pointer;
+                transition:
+                    all 0.3s ease,
+                    background-color var(--transition-speed);
+                border-left: 4px solid var(--accent-color);
+            }
+
+            .block:hover {
+                background-color: var(--border-color);
+                transform: scale(1.02);
+            }
+
+            .block-header {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 0.5rem;
+                font-weight: 600;
+            }
+
+            .block-height {
+                color: var(--accent-color);
+            }
+
+            .block-details {
+                display: flex;
+                justify-content: space-between;
+                font-size: 0.875rem;
+                color: var(--text-secondary);
+            }
+
+            .stats-container {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 1rem;
+            }
+
+            .stat-card {
+                background-color: var(--highlight-bg);
+                border-radius: 0.5rem;
+                padding: 1.25rem;
+                text-align: center;
+                transition:
+                    background-color var(--transition-speed),
+                    transform 0.2s;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+                overflow: hidden;
+            }
+
+            .stat-card:hover {
+                transform: translateY(-3px);
+            }
+
+            .stat-icon {
+                font-size: 1.5rem;
+                margin-bottom: 0.5rem;
+                color: var(--accent-color);
+            }
+
+            .stat-value {
+                font-size: 1.75rem;
+                font-weight: 700;
+                color: var(--accent-color);
+                margin-bottom: 0.25rem;
+            }
+
+            .stat-label {
+                font-size: 0.875rem;
+                color: var(--text-secondary);
+                font-weight: 500;
+            }
+
+            .visualization-container {
+                height: 300px;
+                margin-top: 1rem;
+                margin-bottom: 1rem;
+                position: relative;
+            }
+
+            .network-container {
+                height: 450px;
+                margin-top: 1rem;
+                position: relative;
+            }
+
+            .network-controls {
+                position: absolute;
+                top: 0.5rem;
+                right: 0.5rem;
+                z-index: 10;
+                display: flex;
+                gap: 0.5rem;
+            }
+
+            .network-legend {
+                position: absolute;
+                bottom: 0.5rem;
+                left: 0.5rem;
+                background-color: var(--card-bg);
+                padding: 0.5rem;
+                border-radius: 0.5rem;
+                font-size: 0.75rem;
+                z-index: 10;
+            }
+
+            .legend-item {
+                display: flex;
+                align-items: center;
+                margin-bottom: 0.25rem;
+            }
+
+            .legend-color {
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                margin-right: 0.5rem;
+            }
+
+            .tooltip {
+                position: absolute;
+                padding: 0.75rem;
+                background-color: var(--card-bg);
+                border-radius: 0.5rem;
+                pointer-events: none;
+                opacity: 0;
+                transition: opacity 0.2s;
+                z-index: 1000;
+                max-width: 300px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                border: 1px solid var(--border-color);
+            }
+
+            /* Animation for new transactions */
+            @keyframes fadeIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .new-transaction {
+                animation: fadeIn 0.5s ease-out;
+            }
+
+            /* Animation for new blocks */
+            @keyframes blockFadeIn {
+                from {
+                    opacity: 0;
+                    transform: scale(0.9);
+                }
+                to {
+                    opacity: 1;
+                    transform: scale(1);
+                }
+            }
+
+            .new-block {
+                animation: blockFadeIn 0.8s ease-out;
+            }
+
+            /* Mining animation */
+            @keyframes pulse {
+                0% {
+                    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7);
+                }
+                70% {
+                    box-shadow: 0 0 0 10px rgba(249, 115, 22, 0);
+                }
+                100% {
+                    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+                }
+            }
+
+            .mining-active {
+                animation: pulse 1.5s infinite;
+            }
+
+            .mining-activity {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background-color: var(--card-bg);
+                border-radius: 0.75rem;
+                padding: 1rem;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                z-index: 1000;
+                max-width: 300px;
+                border: 1px solid var(--accent-color);
+                transition: background-color var(--transition-speed);
+            }
+
+            .mining-activity-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 0.75rem;
+                border-bottom: 1px solid var(--border-color);
+                padding-bottom: 0.5rem;
+            }
+
+            .mining-activity-content {
+                max-height: 200px;
+                overflow-y: auto;
+            }
+
+            .mining-log {
+                font-size: 0.875rem;
+                margin-bottom: 0.375rem;
+                padding: 0.375rem 0.5rem;
+                border-radius: 0.25rem;
+                background-color: var(--highlight-bg);
+                transition: background-color var(--transition-speed);
+            }
+
+            .theme-toggle {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background-color: var(--highlight-bg);
+                border-radius: 50%;
+                width: 40px;
+                height: 40px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                cursor: pointer;
+                z-index: 1000;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                transition: background-color var(--transition-speed);
+                border: 1px solid var(--border-color);
+            }
+
+            .view-options {
+                position: fixed;
+                top: 70px;
+                right: 20px;
+                background-color: var(--card-bg);
+                border-radius: 0.75rem;
+                padding: 0.75rem;
+                z-index: 1000;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+                border: 1px solid var(--border-color);
+                transition: background-color var(--transition-speed);
+            }
+
+            .view-button {
+                background-color: var(--highlight-bg);
+                color: var(--text-color);
+                border: none;
+                border-radius: 0.375rem;
+                padding: 0.5rem 0.75rem;
+                font-family: "Inter", sans-serif;
+                font-size: 0.875rem;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            }
+
+            .view-button:hover {
+                background-color: var(--border-color);
+            }
+
+            button {
+                background-color: var(--accent-color);
+                border: none;
+                color: white;
+                padding: 0.5rem 0.75rem;
+                border-radius: 0.375rem;
+                font-family: "Inter", sans-serif;
+                font-size: 0.875rem;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 0.375rem;
+                transition: background-color 0.2s;
+            }
+
+            button:hover {
+                background-color: #ea580c;
+            }
+
+            select {
+                background-color: var(--highlight-bg);
+                color: var(--text-color);
+                border: 1px solid var(--border-color);
+                padding: 0.5rem 0.75rem;
+                border-radius: 0.375rem;
+                font-family: "Inter", sans-serif;
+                font-size: 0.875rem;
+                cursor: pointer;
+                transition:
+                    border-color 0.2s,
+                    background-color var(--transition-speed);
+            }
+
+            select:hover {
+                border-color: var(--accent-color);
+            }
+
+            #details-panel {
+                padding: 1rem;
+                background-color: var(--highlight-bg);
+                border-radius: 0.5rem;
+                margin-top: 1rem;
+            }
+
+            .details-header {
+                border-bottom: 1px solid var(--border-color);
+                padding-bottom: 0.5rem;
+                margin-bottom: 1rem;
+            }
+
+            .details-content {
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+
+            .details-section {
+                margin-bottom: 1rem;
+            }
+
+            .details-section h4 {
+                margin-bottom: 0.5rem;
+                font-weight: 600;
+                color: var(--accent-color);
+            }
+
+            .detail-item {
+                display: flex;
+                justify-content: space-between;
+                padding: 0.375rem 0;
+                border-bottom: 1px dashed var(--border-color);
+            }
+
+            .detail-label {
+                color: var(--text-secondary);
+                font-weight: 500;
+            }
+
+            .detail-value {
+                max-width: 60%;
+                word-break: break-all;
+                text-align: right;
+            }
+
+            .code {
+                font-family: monospace;
+                background-color: var(--primary-bg);
+                padding: 0.25rem 0.5rem;
+                border-radius: 0.25rem;
+                font-size: 0.875rem;
+            }
+
+            .loading {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                width: 100%;
+            }
+
+            .spinner {
+                border: 3px solid rgba(0, 0, 0, 0.1);
+                border-top: 3px solid var(--accent-color);
+                border-radius: 50%;
+                width: 24px;
+                height: 24px;
+                animation: spin 1s linear infinite;
+                margin-right: 0.5rem;
+            }
+
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+
+            /* Bitcoin price animation */
+            .price-change {
+                position: absolute;
+                top: 0;
+                right: 0;
+                bottom: 0;
+                width: 4px;
+                border-radius: 0 0.5rem 0.5rem 0;
+            }
+
+            .price-up {
+                background-color: #10b981;
+            }
+
+            .price-down {
+                background-color: #ef4444;
+            }
+
+            .bitcoin-price-card {
+                position: relative;
+                overflow: hidden;
+            }
+
+            .bitcoin-change {
+                display: flex;
+                align-items: center;
+                margin-top: 0.25rem;
+                font-size: 0.875rem;
+            }
+
+            .up-arrow {
+                color: #10b981;
+            }
+
+            .down-arrow {
+                color: #ef4444;
+            }
+
+            /* Media queries for responsive design */
+            @media (max-width: 1024px) {
+                .dashboard {
+                    grid-template-columns: 1fr;
+                }
+
+                .dashboard-header {
+                    grid-column: 1;
+                }
+            }
+
+            @media (max-width: 768px) {
+                .stats-container {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+
+                .theme-toggle,
+                .view-options {
+                    top: auto;
+                    bottom: 20px;
+                }
+
+                .theme-toggle {
+                    left: 20px;
+                    right: auto;
+                }
+
+                .view-options {
+                    left: 70px;
+                    right: auto;
+                    flex-direction: row;
+                }
+            }
+
+            @media (max-width: 480px) {
+                .dashboard {
+                    padding: 0.75rem;
+                    gap: 0.75rem;
+                }
+
+                .card {
+                    padding: 1rem;
+                }
+
+                .stats-container {
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            /* Scroll bar styling */
+            ::-webkit-scrollbar {
+                width: 8px;
+                height: 8px;
+            }
+
+            ::-webkit-scrollbar-track {
+                background: var(--primary-bg);
+                border-radius: 4px;
+            }
+
+            ::-webkit-scrollbar-thumb {
+                background: var(--border-color);
+                border-radius: 4px;
+            }
+
+            ::-webkit-scrollbar-thumb:hover {
+                background: var(--accent-color);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="theme-toggle" id="themeToggle" title="Toggle theme">
+            <i class="fas fa-moon"></i>
+        </div>
+
+        <div class="view-options">
+            <button class="view-button" id="pixelViewBtn">
+                <i class="fas fa-cubes"></i> Pixel View
+            </button>
+            <button class="view-button" id="minecraftViewBtn">
+                <i class="fas fa-cube"></i> Minecraft View
+            </button>
+        </div>
+
+        <header class="dashboard-header">
+            <div>
+                <h1 style="display: flex; align-items: center; gap: 0.75rem">
+                    <svg
+                        width="32"
+                        height="32"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M19 5h-7L8 9l-5 5.5 5 5.5 7-5h6.1a1.94 1.94 0 0 0 1.9-2.25C22.5 11.73 21.09 5 19 5Z"
+                        ></path>
+                        <circle cx="16" cy="8" r="1"></circle>
+                    </svg>
+                    <span style="color: #f7931a">Caravan Regtest Explorer</span>
+                </h1>
+                <p class="text-sm text-gray-400">
+                    Real-time blockchain visualization
+                </p>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div
+                    id="connectionStatus"
+                    style="display: flex; align-items: center"
+                >
+                    <span
+                        style="
+                            width: 12px;
+                            height: 12px;
+                            background-color: #10b981;
+                            border-radius: 50%;
+                            margin-right: 8px;
+                        "
+                    ></span>
+                    <span>Connected</span>
+                </div>
+                <button id="refreshBtn">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+        </header>
+
+        <script>
+            document
+                .getElementById("minecraft-view-btn")
+                .addEventListener("click", function () {
+                    window.location.href = "index-minecraft.html";
+                });
+        </script>
+
+        <script src="./js/main.js"></script>
+    </body>
+</html>

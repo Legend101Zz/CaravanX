@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Blockchain Pixel City</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/6.5.2/browser/pixi.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js"></script>
+        <style>
+            body,
+            html {
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+                background-color: #0a0a1a;
+                font-family: "Courier New", monospace;
+            }
+
+            #game-container {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                z-index: 1;
+            }
+
+            #ui-overlay {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                pointer-events: none;
+                z-index: 2;
+            }
+
+            #stats-panel {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                background-color: rgba(0, 0, 0, 0.7);
+                border: 2px solid #f7931a;
+                border-radius: 5px;
+                padding: 10px;
+                color: #fff;
+                font-size: 12px;
+                pointer-events: auto;
+            }
+
+            #controls {
+                position: absolute;
+                bottom: 10px;
+                right: 10px;
+                display: flex;
+                gap: 5px;
+                pointer-events: auto;
+            }
+
+            .pixel-button {
+                background-color: #f7931a;
+                border: none;
+                color: white;
+                padding: 8px 16px;
+                font-family: "Courier New", monospace;
+                font-size: 10px;
+                cursor: pointer;
+                position: relative;
+                image-rendering: pixelated;
+            }
+
+            .loading-screen {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                background-color: #0a0a1a;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                z-index: 100;
+            }
+
+            .loading-bar-container {
+                width: 200px;
+                height: 20px;
+                background-color: #333;
+                border: 2px solid #f7931a;
+                margin-top: 20px;
+            }
+
+            .loading-bar {
+                height: 100%;
+                width: 0%;
+                background-color: #f7931a;
+                transition: width 0.2s;
+            }
+
+            .pixel-title {
+                color: #f7931a;
+                font-size: 24px;
+                margin-bottom: 20px;
+                text-shadow: 4px 4px 0px rgba(0, 0, 0, 0.8);
+            }
+
+            .tooltip {
+                position: absolute;
+                background-color: #111;
+                border: 2px solid #f7931a;
+                padding: 8px;
+                color: white;
+                font-size: 10px;
+                pointer-events: none;
+                z-index: 10;
+                opacity: 0;
+                transition: opacity 0.2s;
+            }
+
+            #details-panel {
+                position: absolute;
+                right: 10px;
+                top: 10px;
+                width: 300px;
+                background-color: rgba(0, 0, 0, 0.8);
+                border: 2px solid #f7931a;
+                border-radius: 5px;
+                padding: 10px;
+                color: #fff;
+                font-size: 10px;
+                display: none;
+                pointer-events: auto;
+            }
+
+            #details-close {
+                position: absolute;
+                top: 5px;
+                right: 5px;
+                cursor: pointer;
+                font-size: 12px;
+            }
+
+            #time-cycle {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 100, 0.2);
+                z-index: 1;
+                pointer-events: none;
+                opacity: 0;
+                transition: opacity 10s;
+            }
+
+            #compass {
+                position: absolute;
+                bottom: 20px;
+                left: 20px;
+                width: 100px;
+                height: 100px;
+                background-color: rgba(0, 0, 0, 0.5);
+                border: 2px solid #f7931a;
+                border-radius: 50%;
+                pointer-events: auto;
+            }
+
+            #compass-arrow {
+                position: absolute;
+                top: 10px;
+                left: 48px;
+                width: 4px;
+                height: 40px;
+                background-color: #f7931a;
+                transform-origin: bottom center;
+            }
+
+            #compass-label {
+                position: absolute;
+                bottom: 10px;
+                width: 100%;
+                text-align: center;
+                color: white;
+                font-size: 10px;
+            }
+
+            #view-toggle {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                background-color: #f7931a;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                font-size: 12px;
+                cursor: pointer;
+                pointer-events: auto;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="loading-screen" id="loading-screen">
+            <div class="pixel-title">BLOCKCHAIN PIXEL CITY</div>
+            <div class="loading-bar-container">
+                <div class="loading-bar" id="loading-bar"></div>
+            </div>
+            <div
+                id="loading-text"
+                style="color: white; margin-top: 10px; font-size: 12px"
+            >
+                Loading resources...
+            </div>
+        </div>
+
+        <div id="game-container"></div>
+
+        <div id="ui-overlay">
+            <button id="view-toggle">Switch to Standard View</button>
+
+            <div id="stats-panel">
+                <div>BLOCKS: <span id="block-count">0</span></div>
+                <div>TXs: <span id="tx-count">0</span></div>
+                <div>MEMPOOL: <span id="mempool-size">0</span></div>
+                <div>TIME: <span id="game-time">00:00</span></div>
+            </div>
+
+            <div id="compass">
+                <div id="compass-arrow"></div>
+                <div id="compass-label">NORTH</div>
+            </div>
+
+            <div id="controls">
+                <button class="pixel-button" id="mine-btn">MINE BLOCK</button>
+                <button class="pixel-button" id="tx-btn">NEW TX</button>
+                <button class="pixel-button" id="zoom-in-btn">ZOOM+</button>
+                <button class="pixel-button" id="zoom-out-btn">ZOOM-</button>
+            </div>
+
+            <div id="details-panel">
+                <div id="details-close">X</div>
+                <div id="details-content"></div>
+            </div>
+
+            <div id="time-cycle"></div>
+        </div>
+
+        <div class="tooltip" id="tooltip"></div>
+
+        <script src="js/pixel-city.js"></script>
+    </body>
+</html>

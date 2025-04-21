@@ -1,0 +1,312 @@
+/* Mempool Status UI */
+.mempool-status-ui {
+    position: absolute;
+    top: 60px;
+    left: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    border: 2px solid #5a5a5a;
+    padding: 8px;
+    color: white;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    min-width: 180px;
+    z-index: 5;
+}
+
+.mempool-status-ui h3 {
+    margin: 0 0 5px 0;
+    font-size: 14px;
+    color: #ffaa00;
+    text-align: center;
+    border-bottom: 1px solid #5a5a5a;
+    padding-bottom: 3px;
+}
+
+.mempool-stats div {
+    font-size: 12px;
+    margin: 2px 0;
+}
+
+.fee-rate-tiers {
+    margin-top: 5px;
+}
+
+.tier {
+    font-size: 11px;
+    padding: 2px 5px;
+    margin: 2px 0;
+}
+
+.high-priority {
+    color: #ff5555;
+}
+
+.medium-priority {
+    color: #ffaa00;
+}
+
+.low-priority {
+    color: #55ff55;
+}
+
+/* Blockchain Status UI */
+.blockchain-status-ui {
+    position: absolute;
+    top: 60px;
+    right: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    border: 2px solid #5a5a5a;
+    padding: 8px;
+    color: white;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    min-width: 180px;
+    z-index: 5;
+}
+
+.blockchain-status-ui h3 {
+    margin: 0 0 5px 0;
+    font-size: 14px;
+    color: #ffaa00;
+    text-align: center;
+    border-bottom: 1px solid #5a5a5a;
+    padding-bottom: 3px;
+}
+
+.blockchain-stats div {
+    font-size: 12px;
+    margin: 2px 0;
+}
+
+/* Player Mining UI */
+.player-mining-ui {
+    position: absolute;
+    bottom: 80px;
+    right: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    border: 2px solid #ffaa00;
+    padding: 8px;
+    color: white;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    width: 220px;
+    z-index: 5;
+}
+
+.mining-header h3 {
+    margin: 0 0 5px 0;
+    font-size: 14px;
+    color: #ffaa00;
+    text-align: center;
+    border-bottom: 1px solid #ffaa00;
+    padding-bottom: 3px;
+}
+
+.mining-stats {
+    margin: 5px 0;
+}
+
+.mining-stat {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin: 2px 0;
+}
+
+.mining-progress-container {
+    height: 12px;
+    background-color: #333;
+    border: 1px solid #5a5a5a;
+    margin: 5px 0;
+}
+
+.mining-progress {
+    height: 100%;
+    background-color: #ffaa00;
+    width: 0%;
+    transition: width 0.2s;
+}
+
+.mining-stop-btn {
+    width: 100%;
+    background-color: #aa0000;
+    border: none;
+    color: white;
+    padding: 5px 0;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 5px;
+}
+
+/* Transaction Dialog */
+.transaction-dialog {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: #c6c6c6;
+    border: 3px solid #5a5a5a;
+    width: 300px;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    z-index: 100;
+}
+
+.dialog-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #5a5a5a;
+    padding: 5px 10px;
+}
+
+.dialog-header h3 {
+    margin: 0;
+    color: white;
+    font-size: 16px;
+}
+
+.dialog-close-btn {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+}
+
+.dialog-content {
+    padding: 10px;
+}
+
+.input-group {
+    margin-bottom: 10px;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 3px;
+    color: #333;
+    font-size: 12px;
+}
+
+.input-group input,
+.input-group select {
+    width: 100%;
+    padding: 5px;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    border: 2px solid #5a5a5a;
+    background-color: #e8e8e8;
+}
+
+.dialog-footer {
+    padding: 10px;
+    text-align: right;
+    background-color: #d9d9d9;
+    border-top: 2px solid #5a5a5a;
+}
+
+.primary-btn {
+    background-color: #ffaa00;
+    border: 2px solid #5a5a5a;
+    color: white;
+    padding: 5px 10px;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: 5px;
+}
+
+.secondary-btn {
+    background-color: #aaaaaa;
+    border: 2px solid #5a5a5a;
+    color: white;
+    padding: 5px 10px;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+/* Block Mined Success */
+.block-mined-success {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: #c6c6c6;
+    border: 5px solid #ffaa00;
+    width: 350px;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    z-index: 100;
+    animation: pulse 1s infinite alternate;
+}
+
+@keyframes pulse {
+    from {
+        box-shadow: 0 0 10px #ffaa00;
+    }
+    to {
+        box-shadow: 0 0 20px #ffaa00;
+    }
+}
+
+.success-header {
+    background-color: #ffaa00;
+    padding: 10px;
+    text-align: center;
+}
+
+.success-header h2 {
+    margin: 0;
+    color: white;
+    font-size: 24px;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.success-details {
+    padding: 15px;
+}
+
+.success-detail {
+    display: flex;
+    justify-content: space-between;
+    margin: 5px 0;
+}
+
+.detail-label {
+    color: #333;
+    font-weight: bold;
+}
+
+.detail-value {
+    color: #ffaa00;
+}
+
+.success-close-btn {
+    display: block;
+    width: 80%;
+    margin: 10px auto 15px auto;
+    background-color: #ffaa00;
+    border: 2px solid #5a5a5a;
+    color: white;
+    padding: 8px 0;
+    font-family: "MinecraftFont", monospace, sans-serif;
+    font-size: 14px;
+    cursor: pointer;
+    text-align: center;
+}
+
+/* Item hints */
+.item-hint {
+    position: absolute;
+    top: -25px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 3px 6px;
+    font-size: 10px;
+    white-space: nowrap;
+    display: none;
+    pointer-events: none;
+}
+
+.hotbar-slot:hover .item-hint {
+    display: block;
+}

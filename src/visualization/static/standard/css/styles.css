@@ -1,0 +1,106 @@
+/* Additional styles for the visualization */
+/* Light theme styles */
+body.light-theme {
+    background-color: #f8fafc;
+    color: #1e293b;
+}
+
+body.light-theme .card {
+    background-color: #ffffff;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+body.light-theme .card-title {
+    color: #f97316;
+}
+
+body.light-theme .block,
+body.light-theme .transaction,
+body.light-theme .stat-card,
+body.light-theme .mining-log {
+    background-color: #f1f5f9;
+}
+
+body.light-theme .block:hover,
+body.light-theme .transaction:hover {
+    background-color: #e2e8f0;
+}
+
+body.light-theme .stat-value {
+    color: #f97316;
+}
+
+body.light-theme .stat-label {
+    color: #64748b;
+}
+
+body.light-theme .bg-gray-700 {
+    background-color: #e2e8f0;
+}
+
+body.light-theme .text-white {
+    color: #1e293b;
+}
+
+body.light-theme .text-gray-400 {
+    color: #64748b;
+}
+
+/* Pulse animation in light theme */
+@keyframes light-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(249, 115, 22, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+    }
+}
+
+body.light-theme .mining-active {
+    animation: light-pulse 1.5s infinite;
+}
+
+/* Additional responsive adjustments */
+@media (max-width: 768px) {
+    .dashboard {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-header {
+        grid-column: 1;
+    }
+
+    .stats-container {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Animation adjustments for light theme */
+body.light-theme @keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+        background-color: #f97316;
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+        background-color: #f1f5f9;
+    }
+}
+
+body.light-theme @keyframes blockFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+        background-color: #f97316;
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+        background-color: #f1f5f9;
+    }
+}
