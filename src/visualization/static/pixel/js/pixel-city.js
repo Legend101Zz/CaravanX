@@ -1925,59 +1925,76 @@ class CaravanXBlockchain {
 
   // Show block details
   showBlockDetails(block) {
-    const detailsPanel = document.getElementById("details-panel");
-    const detailsContent = document.getElementById("details-content");
-    const detailsTitle = document.getElementById("details-title");
+    try {
+      if (!block) {
+        console.warn("Cannot show details for undefined block");
+        return;
+      }
 
-    detailsTitle.textContent = `CARAVAN #${block.height}`;
+      const detailsPanel = document.getElementById("details-panel");
+      const detailsContent = document.getElementById("details-content");
+      const detailsTitle = document.getElementById("details-title");
 
-    // Format time as pixel-style date
-    const date = new Date(block.time * 1000);
-    const pixelDate = `${date.getDate().toString().padStart(2, "0")}-${(date.getMonth() + 1).toString().padStart(2, "0")}-${date.getFullYear()} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+      if (!detailsPanel || !detailsContent) {
+        console.warn("Details panel elements not found");
+        return;
+      }
 
-    detailsContent.innerHTML = `
-      <div class="detail-section">
-        <div class="detail-item">
-          <span class="detail-label">ROUTE:</span>
-          <span class="detail-value">${block.hash.substring(0, 20)}...</span>
-        </div>
-        <div class="detail-item">
-          <span class="detail-label">DEPARTED:</span>
-          <span class="detail-value">${pixelDate}</span>
-        </div>
-        <div class="detail-item">
-          <span class="detail-label">CARGO COUNT:</span>
-          <span class="detail-value">${block.txCount || 0}</span>
-        </div>
-        <div class="detail-item">
-          <span class="detail-label">CARAVAN SIZE:</span>
-          <span class="detail-value">${(block.size / 1024).toFixed(2)} KB</span>
-        </div>
-        <div class="detail-item">
-          <span class="detail-label">JOURNEY DIFFICULTY:</span>
-          <span class="detail-value">${block.difficulty.toFixed(2)}</span>
-        </div>
-      </div>
+      // Set title if the element exists
+      if (detailsTitle) {
+        detailsTitle.textContent = `CARAVAN #${block.height}`;
+      }
 
-      <div class="detail-section">
-        <h4>CARGO MANIFEST</h4>
-        <div class="cargo-list">
-          ${this.generateCargoItems(block)}
-        </div>
-      </div>
+      // Format time as pixel-style date
+      const date = new Date((block.time || Date.now() / 1000) * 1000);
+      const pixelDate = `${date.getDate().toString().padStart(2, "0")}-${(date.getMonth() + 1).toString().padStart(2, "0")}-${date.getFullYear()} ${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
 
-      <button id="forge-next-btn" class="pixel-button detail-action-btn">
-        FORGE NEXT CARAVAN
-      </button>
-    `;
+      detailsContent.innerHTML = `
+         <div class="detail-section">
+           <div class="detail-item">
+             <span class="detail-label">ROUTE:</span>
+             <span class="detail-value">${block.hash ? block.hash.substring(0, 20) + "..." : "Unknown"}</span>
+           </div>
+           <div class="detail-item">
+             <span class="detail-label">DEPARTED:</span>
+             <span class="detail-value">${pixelDate}</span>
+           </div>
+           <div class="detail-item">
+             <span class="detail-label">CARGO COUNT:</span>
+             <span class="detail-value">${block.txCount || 0}</span>
+           </div>
+           <div class="detail-item">
+             <span class="detail-label">CARAVAN SIZE:</span>
+             <span class="detail-value">${((block.size || 0) / 1024).toFixed(2)} KB</span>
+           </div>
+           <div class="detail-item">
+             <span class="detail-label">JOURNEY DIFFICULTY:</span>
+             <span class="detail-value">${(block.difficulty || 1).toFixed(2)}</span>
+           </div>
+         </div>
 
-    detailsPanel.style.display = "block";
+         <div class="detail-section">
+           <h4>CARGO MANIFEST</h4>
+           <div class="cargo-list">
+             ${this.generateCargoItems(block)}
+           </div>
+         </div>
 
-    // Add button handler
-    document.getElementById("forge-next-btn").addEventListener("click", () => {
-      this.triggerMineBlock();
-      detailsPanel.style.display = "none";
-    });
+         <button id="forge-next-btn" class="pixel-button detail-action-btn">
+           FORGE NEXT CARAVAN
+         </button>
+       `;
+
+      detailsPanel.style.display = "block";
+
+      // Add button handler
+      this.addSafeEventListener("forge-next-btn", "click", () => {
+        this.triggerMineBlock();
+        detailsPanel.style.display = "none";
+      });
+    } catch (error) {
+      console.error("Error showing block details:", error);
+    }
   }
 
   // Generate cargo items for block details
@@ -2432,62 +2449,78 @@ class CaravanXBlockchain {
   // Setup event listeners
   setupEventListeners() {
     // Socket events
-    this.socket.on("connect", () => {
-      console.log("Connected to server");
-      this.showNotification("Connected to blockchain network");
-    });
+    if (this.socket) {
+      this.socket.on("connect", () => {
+        console.log("Connected to server");
+        this.showNotification("Connected to blockchain network");
+      });
 
-    this.socket.on("disconnect", () => {
-      console.log("Disconnected from server");
-      this.showNotification("Disconnected from blockchain network");
-    });
+      this.socket.on("disconnect", () => {
+        console.log("Disconnected from server");
+        this.showNotification("Disconnected from blockchain network");
+      });
 
-    this.socket.on("blockchain_update", (data) => {
-      console.log("Received blockchain update", data);
-      this.updateStats(data.stats);
-      this.processBlocks(data.blocks);
-      this.processMempool(data.mempool);
-    });
+      this.socket.on("blockchain_update", (data) => {
+        console.log("Received blockchain update", data);
+        if (data) {
+          if (data.stats) this.updateStats(data.stats);
+          if (data.blocks) this.processBlocks(data.blocks);
+          if (data.mempool) this.processMempool(data.mempool);
+        }
+      });
 
-    this.socket.on("new_block", (block) => {
-      console.log("New block mined", block);
-      this.processNewBlock(block);
-      this.showNotification(`New caravan formed: Block #${block.height}`);
-    });
+      this.socket.on("new_block", (block) => {
+        console.log("New block mined", block);
+        if (block) {
+          this.processNewBlock(block);
+          this.showNotification(`New caravan formed: Block #${block.height}`);
+        }
+      });
 
-    this.socket.on("new_transaction", (tx) => {
-      console.log("New transaction", tx);
-      this.processNewTransaction(tx);
-      this.showNotification(`New cargo ready: ${tx.txid.substring(0, 8)}...`);
-    });
+      this.socket.on("new_transaction", (tx) => {
+        console.log("New transaction", tx);
+        if (tx) {
+          this.processNewTransaction(tx);
+          if (tx.txid) {
+            this.showNotification(
+              `New cargo ready: ${tx.txid.substring(0, 8)}...`,
+            );
+          }
+        }
+      });
 
-    this.socket.on("mining_started", (data) => {
-      console.log("Mining started", data);
-      this.showMiningActivity(data);
-    });
+      this.socket.on("mining_started", (data) => {
+        console.log("Mining started", data);
+        if (data) {
+          this.showMiningActivity(data);
+        }
+      });
 
-    this.socket.on("mining_complete", (data) => {
-      console.log("Mining complete", data);
-      this.completeMiningActivity(data);
-    });
+      this.socket.on("mining_complete", (data) => {
+        console.log("Mining complete", data);
+        if (data) {
+          this.completeMiningActivity(data);
+        }
+      });
+    }
 
-    // UI button events
-    document.getElementById("mine-btn").addEventListener("click", () => {
+    // UI button events - add null checks before adding listeners
+    this.addSafeEventListener("mine-btn", "click", () => {
       this.triggerMineBlock();
     });
 
-    document.getElementById("tx-btn").addEventListener("click", () => {
+    this.addSafeEventListener("tx-btn", "click", () => {
       this.triggerCreateTransaction();
     });
 
-    document.getElementById("zoom-in-btn").addEventListener("click", () => {
+    this.addSafeEventListener("zoom-in-btn", "click", () => {
       this.state.camera.targetScale = Math.min(
         2,
         this.state.camera.targetScale + 0.2,
       );
     });
 
-    document.getElementById("zoom-out-btn").addEventListener("click", () => {
+    this.addSafeEventListener("zoom-out-btn", "click", () => {
       this.state.camera.targetScale = Math.max(
         0.5,
         this.state.camera.targetScale - 0.2,
@@ -2495,79 +2528,140 @@ class CaravanXBlockchain {
     });
 
     // Close details panel
-    document.getElementById("details-close").addEventListener("click", () => {
-      document.getElementById("details-panel").style.display = "none";
-    });
-
-    // View toggle buttons
-    document.getElementById("view-toggle").addEventListener("click", () => {
-      window.location.href = "index.html";
-    });
-
-    document
-      .getElementById("minecraft-toggle")
-      .addEventListener("click", () => {
-        window.location.href = "index-minecraft.html";
-      });
-
-    // Sound toggle
-    document.getElementById("toggle-sound").addEventListener("click", () => {
-      this.toggleSound();
-    });
-
-    // Dragging functionality
-    this.app.view.addEventListener("mousedown", (e) => {
-      this.state.camera.dragging = true;
-      this.state.camera.lastPosition = { x: e.clientX, y: e.clientY };
-    });
-
-    this.app.view.addEventListener("touchstart", (e) => {
-      this.state.camera.dragging = true;
-      this.state.camera.lastPosition = {
-        x: e.touches[0].clientX,
-        y: e.touches[0].clientY,
-      };
-    });
-
-    window.addEventListener("mouseup", () => {
-      this.state.camera.dragging = false;
-    });
-
-    window.addEventListener("touchend", () => {
-      this.state.camera.dragging = false;
-    });
-
-    this.app.view.addEventListener("mousemove", (e) => {
-      if (this.state.camera.dragging && this.state.camera.lastPosition) {
-        const dx = e.clientX - this.state.camera.lastPosition.x;
-        const dy = e.clientY - this.state.camera.lastPosition.y;
-
-        this.state.camera.x += dx;
-        this.state.camera.y += dy;
-
-        this.state.camera.lastPosition = { x: e.clientX, y: e.clientY };
+    this.addSafeEventListener("details-close", "click", () => {
+      const detailsPanel = document.getElementById("details-panel");
+      if (detailsPanel) {
+        detailsPanel.style.display = "none";
       }
     });
 
-    this.app.view.addEventListener("touchmove", (e) => {
-      if (this.state.camera.dragging && this.state.camera.lastPosition) {
-        const dx = e.touches[0].clientX - this.state.camera.lastPosition.x;
-        const dy = e.touches[0].clientY - this.state.camera.lastPosition.y;
+    // View toggle buttons
+    this.addSafeEventListener("view-toggle", "click", () => {
+      window.location.href = "index.html";
+    });
 
-        this.state.camera.x += dx;
-        this.state.camera.y += dy;
+    // Sound toggle
+    this.addSafeEventListener("toggle-sound", "click", () => {
+      this.toggleSound();
+    });
 
+    // Tutorial close button
+    this.addSafeEventListener("tutorial-close", "click", () => {
+      const tutorial = document.getElementById("tutorial");
+      if (tutorial) {
+        tutorial.style.display = "none";
+      }
+      this.state.isTutorialShown = true;
+    });
+
+    // Dragging functionality for canvas
+    if (this.app && this.app.view) {
+      this.app.view.addEventListener("mousedown", (e) => {
+        this.state.camera.dragging = true;
+        this.state.camera.lastPosition = { x: e.clientX, y: e.clientY };
+      });
+
+      this.app.view.addEventListener("touchstart", (e) => {
+        this.state.camera.dragging = true;
         this.state.camera.lastPosition = {
           x: e.touches[0].clientX,
           y: e.touches[0].clientY,
         };
-      }
-    });
+      });
+
+      window.addEventListener("mouseup", () => {
+        this.state.camera.dragging = false;
+      });
+
+      window.addEventListener("touchend", () => {
+        this.state.camera.dragging = false;
+      });
+
+      this.app.view.addEventListener("mousemove", (e) => {
+        if (this.state.camera.dragging && this.state.camera.lastPosition) {
+          const dx = e.clientX - this.state.camera.lastPosition.x;
+          const dy = e.clientY - this.state.camera.lastPosition.y;
+
+          this.state.camera.x += dx;
+          this.state.camera.y += dy;
+
+          this.state.camera.lastPosition = { x: e.clientX, y: e.clientY };
+        }
+      });
+
+      this.app.view.addEventListener("touchmove", (e) => {
+        if (this.state.camera.dragging && this.state.camera.lastPosition) {
+          const dx = e.touches[0].clientX - this.state.camera.lastPosition.x;
+          const dy = e.touches[0].clientY - this.state.camera.lastPosition.y;
+
+          this.state.camera.x += dx;
+          this.state.camera.y += dy;
+
+          this.state.camera.lastPosition = {
+            x: e.touches[0].clientX,
+            y: e.touches[0].clientY,
+          };
+        }
+      });
+    }
 
     // Window resize
     window.addEventListener("resize", () => {
-      this.app.renderer.resize(window.innerWidth, window.innerHeight);
+      if (this.app && this.app.renderer) {
+        this.app.renderer.resize(window.innerWidth, window.innerHeight);
+      }
     });
+
+    console.log("Event listeners setup complete");
+  }
+
+  // Helper method to safely add event listeners
+  addSafeEventListener(elementId, eventType, callback) {
+    const element = document.getElementById(elementId);
+    if (element) {
+      element.addEventListener(eventType, callback);
+    } else {
+      console.warn(
+        `Element with ID '${elementId}' not found, cannot add ${eventType} listener`,
+      );
+    }
+  }
+
+  // Show tutorial with error handling
+  showTutorial() {
+    try {
+      const tutorialElement = document.getElementById("tutorial");
+      if (tutorialElement) {
+        tutorialElement.style.display = "block";
+      } else {
+        console.warn("Tutorial element not found");
+        // Create tutorial element if it doesn't exist
+        const tutorial = document.createElement("div");
+        tutorial.id = "tutorial";
+        tutorial.className = "tutorial";
+        tutorial.innerHTML = `
+            <div class="panel-header">WELCOME, EXPLORER!</div>
+            <div class="tutorial-content">
+              <p>This is the CARAVAN-X blockchain visualization. Each block is represented as a <span class="highlight">caravan</span> traveling along the chain.</p>
+              <p>Transactions are shown as <span class="highlight">traders</span> waiting to join the next caravan.</p>
+              <p>Click on caravans or traders to see details. Use the control buttons to interact with the blockchain.</p>
+            </div>
+            <button id="tutorial-close" class="pixel-button">GOT IT!</button>
+          `;
+        document.body.appendChild(tutorial);
+
+        // Add event listener to the close button
+        const closeButton = tutorial.querySelector("#tutorial-close");
+        if (closeButton) {
+          closeButton.addEventListener("click", () => {
+            tutorial.style.display = "none";
+            this.state.isTutorialShown = true;
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error showing tutorial:", error);
+    }
   }
 
   // Process a new block
@@ -3023,132 +3117,149 @@ class CaravanXBlockchain {
 
   // Update time of day (day/night cycle)
   updateTimeOfDay(delta) {
-    // Update time
-    this.state.timeOfDay += delta * 0.1; // Speed of day/night cycle
-    if (this.state.timeOfDay >= 24) {
-      this.state.timeOfDay = 0;
+    try {
+      // Update time
+      this.state.timeOfDay += delta * 0.1; // Speed of day/night cycle
+      if (this.state.timeOfDay >= 24) {
+        this.state.timeOfDay = 0;
+      }
+
+      // Update game time display
+      const hours = Math.floor(this.state.timeOfDay);
+      const minutes = Math.floor((this.state.timeOfDay - hours) * 60);
+
+      const gameTimeElement = document.getElementById("game-time");
+      if (gameTimeElement) {
+        gameTimeElement.textContent = `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
+      }
+
+      // Update sky and lighting based on time
+      this.updateDayNightCycle();
+    } catch (error) {
+      console.error("Error updating time of day:", error);
     }
-
-    // Update game time display
-    const hours = Math.floor(this.state.timeOfDay);
-    const minutes = Math.floor((this.state.timeOfDay - hours) * 60);
-    document.getElementById("game-time").textContent =
-      `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
-
-    // Update sky and lighting based on time
-    this.updateDayNightCycle();
   }
 
   // Update the day/night cycle visuals
   updateDayNightCycle() {
-    const time = this.state.timeOfDay;
+    try {
+      const time = this.state.timeOfDay;
 
-    // Night: 0-6, Day: 8-18, Sunset: 18-20, Sunrise: 6-8, Evening: 20-24
-    let skyColor, ambientIntensity, sunPosition, moonPosition;
+      // Night: 0-6, Day: 8-18, Sunset: 18-20, Sunrise: 6-8, Evening: 20-24
+      let skyColor, ambientIntensity, sunPosition, moonPosition;
 
-    if (time >= 22 || time < 4) {
-      // Night
-      skyColor = 0x102040;
-      ambientIntensity = 0.2;
-      sunPosition = -40;
-      moonPosition = 100;
-    } else if (time >= 4 && time < 6) {
-      // Dawn
-      const t = (time - 4) / 2; // 0 to 1
-      skyColor = this.lerpColor(0x102040, 0x6080c0, t);
-      ambientIntensity = 0.2 + 0.2 * t;
-      sunPosition = -40 + 80 * t;
-      moonPosition = 100 - 40 * t;
-    } else if (time >= 6 && time < 8) {
-      // Sunrise
-      const t = (time - 6) / 2; // 0 to 1
-      skyColor = this.lerpColor(0x6080c0, 0x4477aa, t);
-      ambientIntensity = 0.4 + 0.4 * t;
-      sunPosition = 40 + 60 * t;
-      moonPosition = 60 - 60 * t;
-    } else if (time >= 8 && time < 18) {
-      // Day
-      skyColor = 0x4477aa;
-      ambientIntensity = 0.8;
-      sunPosition = 100;
-      moonPosition = 0;
-    } else if (time >= 18 && time < 20) {
-      // Sunset
-      const t = (time - 18) / 2; // 0 to 1
-      skyColor = this.lerpColor(0x4477aa, 0xcc5500, t);
-      ambientIntensity = 0.8 - 0.3 * t;
-      sunPosition = 100 - 60 * t;
-      moonPosition = 0 + 20 * t;
-    } else if (time >= 20 && time < 22) {
-      // Dusk
-      const t = (time - 20) / 2; // 0 to 1
-      skyColor = this.lerpColor(0xcc5500, 0x102040, t);
-      ambientIntensity = 0.5 - 0.3 * t;
-      sunPosition = 40 - 80 * t;
-      moonPosition = 20 + 80 * t;
-    }
-
-    // Apply sky color
-    if (this.sky) {
-      // Don't override weather tint
-      if (this.state.weather === "clear") {
-        this.sky.tint = skyColor;
+      if (time >= 22 || time < 4) {
+        // Night
+        skyColor = 0x102040;
+        ambientIntensity = 0.2;
+        sunPosition = -40;
+        moonPosition = 100;
+      } else if (time >= 4 && time < 6) {
+        // Dawn
+        const t = (time - 4) / 2; // 0 to 1
+        skyColor = this.lerpColor(0x102040, 0x6080c0, t);
+        ambientIntensity = 0.2 + 0.2 * t;
+        sunPosition = -40 + 80 * t;
+        moonPosition = 100 - 40 * t;
+      } else if (time >= 6 && time < 8) {
+        // Sunrise
+        const t = (time - 6) / 2; // 0 to 1
+        skyColor = this.lerpColor(0x6080c0, 0x4477aa, t);
+        ambientIntensity = 0.4 + 0.4 * t;
+        sunPosition = 40 + 60 * t;
+        moonPosition = 60 - 60 * t;
+      } else if (time >= 8 && time < 18) {
+        // Day
+        skyColor = 0x4477aa;
+        ambientIntensity = 0.8;
+        sunPosition = 100;
+        moonPosition = 0;
+      } else if (time >= 18 && time < 20) {
+        // Sunset
+        const t = (time - 18) / 2; // 0 to 1
+        skyColor = this.lerpColor(0x4477aa, 0xcc5500, t);
+        ambientIntensity = 0.8 - 0.3 * t;
+        sunPosition = 100 - 60 * t;
+        moonPosition = 0 + 20 * t;
+      } else if (time >= 20 && time < 22) {
+        // Dusk
+        const t = (time - 20) / 2; // 0 to 1
+        skyColor = this.lerpColor(0xcc5500, 0x102040, t);
+        ambientIntensity = 0.5 - 0.3 * t;
+        sunPosition = 40 - 80 * t;
+        moonPosition = 20 + 80 * t;
       }
+
+      // Apply sky color with safety check
+      if (this.sky) {
+        // Don't override weather tint
+        if (this.state.weather === "clear") {
+          this.sky.tint = skyColor;
+        }
+      }
+
+      // Position sun and moon with safety checks
+      if (this.sun) {
+        this.sun.y = 300 - sunPosition;
+        this.sun.alpha = Math.max(0, Math.min(1, sunPosition / 100));
+      }
+
+      if (this.moon) {
+        this.moon.y = 300 - moonPosition;
+        this.moon.alpha = Math.max(0, Math.min(1, moonPosition / 100));
+      }
+
+      // Show/hide stars with safety check
+      if (this.stars && this.stars.children) {
+        this.stars.children.forEach((star) => {
+          if (star) {
+            star.alpha = Math.max(0, (1 - sunPosition / 100) * 0.8);
+          }
+        });
+      }
+
+      // Apply dark overlay for night time
+      const timeCycle = document.getElementById("time-cycle");
+      if (timeCycle) {
+        if (time >= 20 || time < 6) {
+          // Night time
+          const nightIntensity =
+            time >= 22 || time < 4
+              ? 0.5
+              : time >= 4 && time < 6
+                ? 0.5 - (time - 4) * 0.25
+                : (time - 20) * 0.25;
+
+          timeCycle.style.opacity = nightIntensity.toString();
+        } else {
+          timeCycle.style.opacity = "0";
+        }
+      }
+    } catch (error) {
+      console.error("Error updating day/night cycle:", error);
     }
-
-    // Position sun and moon
-    if (this.sun) {
-      this.sun.y = 300 - sunPosition;
-      this.sun.alpha = Math.max(0, Math.min(1, sunPosition / 100));
-    }
-
-    if (this.moon) {
-      this.moon.y = 300 - moonPosition;
-      this.moon.alpha = Math.max(0, Math.min(1, moonPosition / 100));
-    }
-
-    // Show/hide stars
-    if (this.stars) {
-      this.stars.children.forEach((star) => {
-        star.alpha = Math.max(0, (1 - sunPosition / 100) * 0.8);
-      });
-    }
-
-    // Apply dark overlay for night time
-    const timeCycle = document.getElementById("time-cycle");
-    if (time >= 20 || time < 6) {
-      // Night time
-      const nightIntensity =
-        time >= 22 || time < 4
-          ? 0.5
-          : time >= 4 && time < 6
-            ? 0.5 - (time - 4) * 0.25
-            : (time - 20) * 0.25;
-
-      timeCycle.style.opacity = nightIntensity.toString();
-    } else {
-      timeCycle.style.opacity = "0";
-    }
-
-    // Update torch/fire brightness (brighter at night)
-    this.updateLightSources(1 - ambientIntensity);
   }
 
   // Interpolate between two colors
   lerpColor(color1, color2, t) {
-    const r1 = (color1 >> 16) & 255;
-    const g1 = (color1 >> 8) & 255;
-    const b1 = color1 & 255;
+    try {
+      const r1 = (color1 >> 16) & 255;
+      const g1 = (color1 >> 8) & 255;
+      const b1 = color1 & 255;
 
-    const r2 = (color2 >> 16) & 255;
-    const g2 = (color2 >> 8) & 255;
-    const b2 = color2 & 255;
+      const r2 = (color2 >> 16) & 255;
+      const g2 = (color2 >> 8) & 255;
+      const b2 = color2 & 255;
 
-    const r = Math.round(r1 + (r2 - r1) * t);
-    const g = Math.round(g1 + (g2 - g1) * t);
-    const b = Math.round(b1 + (b2 - b1) * t);
+      const r = Math.round(r1 + (r2 - r1) * t);
+      const g = Math.round(g1 + (g2 - g1) * t);
+      const b = Math.round(b1 + (b2 - b1) * t);
 
-    return (r << 16) + (g << 8) + b;
+      return (r << 16) + (g << 8) + b;
+    } catch (error) {
+      console.error("Error lerping colors:", error);
+      return color1; // Return first color as fallback
+    }
   }
 
   // Update light sources based on time of day
@@ -3160,135 +3271,169 @@ class CaravanXBlockchain {
 
   // Main game loop
   gameLoop(delta) {
-    const dt = Math.min(delta, 0.1); // Cap delta time to avoid huge jumps
+    try {
+      const dt = Math.min(delta, 0.1); // Cap delta time to avoid huge jumps
 
-    // Update game time and day/night cycle
-    this.updateTimeOfDay(dt);
+      // Update game time and day/night cycle
+      this.updateTimeOfDay(dt);
 
-    // Update game state
-    this.state.gameTime += dt;
+      // Update game state
+      this.state.gameTime += dt;
 
-    // Update camera
-    this.state.camera.scale +=
-      (this.state.camera.targetScale - this.state.camera.scale) * 0.1;
-    this.worldContainer.position.set(
-      window.innerWidth / 2 + this.state.camera.x,
-      window.innerHeight / 2 + this.state.camera.y,
-    );
-    this.worldContainer.scale.set(
-      this.state.camera.scale,
-      this.state.camera.scale,
-    );
+      // Update camera
+      this.state.camera.scale +=
+        (this.state.camera.targetScale - this.state.camera.scale) * 0.1;
 
-    // Update clouds
-    if (this.clouds) {
+      if (this.worldContainer) {
+        this.worldContainer.position.set(
+          window.innerWidth / 2 + this.state.camera.x,
+          window.innerHeight / 2 + this.state.camera.y,
+        );
+        this.worldContainer.scale.set(
+          this.state.camera.scale,
+          this.state.camera.scale,
+        );
+      }
+
+      // Update clouds safely
+      this.updateClouds(dt);
+
+      // Update weather effects safely
+      if (typeof this.updateWeather === "function") {
+        this.updateWeather();
+      }
+
+      if (this.rain) {
+        this.updateRainAnimation(dt);
+      }
+
+      // Update caravans safely
+      this.updateCaravans(dt);
+
+      // Update traders safely
+      this.updateTraders(dt);
+
+      // Update miners safely
+      this.updateMiners(dt);
+
+      // Random events (with lower probability to reduce load)
+      if (Math.random() < 0.0005) {
+        this.triggerRandomEvents();
+      }
+    } catch (error) {
+      console.error("Error in game loop:", error);
+    }
+  }
+
+  // Safe update for clouds
+  updateClouds(delta) {
+    if (this.clouds && this.clouds.children) {
       this.clouds.children.forEach((cloud) => {
-        cloud.x += cloud.speed * dt * 60;
+        if (cloud && cloud.speed !== undefined) {
+          cloud.x += cloud.speed * delta * 60;
 
-        // Wrap around screen
-        if (
-          cloud.x >
-          this.state.camera.x +
-            window.innerWidth / this.state.camera.scale +
-            cloud.cloudWidth
-        ) {
-          cloud.x =
-            this.state.camera.x -
-            window.innerWidth / this.state.camera.scale -
-            cloud.cloudWidth;
+          // Wrap around screen
+          if (
+            cloud.x >
+            this.state.camera.x +
+              window.innerWidth / this.state.camera.scale +
+              (cloud.cloudWidth || 50)
+          ) {
+            cloud.x =
+              this.state.camera.x -
+              window.innerWidth / this.state.camera.scale -
+              (cloud.cloudWidth || 50);
+          }
         }
       });
     }
-
-    // Update weather effects
-    this.updateWeather();
-    if (this.rain) {
-      this.updateRainAnimation(dt);
-    }
-
-    // Update caravans
-    this.updateCaravans(dt);
-
-    // Update traders
-    this.updateTraders(dt);
-
-    // Update miners
-    this.updateMiners(dt);
-
-    // Random events
-    this.triggerRandomEvents();
   }
 
   // Update caravans
   updateCaravans(delta) {
     // Add subtle animations to caravans
-    this.state.caravans.forEach((caravan, index) => {
-      // Skip the first caravan (already at final position)
-      if (index === 0) return;
+    if (this.state.caravans && Array.isArray(this.state.caravans)) {
+      this.state.caravans.forEach((caravan, index) => {
+        if (!caravan) return; // Skip if undefined
 
-      // Calculate target position along the trail
-      const pathIndex = Math.min(this.pathPoints.length - 1, index);
-      const pathPoint = this.pathPoints[pathIndex];
+        // Skip the first caravan (already at final position)
+        if (index === 0) return;
 
-      // Move caravan gradually towards target position
-      const distance = Math.sqrt(
-        Math.pow(caravan.x - pathPoint.x, 2) +
-          Math.pow(caravan.y - (pathPoint.y - 10), 2),
-      );
+        // Skip if pathPoints are not initialized
+        if (!this.pathPoints || !Array.isArray(this.pathPoints)) return;
 
-      if (distance > 1) {
-        caravan.x += (pathPoint.x - caravan.x) * 0.01 * delta * 60;
-        caravan.y += (pathPoint.y - 10 - caravan.y) * 0.01 * delta * 60;
-      }
+        // Calculate target position along the trail
+        const pathIndex = Math.min(this.pathPoints.length - 1, index);
+        const pathPoint = this.pathPoints[pathIndex];
 
-      // Add subtle swaying motion
-      caravan.y +=
-        Math.sin(this.state.gameTime * 2 + index) * 0.05 * delta * 60;
-    });
+        if (!pathPoint) return; // Skip if pathPoint is undefined
+
+        // Move caravan gradually towards target position
+        const distance = Math.sqrt(
+          Math.pow(caravan.x - pathPoint.x, 2) +
+            Math.pow(caravan.y - (pathPoint.y - 10), 2),
+        );
+
+        if (distance > 1) {
+          caravan.x += (pathPoint.x - caravan.x) * 0.01 * delta * 60;
+          caravan.y += (pathPoint.y - 10 - caravan.y) * 0.01 * delta * 60;
+        }
+
+        // Add subtle swaying motion
+        caravan.y +=
+          Math.sin(this.state.gameTime * 2 + index) * 0.05 * delta * 60;
+      });
+    }
   }
 
   // Update traders
   updateTraders(delta) {
     // Add idle animations and movement patterns for waiting traders
-    this.state.traders.forEach((trader) => {
-      if (trader.state === "waiting") {
-        // Walking in place animation is already added in addTrader
+    if (this.state.traders && Array.isArray(this.state.traders)) {
+      this.state.traders.forEach((trader) => {
+        if (!trader) return; // Skip if undefined
 
-        // Occasionally change direction
-        if (Math.random() < 0.01) {
-          const direction = Math.random() > 0.5 ? 1 : -1;
-          const distance = 10 + Math.random() * 20;
+        if (trader.state === "waiting" && window.gsap) {
+          // Occasionally change direction
+          if (Math.random() < 0.01) {
+            const direction = Math.random() > 0.5 ? 1 : -1;
+            const distance = 10 + Math.random() * 20;
 
-          gsap.to(trader, {
-            x: trader.x + direction * distance,
-            duration: 2 + Math.random() * 2,
-            ease: "power1.inOut",
-          });
+            gsap.to(trader, {
+              x: trader.x + direction * distance,
+              duration: 2 + Math.random() * 2,
+              ease: "power1.inOut",
+            });
+          }
         }
-      }
-    });
+      });
+    }
   }
 
   // Update miners
   updateMiners(delta) {
     // For miners with active state, occasionally show mining effects
-    this.state.miners.forEach((miner) => {
-      if (miner.minerData && miner.minerData.active && Math.random() < 0.01) {
-        // Small probability to show mining effect
-        this.addMiningParticles(miner);
+    if (this.state.miners && Array.isArray(this.state.miners)) {
+      this.state.miners.forEach((miner) => {
+        if (!miner || !miner.minerData) return; // Skip if undefined
 
-        // Probability to find a block based on hash power
-        const findBlockChance = miner.minerData.hashPower / 10000;
+        if (miner.minerData.active && Math.random() < 0.01) {
+          // Small probability to show mining effect
+          this.addMiningParticles(miner);
 
-        if (Math.random() < findBlockChance) {
-          // This miner found a block!
-          this.triggerMineBlock();
+          // Probability to find a block based on hash power
+          const findBlockChance = miner.minerData.hashPower / 10000;
 
-          // Increment blocks found
-          miner.minerData.blocksFound++;
+          if (Math.random() < findBlockChance) {
+            // This miner found a block!
+            this.triggerMineBlock();
+
+            // Increment blocks found
+            miner.minerData.blocksFound++;
+          }
         }
-      }
-    });
+      });
+    }
   }
 
   // Trigger random events
@@ -3355,17 +3500,36 @@ class CaravanXBlockchain {
 
 // Initialize the application when the page is loaded
 document.addEventListener("DOMContentLoaded", () => {
-  // Setup loading bar first
-  let loadingProgress = 0;
-  const loadingInterval = setInterval(() => {
-    loadingProgress += 5;
-    if (loadingProgress > 100) {
-      clearInterval(loadingInterval);
-      return;
-    }
-    document.getElementById("loading-bar").style.width = `${loadingProgress}%`;
-  }, 100);
+  try {
+    // Setup loading bar first
+    let loadingProgress = 0;
+    const loadingInterval = setInterval(() => {
+      loadingProgress += 5;
+      if (loadingProgress > 100) {
+        clearInterval(loadingInterval);
+        return;
+      }
 
-  // Create the game
-  window.game = new CaravanXBlockchain();
+      const loadingBar = document.getElementById("loading-bar");
+      if (loadingBar) {
+        loadingBar.style.width = `${loadingProgress}%`;
+      }
+    }, 100);
+
+    // Create the game with try-catch
+    try {
+      window.game = new CaravanXBlockchain();
+    } catch (error) {
+      console.error("Failed to initialize game:", error);
+
+      // Show error message in loading screen
+      const loadingText = document.getElementById("loading-text");
+      if (loadingText) {
+        loadingText.textContent = "Error loading game: " + error.message;
+        loadingText.style.color = "#ff5555";
+      }
+    }
+  } catch (error) {
+    console.error("Error in DOMContentLoaded:", error);
+  }
 });
