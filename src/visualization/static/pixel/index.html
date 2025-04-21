@@ -6,17 +6,130 @@
         <title>Blockchain Pixel City</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/6.5.2/browser/pixi.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js"></script>
         <style>
+            /* Pixel Font */
+            @font-face {
+                font-family: "PixelFont";
+                src: url("https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap");
+                font-display: swap;
+            }
+
+            /* CSS Reset */
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --bg-color: #0a0a1a;
+                --primary-color: #1e3b70;
+                --secondary-color: #ffcc00;
+                --accent-color: #f7931a;
+                --text-color: #ffffff;
+                --dark-text: #333333;
+                --panel-bg: rgba(10, 10, 26, 0.85);
+                --panel-border: #ffcc00;
+                --button-bg: #1e3b70;
+                --button-hover: #2a4d8d;
+                --caravan-gold: #ffd700;
+                --sky-blue: #4477aa;
+                --ground-green: #225522;
+                --grass-green: #338833;
+                --trader-color: #44aa88;
+                --miner-color: #aa4488;
+                --node-color: #aaaa44;
+            }
+
             body,
             html {
                 margin: 0;
                 padding: 0;
                 overflow: hidden;
-                background-color: #0a0a1a;
-                font-family: "Courier New", monospace;
+                background-color: var(--bg-color);
+                font-family: "PixelFont", "Press Start 2P", monospace;
+                width: 100%;
+                height: 100%;
+                user-select: none;
+                color: var(--text-color);
             }
 
+            /* ===== Loading Screen ===== */
+            .loading-screen {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                background-color: var(--bg-color);
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                z-index: 9999;
+            }
+
+            .logo-container {
+                margin-bottom: 30px;
+            }
+
+            .logo-pixel {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .pixel-art-logo {
+                width: 128px;
+                height: 96px;
+                background-image: url("../assets/caravan-logo.png");
+                background-size: contain;
+                background-repeat: no-repeat;
+                image-rendering: pixelated;
+                margin-bottom: 10px;
+            }
+
+            .pixel-title {
+                font-size: 32px;
+                color: var(--secondary-color);
+                text-shadow: 3px 3px 0 #000;
+                letter-spacing: 2px;
+                margin-bottom: 5px;
+            }
+
+            .pixel-subtitle {
+                font-size: 16px;
+                color: var(--text-color);
+                text-shadow: 2px 2px 0 #000;
+            }
+
+            .loading-bar-container {
+                width: 300px;
+                height: 20px;
+                background-color: rgba(255, 255, 255, 0.1);
+                border: 4px solid var(--secondary-color);
+                padding: 4px;
+                margin: 20px 0;
+                image-rendering: pixelated;
+            }
+
+            .loading-bar {
+                height: 100%;
+                width: 0%;
+                background-color: var(--secondary-color);
+                box-shadow: 0 0 8px var(--secondary-color);
+                transition: width 0.2s;
+            }
+
+            #loading-text {
+                color: var(--text-color);
+                font-size: 12px;
+                margin-top: 10px;
+            }
+
+            /* ===== Game Container ===== */
             #game-container {
                 position: absolute;
                 top: 0;
@@ -26,6 +139,7 @@
                 z-index: 1;
             }
 
+            /* ===== UI Overlay ===== */
             #ui-overlay {
                 position: absolute;
                 top: 0;
@@ -36,182 +150,502 @@
                 z-index: 2;
             }
 
-            #stats-panel {
-                position: absolute;
-                top: 10px;
-                left: 10px;
-                background-color: rgba(0, 0, 0, 0.7);
-                border: 2px solid #f7931a;
-                border-radius: 5px;
-                padding: 10px;
-                color: #fff;
-                font-size: 12px;
-                pointer-events: auto;
-            }
-
-            #controls {
-                position: absolute;
-                bottom: 10px;
-                right: 10px;
-                display: flex;
-                gap: 5px;
-                pointer-events: auto;
-            }
-
+            /* Pixel-style UI elements */
             .pixel-button {
-                background-color: #f7931a;
-                border: none;
-                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                background-color: var(--button-bg);
+                color: var(--text-color);
+                border: 2px solid var(--secondary-color);
                 padding: 8px 16px;
-                font-family: "Courier New", monospace;
+                font-family: "PixelFont", "Press Start 2P", monospace;
                 font-size: 10px;
                 cursor: pointer;
                 position: relative;
                 image-rendering: pixelated;
+                text-transform: uppercase;
+                text-shadow: 1px 1px 0 #000;
+                transition: all 0.1s;
+                box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5);
+                pointer-events: auto;
             }
 
-            .loading-screen {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100vw;
-                height: 100vh;
-                background-color: #0a0a1a;
+            .pixel-button:hover {
+                background-color: var(--button-hover);
+                transform: translateY(-2px);
+                box-shadow: 3px 5px 0 rgba(0, 0, 0, 0.5);
+            }
+
+            .pixel-button:active {
+                transform: translateY(1px);
+                box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+            }
+
+            /* ===== Stats Panel ===== */
+            .stats-panel {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                background-color: var(--panel-bg);
+                border: 2px solid var(--panel-border);
+                padding: 10px;
+                color: var(--text-color);
+                font-size: 10px;
+                min-width: 180px;
+                pointer-events: auto;
+            }
+
+            .panel-header {
+                color: var(--secondary-color);
+                text-align: center;
+                border-bottom: 1px solid var(--secondary-color);
+                padding-bottom: 5px;
+                margin-bottom: 8px;
+                font-size: 12px;
+                text-shadow: 1px 1px 0 #000;
+            }
+
+            .stat-row {
+                display: flex;
+                justify-content: space-between;
+                margin: 5px 0;
+            }
+
+            .stat-label {
+                color: var(--text-color);
+            }
+
+            .stat-value {
+                color: var(--secondary-color);
+                text-shadow: 1px 1px 0 #000;
+            }
+
+            /* Weather indicator */
+            .weather-indicator {
+                text-align: center;
+                margin-top: 8px;
+                font-size: 16px;
+            }
+
+            .pixel-icon-sun,
+            .pixel-icon-rain,
+            .pixel-icon-cloud {
+                display: inline-block;
+                width: 16px;
+                height: 16px;
+                background-size: contain;
+                background-repeat: no-repeat;
+                image-rendering: pixelated;
+            }
+
+            .pixel-icon-sun {
+                background-image: url("../assets/icons/sun.png");
+            }
+
+            /* ===== Controls ===== */
+            .controls {
+                position: absolute;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                display: flex;
+                gap: 10px;
+                pointer-events: auto;
+            }
+
+            .action-button {
+                min-width: 140px;
+            }
+
+            .zoom-controls {
                 display: flex;
                 flex-direction: column;
+                gap: 5px;
+            }
+
+            .zoom-controls .pixel-button {
+                width: 30px;
+                height: 30px;
+                padding: 0;
+            }
+
+            /* ===== View Mode Toggle ===== */
+            .view-mode-toggle {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                display: flex;
+                gap: 10px;
+                pointer-events: auto;
+            }
+
+            /* ===== Compass ===== */
+            .compass {
+                position: absolute;
+                bottom: 20px;
+                right: 20px;
+                width: 80px;
+                height: 80px;
+                pointer-events: auto;
+            }
+
+            .compass-inner {
+                position: relative;
+                width: 80px;
+                height: 80px;
+                background-color: var(--panel-bg);
+                border: 2px solid var(--panel-border);
+                border-radius: 50%;
+                display: flex;
                 justify-content: center;
                 align-items: center;
-                z-index: 100;
             }
 
-            .loading-bar-container {
-                width: 200px;
-                height: 20px;
-                background-color: #333;
-                border: 2px solid #f7931a;
-                margin-top: 20px;
+            #compass-arrow {
+                position: absolute;
+                width: 4px;
+                height: 30px;
+                background-color: var(--secondary-color);
+                top: 10px;
+                left: 38px;
+                transform-origin: bottom center;
+                transition: transform 0.5s;
             }
 
-            .loading-bar {
+            .compass-markings {
+                position: absolute;
+                width: 100%;
                 height: 100%;
-                width: 0%;
-                background-color: #f7931a;
-                transition: width 0.2s;
             }
 
-            .pixel-title {
-                color: #f7931a;
-                font-size: 24px;
-                margin-bottom: 20px;
-                text-shadow: 4px 4px 0px rgba(0, 0, 0, 0.8);
+            .compass-markings span {
+                position: absolute;
+                font-size: 9px;
+                color: var(--text-color);
             }
 
+            .compass-markings .n {
+                top: 5px;
+                left: 50%;
+                transform: translateX(-50%);
+            }
+
+            .compass-markings .e {
+                right: 5px;
+                top: 50%;
+                transform: translateY(-50%);
+            }
+
+            .compass-markings .s {
+                bottom: 5px;
+                left: 50%;
+                transform: translateX(-50%);
+            }
+
+            .compass-markings .w {
+                left: 5px;
+                top: 50%;
+                transform: translateY(-50%);
+            }
+
+            #compass-label {
+                font-size: 8px;
+                margin-top: 5px;
+                text-align: center;
+                color: var(--secondary-color);
+            }
+
+            /* ===== Legend ===== */
+            .legend {
+                position: absolute;
+                top: 10px;
+                left: 200px;
+                background-color: var(--panel-bg);
+                border: 2px solid var(--panel-border);
+                padding: 10px;
+                color: var(--text-color);
+                font-size: 8px;
+                min-width: 150px;
+                pointer-events: auto;
+            }
+
+            .legend-item {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin: 5px 0;
+            }
+
+            .legend-icon {
+                width: 16px;
+                height: 16px;
+                background-size: contain;
+                background-repeat: no-repeat;
+                image-rendering: pixelated;
+            }
+
+            .caravan-icon {
+                background-image: url("../assets/icons/caravan.png");
+            }
+
+            .trader-icon {
+                background-image: url("../assets/icons/trader.png");
+            }
+
+            .miner-icon {
+                background-image: url("../assets/icons/miner.png");
+            }
+
+            .outpost-icon {
+                background-image: url("../assets/icons/outpost.png");
+            }
+
+            /* ===== Details Panel ===== */
+            .details-panel {
+                position: absolute;
+                right: 20px;
+                top: 60px;
+                width: 300px;
+                background-color: var(--panel-bg);
+                border: 2px solid var(--panel-border);
+                padding: 10px;
+                font-size: 10px;
+                display: none;
+                pointer-events: auto;
+                max-height: 70vh;
+                overflow-y: auto;
+            }
+
+            .details-panel .panel-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .close-button {
+                background: none;
+                border: none;
+                color: var(--secondary-color);
+                font-size: 16px;
+                cursor: pointer;
+            }
+
+            /* ===== Tutorial ===== */
+            .tutorial {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background-color: var(--panel-bg);
+                border: 2px solid var(--panel-border);
+                padding: 15px;
+                color: var(--text-color);
+                font-size: 10px;
+                max-width: 400px;
+                pointer-events: auto;
+                z-index: 1000;
+            }
+
+            .tutorial-content {
+                margin: 10px 0;
+                line-height: 1.5;
+            }
+
+            .tutorial-content p {
+                margin-bottom: 10px;
+            }
+
+            .highlight {
+                color: var(--secondary-color);
+                font-weight: bold;
+            }
+
+            /* ===== Tooltip ===== */
             .tooltip {
                 position: absolute;
-                background-color: #111;
-                border: 2px solid #f7931a;
+                background-color: var(--panel-bg);
+                border: 2px solid var(--secondary-color);
                 padding: 8px;
-                color: white;
-                font-size: 10px;
+                color: var(--text-color);
+                font-size: 8px;
                 pointer-events: none;
                 z-index: 10;
                 opacity: 0;
                 transition: opacity 0.2s;
             }
 
-            #details-panel {
+            /* ===== Sound Controls ===== */
+            .sound-controls {
                 position: absolute;
-                right: 10px;
-                top: 10px;
-                width: 300px;
-                background-color: rgba(0, 0, 0, 0.8);
-                border: 2px solid #f7931a;
-                border-radius: 5px;
-                padding: 10px;
-                color: #fff;
-                font-size: 10px;
-                display: none;
+                bottom: 20px;
+                left: 20px;
                 pointer-events: auto;
             }
 
-            #details-close {
-                position: absolute;
-                top: 5px;
-                right: 5px;
-                cursor: pointer;
-                font-size: 12px;
+            .pixel-icon-sound-on,
+            .pixel-icon-sound-off {
+                display: inline-block;
+                width: 16px;
+                height: 16px;
+                background-size: contain;
+                background-repeat: no-repeat;
+                image-rendering: pixelated;
             }
 
+            .pixel-icon-sound-on {
+                background-image: url("../assets/icons/sound-on.png");
+            }
+
+            .pixel-icon-sound-off {
+                background-image: url("../assets/icons/sound-off.png");
+            }
+
+            /* ===== Notification System ===== */
+            .notification-container {
+                position: absolute;
+                bottom: 80px;
+                left: 20px;
+                width: 250px;
+                pointer-events: none;
+            }
+
+            .notification {
+                background-color: var(--panel-bg);
+                border: 2px solid var(--secondary-color);
+                color: var(--text-color);
+                padding: 10px;
+                margin-bottom: 10px;
+                font-size: 9px;
+                animation:
+                    slideIn 0.3s forwards,
+                    fadeOut 0.5s 3.5s forwards;
+            }
+
+            @keyframes slideIn {
+                0% {
+                    transform: translateX(-100%);
+                    opacity: 0;
+                }
+                100% {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+            }
+
+            @keyframes fadeOut {
+                0% {
+                    opacity: 1;
+                }
+                100% {
+                    opacity: 0;
+                }
+            }
+
+            /* Icon styles for buttons */
+            .pixel-icon-mine,
+            .pixel-icon-tx,
+            .pixel-icon-standard,
+            .pixel-icon-cube {
+                display: inline-block;
+                width: 16px;
+                height: 16px;
+                background-size: contain;
+                background-repeat: no-repeat;
+                image-rendering: pixelated;
+            }
+
+            .pixel-icon-mine {
+                background-image: url("../assets/icons/pickaxe.png");
+            }
+
+            .pixel-icon-tx {
+                background-image: url("../assets/icons/scroll.png");
+            }
+
+            .pixel-icon-standard {
+                background-image: url("../assets/icons/map.png");
+            }
+
+            .pixel-icon-cube {
+                background-image: url("../assets/icons/cube.png");
+            }
+
+            /* ===== Day/Night Cycle ===== */
             #time-cycle {
                 position: absolute;
                 top: 0;
                 left: 0;
                 width: 100%;
                 height: 100%;
-                background-color: rgba(0, 0, 100, 0.2);
+                background-color: rgba(0, 0, 50, 0.3);
                 z-index: 1;
                 pointer-events: none;
                 opacity: 0;
                 transition: opacity 10s;
             }
 
-            #compass {
-                position: absolute;
-                bottom: 20px;
-                left: 20px;
-                width: 100px;
-                height: 100px;
-                background-color: rgba(0, 0, 0, 0.5);
-                border: 2px solid #f7931a;
-                border-radius: 50%;
-                pointer-events: auto;
-            }
+            /* ===== Media Queries ===== */
+            @media (max-width: 768px) {
+                .legend {
+                    display: none;
+                }
 
-            #compass-arrow {
-                position: absolute;
-                top: 10px;
-                left: 48px;
-                width: 4px;
-                height: 40px;
-                background-color: #f7931a;
-                transform-origin: bottom center;
-            }
+                .view-mode-toggle {
+                    top: auto;
+                    bottom: 70px;
+                    right: 10px;
+                }
 
-            #compass-label {
-                position: absolute;
-                bottom: 10px;
-                width: 100%;
-                text-align: center;
-                color: white;
-                font-size: 10px;
-            }
+                .stats-panel {
+                    width: 140px;
+                }
 
-            #view-toggle {
-                position: absolute;
-                top: 10px;
-                right: 10px;
-                background-color: #f7931a;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                font-size: 12px;
-                cursor: pointer;
-                pointer-events: auto;
+                .controls {
+                    flex-direction: column;
+                    left: 10px;
+                    bottom: 10px;
+                    transform: none;
+                }
+
+                .action-button {
+                    min-width: 120px;
+                }
+
+                .compass {
+                    width: 60px;
+                    height: 60px;
+                    bottom: 10px;
+                    right: 10px;
+                }
+
+                .compass-inner {
+                    width: 60px;
+                    height: 60px;
+                }
+
+                .details-panel {
+                    width: calc(100% - 40px);
+                    left: 20px;
+                    right: 20px;
+                    max-height: 50vh;
+                }
             }
         </style>
     </head>
     <body>
         <div class="loading-screen" id="loading-screen">
-            <div class="pixel-title">BLOCKCHAIN PIXEL CITY</div>
+            <div class="logo-container">
+                <div class="logo-pixel">
+                    <div class="pixel-title">CARAVAN-X</div>
+                    <div class="pixel-subtitle">Blockchain Journey</div>
+                </div>
+            </div>
             <div class="loading-bar-container">
                 <div class="loading-bar" id="loading-bar"></div>
             </div>
-            <div
-                id="loading-text"
-                style="color: white; margin-top: 10px; font-size: 12px"
-            >
-                Loading resources...
-            </div>
+            <div id="loading-text">Loading the caravan...</div>
         </div>
 
         <div id="game-container"></div>
@@ -243,7 +677,77 @@
                 <div id="details-content"></div>
             </div>
 
+            <div id="legend" class="legend">
+                <div class="panel-header">LEGEND</div>
+                <div class="legend-item">
+                    <span class="legend-icon caravan-icon"></span>
+                    <span>Caravan (Block)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-icon trader-icon"></span>
+                    <span>Trader (Transaction)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-icon miner-icon"></span>
+                    <span>Miner (Validator)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-icon outpost-icon"></span>
+                    <span>Outpost (Node)</span>
+                </div>
+            </div>
+            <div id="legend" class="legend">
+                <div class="panel-header">LEGEND</div>
+                <div class="legend-item">
+                    <span class="legend-icon caravan-icon"></span>
+                    <span>Caravan (Block)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-icon trader-icon"></span>
+                    <span>Trader (Transaction)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-icon miner-icon"></span>
+                    <span>Miner (Validator)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-icon outpost-icon"></span>
+                    <span>Outpost (Node)</span>
+                </div>
+            </div>
+
             <div id="time-cycle"></div>
+
+            <!-- Add a simple tutorial that appears on first visit -->
+            <div class="tutorial" id="tutorial" style="display: none">
+                <div class="panel-header">WELCOME, EXPLORER!</div>
+                <div class="tutorial-content">
+                    <p>
+                        This is the CARAVAN-X blockchain visualization. Each
+                        block is represented as a
+                        <span class="highlight">caravan</span> traveling along
+                        the chain.
+                    </p>
+                    <p>
+                        Transactions are shown as
+                        <span class="highlight">traders</span> waiting to join
+                        the next caravan.
+                    </p>
+                    <p>
+                        Click on caravans or traders to see details. Use the
+                        control buttons to interact with the blockchain.
+                    </p>
+                </div>
+                <button id="tutorial-close" class="pixel-button">
+                    GOT IT!
+                </button>
+            </div>
+
+            <!-- Add notification container -->
+            <div
+                id="notification-container"
+                class="notification-container"
+            ></div>
         </div>
 
         <div class="tooltip" id="tooltip"></div>
