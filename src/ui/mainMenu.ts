@@ -75,6 +75,10 @@ export class MainMenu {
         value: "spend-caravan",
       },
       {
+        name: colors.commandName("Fund Caravan multisig wallet"),
+        value: "fund-caravan",
+      },
+      {
         name: colors.commandName("View Caravan wallet details"),
         value: "caravan-details",
       },
@@ -82,14 +86,11 @@ export class MainMenu {
         name: colors.commandName("Create watch-only wallet for Caravan"),
         value: "create-watch",
       },
-      {
-        name: colors.commandName("Configure private keys for Caravan wallet"),
-        value: "configure-keys",
-      },
-      {
-        name: colors.commandName("Fund Caravan multisig wallet"),
-        value: "fund-caravan",
-      },
+      // {
+      //   name: colors.commandName("Configure private keys for Caravan wallet"),
+      //   value: "configure-keys",
+      // },
+
       { name: colors.muted("Back to main menu"), value: "back" },
     ],
     transactions: [

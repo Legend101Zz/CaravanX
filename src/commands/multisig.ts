@@ -1820,194 +1820,298 @@ export class MultisigCommands {
    * Fund a Caravan wallet
    */
   async fundCaravanWallet(): Promise<any | null> {
-    const wallets = await this.caravanService.listCaravanWallets();
+    displayCommandTitle("Fund Caravan Multisig Wallet");
 
-    if (wallets.length === 0) {
-      console.log(chalk.yellow("\nNo Caravan wallets found."));
-      return null;
-    }
+    try {
+      const wallets = await this.caravanService.listCaravanWallets();
 
-    const walletIndex = await select({
-      message: "Select a Caravan wallet to fund:",
-      choices: wallets.map((w, i) => ({ name: w.name, value: i })),
-    });
-
-    const selectedWallet = wallets[walletIndex];
-
-    // Check if a watch wallet exists
-    const safeWalletName = `${selectedWallet.name.replace(/\s+/g, "_").toLowerCase()}_watch`;
-    const bitcoindWallets = await this.bitcoinService.listWallets();
-
-    if (!bitcoindWallets.includes(safeWalletName)) {
-      console.log(
-        chalk.yellow(`\nNo watch wallet found for ${selectedWallet.name}.`),
-      );
-
-      const createWallet = await confirm({
-        message: "Create a watch-only wallet first?",
-        default: true,
-      });
-
-      if (createWallet) {
-        await this.createWatchWallet(selectedWallet);
-      } else {
+      if (wallets.length === 0) {
+        console.log(
+          formatWarning("No Caravan wallets found. Create one first."),
+        );
         return null;
       }
-    }
 
-    console.log(
-      chalk.cyan(`\n=== Funding Caravan Wallet: ${selectedWallet.name} ===`),
-    );
-
-    // Get wallet balance before
-    try {
-      const walletInfo =
-        await this.bitcoinService.getWalletInfo(safeWalletName);
-      console.log(chalk.green(`Current balance: ${walletInfo.balance} BTC`));
-    } catch (error) {
-      console.error(chalk.yellow("Could not get wallet info."));
-    }
-
-    // Get a new address from the watch wallet
-    try {
-      const address = await this.bitcoinService.getNewAddress(safeWalletName);
-      console.log(chalk.green(`\nGenerated address: ${address}`));
-
-      // Ask how to fund the wallet
-      const fundMethod = await select({
-        message: "How would you like to fund this wallet?",
-        choices: [
-          { name: "Send from another wallet", value: "send" },
-          { name: "Mine directly to this address", value: "mine" },
-        ],
+      const walletIndex = await select({
+        message: "Select a Caravan wallet to fund:",
+        choices: wallets.map((w, i) => ({
+          name:
+            colors.highlight(w.name) +
+            colors.info(
+              ` (${w.quorum.requiredSigners} of ${w.quorum.totalSigners}, ${w.addressType})`,
+            ),
+          value: i,
+        })),
       });
 
-      if (fundMethod === "send") {
-        // List source wallets
-        const sourceWallets = bitcoindWallets.filter(
-          (w) => w !== safeWalletName,
-        );
+      const selectedWallet = wallets[walletIndex];
 
-        if (sourceWallets.length === 0) {
-          console.log(
-            chalk.yellow(
-              "\nNo source wallets found. Create another wallet first.",
-            ),
-          );
-          return null;
-        }
-
-        const sourceWallet = await select({
-          message: "Select source wallet:",
-          choices: sourceWallets.map((w) => ({ name: w, value: w })),
-        });
-
-        const sourceInfo =
-          await this.bitcoinService.getWalletInfo(sourceWallet);
-
-        if (sourceInfo.balance <= 0) {
-          console.log(
-            chalk.yellow("\nSource wallet has no funds. Please fund it first."),
-          );
-          return null;
-        }
-
-        // Ask for amount
-        const amount = await number({
-          message: "Enter amount to send (BTC):",
-          validate: (input: number | undefined) => {
-            if (input === undefined || isNaN(input) || input <= 0) {
-              return "Please enter a valid positive amount";
-            }
-            if (input > sourceInfo.balance) {
-              return `Amount exceeds balance (${sourceInfo.balance} BTC)`;
-            }
-            return true;
+      // Provide instructions to the user
+      console.log(
+        boxText(
+          "1. Open Caravan in your browser\n" +
+            '2. Go to your caravan wallet\'s "Receive" tab\n' +
+            "3. Select an Address\n" +
+            "4. Copy that address and paste it below",
+          {
+            title: "Steps to Get Multisig Address",
+            titleColor: colors.info,
           },
-          default: Math.min(1, sourceInfo.balance),
-        });
+        ),
+      );
 
+      // Get the multisig address from user
+      const multisigAddress = await input({
+        message: "Paste the multisig address from Caravan's Receive tab:",
+        validate: (addr) =>
+          addr && addr.trim().length > 0
+            ? true
+            : "Please enter a valid address",
+      });
+
+      console.log(
+        formatSuccess(`\nReceived multisig address: ${multisigAddress}`),
+      );
+
+      // Find non-watch wallets with funds
+      console.log(colors.info("\nScanning for wallets with funds..."));
+
+      const fundingWalletsSpinner = ora(
+        "Loading wallets with funds...",
+      ).start();
+      const bitcoindWallets = await this.bitcoinService.listWallets();
+
+      // Filter out watch wallets (those ending with _watch)
+      const nonWatchWallets = bitcoindWallets.filter(
+        (w) => !w.endsWith("_watch"),
+      );
+
+      // Check balance of each wallet
+      const walletsWithFunds = [];
+
+      for (const wallet of nonWatchWallets) {
+        try {
+          const walletInfo = await this.bitcoinService.getWalletInfo(wallet);
+          if (walletInfo.balance > 0) {
+            walletsWithFunds.push({
+              name: wallet,
+              balance: walletInfo.balance,
+            });
+          }
+        } catch (error) {
+          // Skip wallets that we can't get info for
+        }
+      }
+
+      fundingWalletsSpinner.succeed(
+        `Found ${walletsWithFunds.length} wallet(s) with funds`,
+      );
+
+      if (walletsWithFunds.length === 0) {
         console.log(
-          chalk.cyan(
-            `\nSending ${amount} BTC from ${sourceWallet} to ${address}...`,
+          formatWarning(
+            "\nNo wallets with funds found. Please fund a wallet first.",
           ),
         );
 
-        // Send the transaction
-        const txid = await this.bitcoinService.sendToAddress(
-          sourceWallet,
-          address,
-          amount!,
-        );
-
-        console.log(chalk.green(`\nTransaction sent successfully!`));
-        console.log(chalk.green(`Transaction ID: ${txid}`));
-
-        // Ask if user wants to mine a block to confirm the transaction
-        const mine = await confirm({
-          message: "Mine a block to confirm the transaction?",
+        // Offer to create and fund a wallet
+        const createWallet = await confirm({
+          message: "Would you like to create and fund a wallet now?",
           default: true,
         });
 
-        if (mine) {
-          // Use the source wallet for mining
-          const mineAddress =
+        if (createWallet) {
+          // Create funding wallet
+          const fundingWalletName = `funding_wallet_${Date.now()}`;
+          console.log(
+            colors.info(`\nCreating funding wallet: ${fundingWalletName}`),
+          );
+
+          const createSpinner = ora(
+            `Creating wallet ${fundingWalletName}...`,
+          ).start();
+          await this.bitcoinService.createWallet(fundingWalletName, {
+            disablePrivateKeys: false,
+            blank: false,
+            descriptorWallet: true,
+          });
+          createSpinner.succeed(`Created funding wallet: ${fundingWalletName}`);
+
+          // Fund it by mining
+          const fundingAddress =
+            await this.bitcoinService.getNewAddress(fundingWalletName);
+          const mineSpinner = ora(
+            "Mining 6 blocks to fund the wallet...",
+          ).start();
+          const blockHashes = await this.bitcoinService.generateToAddress(
+            6,
+            fundingAddress,
+          );
+          mineSpinner.succeed(`Mined 6 blocks to address ${fundingAddress}`);
+
+          // Add to walletsWithFunds
+          const walletInfo =
+            await this.bitcoinService.getWalletInfo(fundingWalletName);
+          walletsWithFunds.push({
+            name: fundingWalletName,
+            balance: walletInfo.balance,
+          });
+        } else {
+          return null;
+        }
+      }
+
+      // Have user select a wallet to use for funding
+      const fundingWalletChoices = walletsWithFunds.map((w) => ({
+        name:
+          colors.highlight(w.name) +
+          colors.info(` (Balance: ${formatBitcoin(w.balance)})`),
+        value: w.name,
+      }));
+
+      const sourceWallet = await select({
+        message: "Select a wallet to use for funding:",
+        choices: fundingWalletChoices,
+      });
+
+      const sourceInfo = await this.bitcoinService.getWalletInfo(sourceWallet);
+
+      // Ask for amount
+      const amount = await number({
+        message: "Enter amount to send (BTC):",
+        validate: (input: number | undefined) => {
+          if (input === undefined || isNaN(input) || input <= 0) {
+            return "Please enter a valid positive amount";
+          }
+          if (input > sourceInfo.balance) {
+            return `Amount exceeds balance (${formatBitcoin(sourceInfo.balance)})`;
+          }
+          return true;
+        },
+        default: Math.min(0.01, sourceInfo.balance),
+      });
+
+      // Ask about transaction fee
+      const includeFee = await confirm({
+        message: "Would you like to specify a custom fee?",
+        default: false,
+      });
+
+      let fee = 0.0001; // Default fee
+
+      if (includeFee) {
+        fee = (await number({
+          message: "Enter fee amount (BTC):",
+          validate: (input: number | undefined) => {
+            if (input === undefined || isNaN(input) || input < 0) {
+              return "Please enter a valid non-negative amount";
+            }
+            if (input + amount! > sourceInfo.balance) {
+              return `Amount + fee (${formatBitcoin(input + amount!)}) exceeds balance (${formatBitcoin(sourceInfo.balance)})`;
+            }
+            return true;
+          },
+          default: 0.0001,
+        })) as number;
+      }
+
+      // Generate transaction description
+      const txDescription = boxText(
+        `From: ${colors.highlight(sourceWallet)}\n` +
+          `To: ${colors.highlight(multisigAddress)}\n` +
+          `Amount: ${colors.highlight(formatBitcoin(amount!))}\n` +
+          `Fee: ${colors.highlight(formatBitcoin(fee))}\n` +
+          `Total: ${colors.highlight(formatBitcoin(amount! + fee))}`,
+        { title: "Transaction Details", titleColor: colors.info },
+      );
+
+      console.log(txDescription);
+
+      // Confirm the transaction
+      const confirmSend = await confirm({
+        message: "Do you want to send this transaction?",
+        default: true,
+      });
+
+      if (!confirmSend) {
+        console.log(formatWarning("Transaction cancelled."));
+        return null;
+      }
+
+      // Send the transaction
+      console.log(
+        colors.info(
+          `\nSending ${formatBitcoin(amount!)} to multisig address...`,
+        ),
+      );
+
+      const txSpinner = ora("Sending transaction...").start();
+      let txid;
+
+      try {
+        txid = await this.bitcoinService.sendToAddress(
+          sourceWallet,
+          multisigAddress,
+          amount!,
+        );
+        txSpinner.succeed("Transaction sent successfully");
+      } catch (error) {
+        txSpinner.fail("Failed to send transaction");
+        console.error(formatError(`Error: ${error}`));
+        return null;
+      }
+
+      console.log(
+        boxText(
+          `Transaction ID: ${colors.highlight(txid)}\n\n` +
+            `The funds have been sent to the multisig address. You should now\n` +
+            `be able to see this transaction in Caravan's "Pending Transactions" tab.\n\n` +
+            `In regtest mode, the transaction needs to be confirmed by mining a block.`,
+          { title: "Transaction Sent", titleColor: colors.success },
+        ),
+      );
+
+      // Ask if the user wants to mine a block to confirm
+      const mineBlock = await confirm({
+        message: "Would you like to mine a block to confirm the transaction?",
+        default: true,
+      });
+
+      if (mineBlock) {
+        const mineSpinner = ora("Mining a block...").start();
+        try {
+          const miningAddress =
             await this.bitcoinService.getNewAddress(sourceWallet);
           const blockHashes = await this.bitcoinService.generateToAddress(
             1,
-            mineAddress,
+            miningAddress,
           );
+          mineSpinner.succeed("Block mined successfully");
 
           console.log(
-            chalk.green(`\nMined 1 block to confirm the transaction!`),
+            boxText(
+              `Block hash: ${colors.highlight(blockHashes[0])}\n\n` +
+                `The transaction has been confirmed. You can now spend these funds\n` +
+                `from your Caravan multisig wallet by creating a transaction in the\n` +
+                `"Spend" tab.`,
+              { title: "Transaction Confirmed", titleColor: colors.success },
+            ),
           );
-          console.log(chalk.green(`Block hash: ${blockHashes[0]}`));
+        } catch (error) {
+          mineSpinner.fail("Failed to mine block");
+          console.error(formatError(`Error: ${error}`));
         }
-
-        // Check new balance
-        const newWalletInfo =
-          await this.bitcoinService.getWalletInfo(safeWalletName);
-        console.log(chalk.green(`\nNew balance: ${newWalletInfo.balance} BTC`));
-
-        return { txid };
       } else {
-        // Mine directly to address
-        const blocks = await number({
-          message: "How many blocks to mine?",
-          default: 1,
-          validate: (input: number | undefined) =>
-            input !== undefined && input > 0
-              ? true
-              : "Please enter a positive number",
-        });
-
         console.log(
-          chalk.cyan(`\nMining ${blocks} block(s) to address ${address}...`),
-        );
-
-        const blockHashes = await this.bitcoinService.generateToAddress(
-          blocks!,
-          address,
-        );
-
-        console.log(
-          chalk.green(`\nSuccessfully mined ${blockHashes.length} block(s)!`),
-        );
-        console.log(
-          chalk.green(
-            `Latest block hash: ${blockHashes[blockHashes.length - 1]}`,
+          formatWarning(
+            "\nTransaction will remain pending until a block is mined.",
           ),
         );
-
-        // Check new balance
-        const newWalletInfo =
-          await this.bitcoinService.getWalletInfo(safeWalletName);
-        console.log(chalk.green(`\nNew balance: ${newWalletInfo.balance} BTC`));
-
-        return { blockHashes };
       }
+
+      return { txid };
     } catch (error) {
-      console.error(chalk.red("\nError funding wallet:"), error);
+      console.error(formatError("Error funding Caravan wallet:"), error);
       return null;
     }
   }
