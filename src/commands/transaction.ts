@@ -4,7 +4,7 @@ import { CaravanService } from "../core/caravan";
 import { BitcoinService } from "../core/bitcoin";
 import { input, confirm, select, number, password } from "@inquirer/prompts";
 import * as fs from "fs-extra";
-import * as clipboard from "clipboardy";
+import clipboard from "clipboardy";
 import ora from "ora";
 import {
   colors,

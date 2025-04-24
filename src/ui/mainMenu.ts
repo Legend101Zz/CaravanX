@@ -75,6 +75,10 @@ export class MainMenu {
         value: "spend-caravan",
       },
       {
+        name: colors.commandName("Sign Caravan PSBT for import"),
+        value: "sign-caravan-psbt",
+      },
+      {
         name: colors.commandName("Fund Caravan multisig wallet"),
         value: "fund-caravan",
       },
@@ -460,6 +464,9 @@ export class MainMenu {
           break;
         case "spend-caravan":
           await this.app.multisigCommands.spendFromCaravanWallet();
+          break;
+        case "sign-caravan-psbt":
+          await this.app.multisigCommands.signCaravanPSBT();
           break;
         case "caravan-details":
           await this.app.multisigCommands.showCaravanWalletDetails();

@@ -511,6 +511,25 @@ program
     }
   });
 
+// Sign Caravan PSBT command
+program
+  .command("sign-caravan-psbt")
+  .description("Sign a Caravan PSBT and generate importable signature JSON")
+  .option("-f, --file <path>", "Path to PSBT file")
+  .option("-k, --key <key>", "Private key in WIF format for signing")
+  .option("-o, --output <path>", "Output path for signature JSON file")
+  .action(async (options) => {
+    const spinner = ora("Initializing...").start();
+    const app = new CaravanRegtestManager();
+    spinner.succeed("Initialized");
+
+    try {
+      await app.multisigCommands.signCaravanPSBT();
+    } catch (error) {
+      console.error(formatError("Error signing Caravan PSBT:"), error);
+    }
+  });
+
 // Start the interactive app (default command)
 program
   .command("start", { isDefault: true })
