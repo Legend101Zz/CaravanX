@@ -3,220 +3,2319 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>BlockCraft: The Living Ledger</title>
-        <link rel="stylesheet" href="styles/minecraft-style.css" />
-        <link rel="stylesheet" href="styles/blockchain.css" />
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r132/three.min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r132/examples/js/controls/PointerLockControls.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+        <title>CARAVAN-X: BlockCraft - Coming Soon</title>
+
+        <!-- External libraries -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r132/three.min.js"></script>
+        <style>
+            @font-face {
+                font-family: "MinecraftFont";
+                src: url("assets/fonts/minecraft.woff2") format("woff2");
+                font-display: swap;
+            }
+
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            body,
+            html {
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+                background-color: #111111;
+                font-family: "MinecraftFont", monospace, sans-serif;
+                width: 100%;
+                height: 100%;
+                color: #f0f0f0;
+                text-shadow: 2px 2px 0 #000;
+                cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16"><rect x="0" y="0" width="16" height="16" fill="rgba(0,0,0,0)"/><polygon points="4,4 12,8 4,12" fill="%23fff" stroke="%23000" stroke-width="1"/></svg>'),
+                    auto;
+            }
+
+            /* Terminal container */
+            .terminal-container {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 80%;
+                max-width: 800px;
+                height: 500px;
+                background-color: #1e2d3b;
+                border: 4px solid #3b8ba3;
+                box-shadow: 0 0 30px rgba(59, 139, 163, 0.5);
+                z-index: 10;
+                overflow: hidden;
+            }
+
+            .terminal-header {
+                background-color: #3b8ba3;
+                height: 40px;
+                display: flex;
+                align-items: center;
+                padding: 0 15px;
+            }
+
+            .terminal-title {
+                color: #f0f0f0;
+                font-size: 18px;
+                flex-grow: 1;
+            }
+
+            .terminal-buttons {
+                display: flex;
+            }
+
+            .terminal-button {
+                width: 15px;
+                height: 15px;
+                border-radius: 50%;
+                margin-left: 8px;
+                cursor: pointer;
+            }
+
+            .button-close {
+                background-color: #ff5f56;
+            }
+
+            .button-minimize {
+                background-color: #ffbd2e;
+            }
+
+            .button-maximize {
+                background-color: #27c93f;
+            }
+
+            .terminal-body {
+                height: calc(100% - 40px);
+                padding: 20px;
+                font-family: "Courier New", monospace;
+                color: #f0f0f0;
+                overflow: auto;
+                position: relative;
+            }
+
+            .terminal-line {
+                margin-bottom: 10px;
+                display: flex;
+                opacity: 0;
+            }
+
+            .terminal-line.visible {
+                opacity: 1;
+            }
+
+            .prompt {
+                color: #ffbd2e;
+                margin-right: 10px;
+            }
+
+            .command {
+                color: #f0f0f0;
+            }
+
+            .response {
+                color: #a0a0a0;
+                white-space: pre-wrap;
+                margin-left: 0;
+            }
+
+            .terminal-input {
+                background: transparent;
+                border: none;
+                color: #f0f0f0;
+                font-family: "Courier New", monospace;
+                font-size: inherit;
+                outline: none;
+                width: 100%;
+            }
+
+            .cursor {
+                display: inline-block;
+                width: 10px;
+                height: 18px;
+                background-color: #f0f0f0;
+                animation: blink 1s step-end infinite;
+                margin-left: 5px;
+                vertical-align: middle;
+            }
+
+            @keyframes blink {
+                0%,
+                100% {
+                    opacity: 1;
+                }
+                50% {
+                    opacity: 0;
+                }
+            }
+
+            /* Minecraft world */
+            .minecraft-world {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: 1;
+                overflow: hidden;
+                perspective: 1000px;
+            }
+
+            /* Ground */
+            .ground {
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                width: 100%;
+                height: 200px;
+                background-image: repeating-linear-gradient(
+                    90deg,
+                    #7d6338 0px,
+                    #7d6338 20px,
+                    #8b764d 20px,
+                    #8b764d 40px
+                );
+                transform: rotateX(60deg);
+                transform-origin: bottom;
+                background-size: 40px 40px;
+                z-index: 1;
+            }
+
+            /* Sky */
+            .sky {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(
+                    to bottom,
+                    #0a141f 0%,
+                    #1e3a56 100%
+                );
+                z-index: 0;
+            }
+
+            .stars {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: 0;
+            }
+
+            .star {
+                position: absolute;
+                background-color: white;
+                border-radius: 50%;
+            }
+
+            /* Minecraft blocks */
+            .minecraft-block {
+                position: absolute;
+                width: 30px;
+                height: 30px;
+                background-size: contain;
+                image-rendering: pixelated;
+                cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 16 16"><rect x="0" y="0" width="16" height="16" fill="rgba(0,0,0,0)"/><path d="M2,2 L9,8 L2,14 M9,8 L14,8" stroke="%23fff" stroke-width="1"/></svg>'),
+                    pointer;
+                transition: transform 0.2s;
+                z-index: 2;
+            }
+
+            .minecraft-block:hover {
+                transform: scale(1.2);
+            }
+
+            .minecraft-block.breaking {
+                animation: block-break 0.5s forwards;
+            }
+
+            @keyframes block-break {
+                0% {
+                    transform: scale(1);
+                }
+                50% {
+                    transform: scale(1.1);
+                }
+                100% {
+                    transform: scale(0);
+                    opacity: 0;
+                }
+            }
+
+            .diamond-ore {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23666"/><rect x="2" y="2" width="2" height="2" fill="%2347A3FF"/><rect x="6" y="6" width="2" height="2" fill="%2347A3FF"/></svg>');
+            }
+
+            .gold-ore {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23666"/><rect x="2" y="2" width="2" height="2" fill="%23FFD700"/><rect x="6" y="6" width="2" height="2" fill="%23FFD700"/></svg>');
+            }
+
+            .stone {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23777"/><rect x="0" y="0" width="5" height="5" fill="%23666"/><rect x="5" y="5" width="5" height="5" fill="%23666"/></svg>');
+            }
+
+            .grass {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 10 10"><rect width="10" height="2" fill="%2367A337"/><rect y="2" width="10" height="8" fill="%23866043"/></svg>');
+            }
+
+            .dirt {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23866043"/><rect x="1" y="1" width="2" height="2" fill="%23785a3c"/><rect x="7" y="3" width="2" height="2" fill="%23785a3c"/><rect x="3" y="6" width="2" height="2" fill="%23785a3c"/></svg>');
+            }
+
+            .redstone-ore {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23666"/><rect x="2" y="2" width="2" height="2" fill="%23FF0000"/><rect x="6" y="6" width="2" height="2" fill="%23FF0000"/></svg>');
+            }
+
+            .emerald-ore {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23666"/><rect x="2" y="2" width="2" height="2" fill="%2350C878"/><rect x="6" y="6" width="2" height="2" fill="%2350C878"/></svg>');
+            }
+
+            .coal-ore {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23666"/><rect x="2" y="2" width="2" height="2" fill="%23333"/><rect x="6" y="6" width="2" height="2" fill="%23333"/></svg>');
+            }
+
+            /* Miner character */
+            .miner {
+                position: absolute;
+                width: 60px;
+                height: 120px;
+                z-index: 10;
+                display: none;
+                transition: transform 0.2s;
+            }
+
+            .miner:hover {
+                transform: scale(1.1);
+                cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 16 16"><rect x="0" y="0" width="16" height="16" fill="rgba(0,0,0,0)"/><path d="M4,4 L12,8 L4,12 Z" fill="%23fff" stroke="%23000" stroke-width="1"/></svg>'),
+                    pointer;
+            }
+
+            .miner-head {
+                position: absolute;
+                top: 0;
+                left: 15px;
+                width: 30px;
+                height: 30px;
+                background-color: #ffcc99;
+                image-rendering: pixelated;
+            }
+
+            .miner-body {
+                position: absolute;
+                top: 30px;
+                left: 15px;
+                width: 30px;
+                height: 45px;
+                background-color: #3b8ba3;
+                image-rendering: pixelated;
+            }
+
+            .miner-leg-left {
+                position: absolute;
+                top: 75px;
+                left: 15px;
+                width: 15px;
+                height: 45px;
+                background-color: #333;
+                image-rendering: pixelated;
+            }
+
+            .miner-leg-right {
+                position: absolute;
+                top: 75px;
+                left: 30px;
+                width: 15px;
+                height: 45px;
+                background-color: #333;
+                image-rendering: pixelated;
+            }
+
+            .miner-arm-left {
+                position: absolute;
+                top: 30px;
+                left: 0;
+                width: 15px;
+                height: 45px;
+                background-color: #3b8ba3;
+                transform-origin: top center;
+                image-rendering: pixelated;
+            }
+
+            .miner-arm-right {
+                position: absolute;
+                top: 30px;
+                left: 45px;
+                width: 15px;
+                height: 45px;
+                background-color: #3b8ba3;
+                transform-origin: top center;
+                image-rendering: pixelated;
+            }
+
+            .pickaxe {
+                position: absolute;
+                top: 0;
+                left: 15px;
+                width: 30px;
+                height: 30px;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 10 10"><path d="M2,2 L8,8 M5,2 L8,5" stroke="%23999" stroke-width="1.5"/><rect x="1" y="1" width="2" height="2" fill="%23a67c52"/></svg>');
+                transform-origin: bottom left;
+                image-rendering: pixelated;
+            }
+
+            /* Minecraft mobs */
+            .mob {
+                position: absolute;
+                width: 30px;
+                height: 60px;
+                z-index: 10;
+                transition: transform 0.2s;
+            }
+
+            .mob:hover {
+                transform: scale(1.1);
+                cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 16 16"><rect x="0" y="0" width="16" height="16" fill="rgba(0,0,0,0)"/><path d="M4,4 L12,8 L4,12 Z" fill="%23fff" stroke="%23000" stroke-width="1"/></svg>'),
+                    pointer;
+            }
+
+            .creeper {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .creeper-head {
+                width: 30px;
+                height: 30px;
+                background-color: #5fa050;
+                position: relative;
+            }
+
+            .creeper-face {
+                position: absolute;
+                width: 20px;
+                height: 10px;
+                top: 10px;
+                left: 5px;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" viewBox="0 0 10 5"><rect x="1" y="1" width="2" height="2" fill="black"/><rect x="7" y="1" width="2" height="2" fill="black"/><rect x="3" y="3" width="1" height="1" fill="black"/><rect x="4" y="2" width="2" height="2" fill="black"/><rect x="6" y="3" width="1" height="1" fill="black"/></svg>');
+            }
+
+            .creeper-body {
+                width: 20px;
+                height: 30px;
+                background-color: #5fa050;
+            }
+
+            .zombie {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .zombie-head {
+                width: 30px;
+                height: 30px;
+                background-color: #567d3e;
+                position: relative;
+            }
+
+            .zombie-face {
+                position: absolute;
+                width: 20px;
+                height: 10px;
+                top: 10px;
+                left: 5px;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" viewBox="0 0 10 5"><rect x="1" y="1" width="2" height="2" fill="black"/><rect x="7" y="1" width="2" height="2" fill="black"/><rect x="3" y="3" width="4" height="1" fill="black"/></svg>');
+            }
+
+            .zombie-body {
+                width: 20px;
+                height: 30px;
+                background-color: #587e3e;
+            }
+
+            .skeleton {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .skeleton-head {
+                width: 30px;
+                height: 30px;
+                background-color: #c2c2c2;
+                position: relative;
+            }
+
+            .skeleton-face {
+                position: absolute;
+                width: 20px;
+                height: 10px;
+                top: 10px;
+                left: 5px;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10" viewBox="0 0 10 5"><rect x="1" y="1" width="2" height="2" fill="black"/><rect x="7" y="1" width="2" height="2" fill="black"/><rect x="3" y="3" width="4" height="1" fill="black"/></svg>');
+            }
+
+            .skeleton-body {
+                width: 20px;
+                height: 30px;
+                background-color: #c2c2c2;
+            }
+
+            /* Terminal crack effect */
+            .crack {
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                top: 0;
+                left: 0;
+                pointer-events: none;
+                opacity: 0;
+                z-index: 11;
+            }
+
+            .crack-line {
+                position: absolute;
+                background-color: white;
+                transform-origin: center;
+            }
+
+            /* Caravan logo */
+            .caravan-container {
+                position: absolute;
+                top: 10%;
+                left: 0;
+                width: 200px;
+                height: 120px;
+                z-index: 20;
+                transform: translateY(-200px);
+            }
+
+            .caravan {
+                position: relative;
+                width: 200px;
+                height: 120px;
+            }
+
+            .caravan-body {
+                position: absolute;
+                width: 150px;
+                height: 80px;
+                background-color: #1e6ea1; /* Blue body */
+                bottom: 20px;
+                left: 25px;
+            }
+
+            .caravan-roof {
+                position: absolute;
+                width: 170px;
+                height: 20px;
+                background-color: #ffbd2e; /* Gold roof */
+                top: 20px;
+                left: 15px;
+                border-radius: 10px 10px 0 0;
+            }
+
+            .caravan-window {
+                position: absolute;
+                width: 60px;
+                height: 40px;
+                background-color: #1e2d3b; /* Dark screen */
+                top: 50px;
+                left: 70px;
+                border: 3px solid #111;
+            }
+
+            .caravan-prompt {
+                position: absolute;
+                color: #ffbd2e;
+                font-size: 20px;
+                top: 58px;
+                left: 80px;
+            }
+
+            .wheel {
+                position: absolute;
+                width: 40px;
+                height: 40px;
+                background-color: #ffbd2e; /* Gold wheels */
+                border-radius: 50%;
+                bottom: 0;
+                border: 5px solid #111;
+            }
+
+            .wheel-left {
+                left: 30px;
+            }
+
+            .wheel-right {
+                right: 30px;
+            }
+
+            .wheel-spoke {
+                position: absolute;
+                background-color: #111;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+            }
+
+            .spoke-vertical {
+                width: 4px;
+                height: 30px;
+            }
+
+            .spoke-horizontal {
+                width: 30px;
+                height: 4px;
+            }
+
+            .spoke-diagonal1 {
+                width: 4px;
+                height: 30px;
+                transform: translate(-50%, -50%) rotate(45deg);
+            }
+
+            .spoke-diagonal2 {
+                width: 4px;
+                height: 30px;
+                transform: translate(-50%, -50%) rotate(-45deg);
+            }
+
+            .caravan-sign {
+                position: absolute;
+                width: 180px;
+                height: 40px;
+                background-color: #1e2d3b;
+                border: 3px solid #3b8ba3;
+                top: -30px;
+                left: 10px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .sign-text {
+                color: #ffbd2e;
+                font-size: 20px;
+                letter-spacing: 2px;
+            }
+
+            /* Item pickups */
+            .item-pickup {
+                position: absolute;
+                width: 20px;
+                height: 20px;
+                background-size: contain;
+                image-rendering: pixelated;
+                z-index: 5;
+                animation: float 2s infinite ease-in-out;
+                opacity: 0;
+                transition: opacity 0.3s;
+            }
+
+            @keyframes float {
+                0%,
+                100% {
+                    transform: translateY(0);
+                }
+                50% {
+                    transform: translateY(-10px);
+                }
+            }
+
+            .diamond {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><polygon points="5,0 10,5 5,10 0,5" fill="%2347A3FF"/></svg>');
+            }
+
+            .gold {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23FFD700"/></svg>');
+            }
+
+            .emerald {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><polygon points="5,0 10,5 5,10 0,5" fill="%2350C878"/></svg>');
+            }
+
+            .redstone {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23FF0000"/></svg>');
+            }
+
+            .coal {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23333"/></svg>');
+            }
+
+            /* Particles */
+            .particle {
+                position: absolute;
+                width: 5px;
+                height: 5px;
+                border-radius: 50%;
+                pointer-events: none;
+                z-index: 15;
+            }
+
+            /* Loading screen */
+            .loading-screen {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: #111;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                z-index: 100;
+            }
+
+            .loading-title {
+                color: #ffbd2e;
+                font-size: 36px;
+                margin-bottom: 20px;
+                text-shadow: 3px 3px 0 #000;
+            }
+
+            .loading-bar-container {
+                width: 300px;
+                padding: 10px;
+                background-color: #333;
+                border: 4px solid #3b8ba3;
+            }
+
+            .loading-bar {
+                height: 30px;
+                background-color: #1e2d3b;
+                position: relative;
+                overflow: hidden;
+            }
+
+            .loading-progress {
+                position: absolute;
+                top: 0;
+                left: 0;
+                height: 100%;
+                background-color: #ffbd2e;
+                width: 0%;
+                transition: width 0.2s ease-in-out;
+            }
+
+            .loading-text {
+                margin-top: 20px;
+                color: #a0a0a0;
+                font-size: 16px;
+            }
+
+            /* Inventory */
+            .inventory {
+                position: absolute;
+                bottom: 10px;
+                left: 50%;
+                transform: translateX(-50%);
+                display: flex;
+                z-index: 50;
+            }
+
+            .inventory-slot {
+                width: 44px;
+                height: 44px;
+                background-color: rgba(0, 0, 0, 0.5);
+                border: 2px solid #3b8ba3;
+                margin: 0 2px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                position: relative;
+            }
+
+            .inventory-slot.selected {
+                border-color: #ffbd2e;
+                background-color: rgba(255, 189, 46, 0.2);
+            }
+
+            .inventory-item {
+                width: 30px;
+                height: 30px;
+                background-size: contain;
+                image-rendering: pixelated;
+            }
+
+            .inventory-count {
+                position: absolute;
+                bottom: 2px;
+                right: 2px;
+                color: white;
+                font-size: 12px;
+                text-shadow: 1px 1px 0 black;
+            }
+
+            /* Game UI */
+            .game-ui {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                z-index: 50;
+            }
+
+            .health-bar {
+                display: flex;
+                margin-bottom: 5px;
+            }
+
+            .heart {
+                width: 20px;
+                height: 20px;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><path d="M5,9 L1,5 C0,4 0,2 2,1 C4,0 5,2 5,2 C5,2 6,0 8,1 C10,2 10,4 9,5 Z" fill="red"/></svg>');
+                margin-right: 2px;
+            }
+
+            .heart.empty {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><path d="M5,9 L1,5 C0,4 0,2 2,1 C4,0 5,2 5,2 C5,2 6,0 8,1 C10,2 10,4 9,5 Z" fill="none" stroke="red" stroke-width="0.5"/></svg>');
+            }
+
+            .food-bar {
+                display: flex;
+            }
+
+            .food {
+                width: 20px;
+                height: 20px;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="%23bb7812"/></svg>');
+                margin-right: 2px;
+            }
+
+            .food.empty {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="none" stroke="%23bb7812" stroke-width="0.5"/></svg>');
+            }
+
+            /* Footer */
+            .footer {
+                position: absolute;
+                bottom: 20px;
+                left: 0;
+                width: 100%;
+                text-align: center;
+                font-size: 14px;
+                color: #666;
+                z-index: 2;
+            }
+
+            /* Tooltip */
+            .tooltip {
+                position: absolute;
+                background-color: rgba(0, 0, 0, 0.8);
+                border: 2px solid #3b8ba3;
+                padding: 5px 10px;
+                color: white;
+                font-size: 12px;
+                border-radius: 5px;
+                z-index: 100;
+                pointer-events: none;
+                opacity: 0;
+                transition: opacity 0.3s;
+                max-width: 200px;
+            }
+
+            /* Day/Night Cycle */
+            @keyframes dayCycle {
+                0%,
+                100% {
+                    background: linear-gradient(
+                        to bottom,
+                        #0a141f 0%,
+                        #1e3a56 100%
+                    );
+                } /* Night */
+                25% {
+                    background: linear-gradient(
+                        to bottom,
+                        #644c78 0%,
+                        #a57c84 100%
+                    );
+                } /* Dawn */
+                50% {
+                    background: linear-gradient(
+                        to bottom,
+                        #1976d2 0%,
+                        #64b5f6 100%
+                    );
+                } /* Day */
+                75% {
+                    background: linear-gradient(
+                        to bottom,
+                        #ff9800 0%,
+                        #f57c00 100%
+                    );
+                } /* Sunset */
+            }
+
+            /* Sound control */
+            .sound-toggle {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                width: 40px;
+                height: 40px;
+                background-color: rgba(0, 0, 0, 0.5);
+                border: 2px solid #3b8ba3;
+                border-radius: 5px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                cursor: pointer;
+                z-index: 50;
+            }
+
+            .sound-icon {
+                width: 24px;
+                height: 24px;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" fill="%23fff"/></svg>');
+            }
+
+            .sound-icon.off {
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51c.66-1.28 1.03-2.69 1.03-4.15 0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" fill="%23fff"/></svg>');
+            }
+        </style>
     </head>
     <body>
+        <!-- Loading Screen -->
         <div class="loading-screen" id="loading-screen">
-            <h1>BlockCraft: The Living Ledger</h1>
-            <div class="loading-container">
+            <h1 class="loading-title">CARAVAN-X</h1>
+            <div class="loading-bar-container">
                 <div class="loading-bar">
-                    <div class="progress" id="loading-progress"></div>
+                    <div class="loading-progress" id="loading-progress"></div>
                 </div>
             </div>
-            <p id="loading-message">Loading blockchain world...</p>
+            <p class="loading-text" id="loading-text">
+                Loading blockchain world...
+            </p>
         </div>
 
-        <div class="game-container" id="game-container">
-            <!-- Game canvas will be inserted here -->
+        <!-- Minecraft World -->
+        <div class="minecraft-world" id="minecraft-world">
+            <div class="sky" id="sky"></div>
+            <div class="stars" id="stars"></div>
+            <div class="ground"></div>
+            <!-- Blocks will be generated via JavaScript -->
         </div>
 
-        <div class="crosshair" id="crosshair"></div>
+        <!-- Tooltip -->
+        <div class="tooltip" id="tooltip"></div>
 
-        <div class="stats-panel hud-element" id="stats-panel">
-            <h3>BLOCKCHAIN</h3>
-            <div>
-                Blocks: <span class="stat-value" id="block-count">0</span>
-            </div>
-            <div>
-                Transactions: <span class="stat-value" id="tx-count">0</span>
-            </div>
-            <div>
-                Mempool: <span class="stat-value" id="mempool-size">0</span>
-            </div>
-            <div>
-                BTC:
-                <span class="stat-value" id="bitcoin-balance">0.00000000</span>
-            </div>
-        </div>
-
-        <div class="hotbar hud-element" id="hotbar">
-            <div class="hotbar-slot selected" data-tool="pickaxe">
-                <img src="assets/items/pickaxe.png" alt="Pickaxe" />
-                <div class="item-hint">Mine Blocks</div>
-            </div>
-            <div class="hotbar-slot" data-tool="shovel">
-                <img src="assets/items/shovel.png" alt="Shovel" />
-                <div class="item-hint">Clear Area</div>
-            </div>
-            <div class="hotbar-slot" data-tool="signkey">
-                <img src="assets/items/signkey.png" alt="Signing Key" />
-                <div class="item-hint">Sign Transactions</div>
-            </div>
-            <div class="hotbar-slot" data-tool="verifier">
-                <img src="assets/items/verifier.png" alt="Verifier" />
-                <div class="item-hint">Verify Blocks</div>
-            </div>
-            <div class="hotbar-slot" data-tool="compass">
-                <img src="assets/items/compass.png" alt="Compass" />
-                <div class="item-hint">Block Explorer</div>
+        <!-- Caravan Logo -->
+        <div class="caravan-container" id="caravan-container">
+            <div class="caravan">
+                <div class="caravan-sign">
+                    <div class="sign-text">CARAVAN-X</div>
+                </div>
+                <div class="caravan-roof"></div>
+                <div class="caravan-body"></div>
+                <div class="caravan-window"></div>
+                <div class="caravan-prompt">&gt;_</div>
+                <div class="wheel wheel-left" id="wheel-left">
+                    <div class="wheel-spoke spoke-vertical"></div>
+                    <div class="wheel-spoke spoke-horizontal"></div>
+                    <div class="wheel-spoke spoke-diagonal1"></div>
+                    <div class="wheel-spoke spoke-diagonal2"></div>
+                </div>
+                <div class="wheel wheel-right" id="wheel-right">
+                    <div class="wheel-spoke spoke-vertical"></div>
+                    <div class="wheel-spoke spoke-horizontal"></div>
+                    <div class="wheel-spoke spoke-diagonal1"></div>
+                    <div class="wheel-spoke spoke-diagonal2"></div>
+                </div>
             </div>
         </div>
 
-        <button id="view-toggle" class="view-toggle">
-            Switch to Standard View
-        </button>
+        <!-- Terminal -->
+        <div class="terminal-container" id="terminal-container">
+            <div class="terminal-header">
+                <div class="terminal-title">BlockCraft Terminal</div>
+                <div class="terminal-buttons">
+                    <div
+                        class="terminal-button button-minimize"
+                        id="minimize-btn"
+                    ></div>
+                    <div
+                        class="terminal-button button-maximize"
+                        id="maximize-btn"
+                    ></div>
+                    <div
+                        class="terminal-button button-close"
+                        id="close-btn"
+                    ></div>
+                </div>
+            </div>
+            <div class="terminal-body" id="terminal-body">
+                <!-- Terminal lines will be added here -->
+            </div>
+            <!-- Crack effect overlay -->
+            <div class="crack" id="crack-effect"></div>
+        </div>
 
-        <!-- Load basic engine files -->
-        <script src="js/voxel-engine.js"></script>
-        <script src="js/character-system.js"></script>
+        <!-- Miner Character -->
+        <div class="miner" id="miner">
+            <div class="miner-head"></div>
+            <div class="miner-body"></div>
+            <div class="miner-arm-left">
+                <div class="pickaxe"></div>
+            </div>
+            <div class="miner-arm-right"></div>
+            <div class="miner-leg-left"></div>
+            <div class="miner-leg-right"></div>
+        </div>
 
-        <!-- Load enhanced blockchain system files -->
-        <script src="js/world/BlockchainWorld.js"></script>
+        <!-- Game UI -->
+        <div class="game-ui">
+            <div class="health-bar" id="health-bar">
+                <div class="heart"></div>
+                <div class="heart"></div>
+                <div class="heart"></div>
+                <div class="heart"></div>
+                <div class="heart"></div>
+            </div>
+            <div class="food-bar" id="food-bar">
+                <div class="food"></div>
+                <div class="food"></div>
+                <div class="food"></div>
+                <div class="food"></div>
+                <div class="food"></div>
+            </div>
+        </div>
 
-        <!-- Integration with blockchain data -->
-        <script src="js/blockchain-game-integration.js"></script>
+        <!-- Inventory -->
+        <div class="inventory" id="inventory">
+            <div class="inventory-slot selected" data-slot="1">
+                <div
+                    class="inventory-item pickaxe-item"
+                    style="
+                        background-image: url(&quot;data:image/svg+xml;charset=utf8,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 10 10'><path d='M2,2 L8,8 M5,2 L8,5' stroke='%23999' stroke-width='1.5'/><rect x='1' y='1' width='2' height='2' fill='%23a67c52'/></svg>&quot;);
+                    "
+                ></div>
+            </div>
+            <div class="inventory-slot" data-slot="2">
+                <!-- Empty initially -->
+            </div>
+            <div class="inventory-slot" data-slot="3">
+                <!-- Empty initially -->
+            </div>
+            <div class="inventory-slot" data-slot="4">
+                <!-- Empty initially -->
+            </div>
+            <div class="inventory-slot" data-slot="5">
+                <!-- Empty initially -->
+            </div>
+        </div>
+
+        <!-- Sound Toggle -->
+        <div class="sound-toggle" id="sound-toggle">
+            <div class="sound-icon" id="sound-icon"></div>
+        </div>
+
+        <div class="footer">
+            &copy; 2025 CARAVAN-X • A Minecraft-inspired Blockchain
+            Visualization
+        </div>
+
         <script>
-            // Main entry point
+            // Main JavaScript for CARAVAN-X Coming Soon Page
+
             document.addEventListener("DOMContentLoaded", () => {
-                // Start loading process
-                let loadingProgress = 0;
-                const loadingInterval = setInterval(() => {
-                    loadingProgress += 5;
-                    if (loadingProgress >= 100) {
-                        clearInterval(loadingInterval);
-                        startGame();
+                // Global variables
+                let soundEnabled = true;
+                let terminalActive = true;
+                let inventoryItems = {
+                    diamond: 0,
+                    gold: 0,
+                    emerald: 0,
+                    redstone: 0,
+                    coal: 0,
+                };
+
+                // Initialize loading screen
+                const loadingScreen = document.getElementById("loading-screen");
+                const loadingProgress =
+                    document.getElementById("loading-progress");
+                const loadingText = document.getElementById("loading-text");
+
+                const loadingMessages = [
+                    "Loading blockchain world...",
+                    "Connecting to network nodes...",
+                    "Generating voxel terrain...",
+                    "Mining genesis block...",
+                    "Spawning blockchain entities...",
+                    "Building CARAVAN-X terminal...",
+                    "Almost ready to explore...",
+                ];
+
+                // Tooltip functionality
+                const tooltip = document.getElementById("tooltip");
+
+                function showTooltip(text, x, y) {
+                    tooltip.textContent = text;
+                    tooltip.style.left = `${x}px`;
+                    tooltip.style.top = `${y}px`;
+                    tooltip.style.opacity = 1;
+                }
+
+                function hideTooltip() {
+                    tooltip.style.opacity = 0;
+                }
+
+                // Sound management
+                const soundToggle = document.getElementById("sound-toggle");
+                const soundIcon = document.getElementById("sound-icon");
+
+                // Sound effects
+                const sounds = {
+                    click: new Audio(
+                        "data:audio/wav;base64,UklGRlQFAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YTAFAAAAAAEAAgADAAQABQAGAAcACAAJAAoACwAMAA0ADgAPABAAEQASABMAFAAVABYAFwAYABkAGgAbABwAHQAeAB8AIAAhACIAIwAkACUAJgAnACgAKQAqACsALAAtAC4ALwAwADEAMgAzADQANQA2ADcAOAA5ADoAOwA8AD0APgA/AEAAQQBCAEMARABFAEYARwBIAEkASgBLAEwATQBOAE8AUABRAFIAUwBUAFUAVgBXAFgAWQBaAFsAXABdAF4AXwBgAGEAYgBjAGQAZQBmAGcAaABpAGoAawBsAG0AbgBvAHAAcQByAHMAdAB1AHYAdwB4AHkAegB7AHwAfQB+AH8AgACBAIIAgwCEAIUAhgCHAIgAiQCKAIsAjACNAI4AjwCQAJEAkgCTAJQAlQCWAJcAmACZAJoAmwCcAJ0AngCfAKAAoQCiAKMApAClAKYApwCoAKkAqgCrAKwArQCuAK8AsACxALIAswC0ALUAtgC3ALgAuQC6ALsAvAC9AL4AvwDAAMEAwgDDAMQAxQDGAMcAyADJAMoAywDMAM0AzgDPANAA0QDSANMA1ADVANYA1wDYANkA2gDbANwA3QDeAN8A4ADhAOIA4wDkAOUA5gDnAOgA6QDqAOsA7ADtAO4A7wDwAPEA8gDzAPQA9QD2APcA+AD5APEAcABpAF4ASgA5ACcAEQD//+3/3f/M/7r/qf+Z/4j/eP9o/1j/Sf87/yz/IP8S/wX/+P7s/uD+1f7K/r/+tf6s/qL+mv6R/ov+hP6A/nv+eP52/nb+dv53/nn+fP6A/oT+if6P/pT+mv6h/qj+r/63/r/+x/7Q/tn+4v7r/vX+/v4I/xL/HP8m/zH/O/9G/1H/XP9n/3L/ff+I/5T/n/+r/7b/wv/O/9r/5f/x//z/AgANABgAIwAuADkARABPAFoAZQBwAHsAhgCQAJsApQCvALkAwwDNANcA4ADqAPMACQATAB0AJwAwADoAQwBNAFYAXwBoAHEAegCCAIsAkwCbAKMAqwCzALoAwgDJANAA1wDeAOUA6wDxAPcA/QAaASABJgEtATMBOQE/AUUBSgFQAVUBWgFfAWMBaAFsAW4BcQF0AXYBeAF6AXsBeQF4AVoBOgEWAfdA2EC2QJJAb0BMQCNA+j/RP6U/ej8cfz5+4H7CfuQ+hj6ofkq+bT4Pvj/9+7303ei92LkI0DPP7M/lj95P10/QD8jPwY/6T7TPsV+9j6ofo6+gr60PlZ+Sn5+fiM+F/4MvgG+Nz3tPeM92T3QfcZ9/L20PaZ9mL2LPb19cD1ivVV9SD17PSx9H/0TPQa9Oj0qPTn9CL1ZfWp9fD1Nfae9QD0",
+                    ),
+                    mining: new Audio(
+                        "data:audio/wav;base64,UklGRl9JAABXQVZFZm10IBAAAAABAAEARKwAAESsAAABAAgAZGF0YTtJAACBgYGCgoKDg4OEhISFhYWGhoaHh4eIiIiJiYmKioqLi4uMjIyNjY2Oj4+QkJCRkZGSkpKTk5OUlJSVlZWWlpaXl5eYmJiZmZmampqbm5ucnJydnZ2enp6fn5+goKChoaGioqKjo6OkpKSlpaWmpqanp6eoqKipqaGqqqqrq6usrKytra2urq6vr6+wsLCxsrKzs7O0tLS1tbW2tra3t7e4uLi5ubm6urq7vLy9vb2+vr6/v7/AwMDBwcHCwsLDw8PExMTFxcXGxsbHx8fIyMjJycnKysrLy8vMzMzNzc3Ozs7Pz8/Q0NDR0dHO0dHS0tLT09PU1NTV1dXW1tbX19fY2NjZ2dnW2Nja2trc3Nzd3d3e3t7f39/a3t7g4ODi4uLj4+Pk5OTl5eXm5ubn5+fh5+fo6Ojq6urr6+vs7Ozt7e3u7u7p7+/w8PDx8fHy8vLz8/P09PT19fXx9fX29vb4+Pj5+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v7/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////",
+                    ),
+                    break: new Audio(
+                        "data:audio/wav;base64,UklGRl9JAABXQVZFZm10IBAAAAABAAEARKwAAESsAAABAAgAZGF0YTtJAACBgYGCgoKDg4OEhISFhYWGhoaHh4eIiIiJiYmKioqLi4uMjIyNjY2Oj4+QkJCRkZGSkpKTk5OUlJSVlZWWlpaXl5eYmJiZmZmampqbm5ucnJydnZ2enp6fn5+goKChoaGioqKjo6OkpKSlpaWmpqanp6eoqKipqaGqqqqrq6usrKytra2urq6vr6+wsLCxsrKzs7O0tLS1tbW2tra3t7e4uLi5ubm6urq7vLy9vb2+vr6/v7/AwMDBwcHCwsLDw8PExMTFxcXGxsbHx8fIyMjJycnKysrLy8vMzMzNzc3Ozs7Pz8/Q0NDR0dHO0dHS0tLT09PU1NTV1dXW1tbX19fY2NjZ2dnW2Nja2trc3Nzd3d3e3t7f39/a3t7g4ODi4uLj4+Pk5OTl5eXm5ubn5+fh5+fo6Ojq6urr6+vs7Ozt7e3u7u7p7+/w8PDx8fHy8vLz8/P09PT19fXx9fX29vb4+Pj5+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v7/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////",
+                    ),
+                    pickup: new Audio(
+                        "data:audio/wav;base64,UklGRl9JAABXQVZFZm10IBAAAAABAAEARKwAAESsAAABAAgAZGF0YTtJAACBgYGCgoKDg4OEhISFhYWGhoaHh4eIiIiJiYmKioqLi4uMjIyNjY2Oj4+QkJCRkZGSkpKTk5OUlJSVlZWWlpaXl5eYmJiZmZmampqbm5ucnJydnZ2enp6fn5+goKChoaGioqKjo6OkpKSlpaWmpqanp6eoqKipqaGqqqqrq6usrKytra2urq6vr6+wsLCxsrKzs7O0tLS1tbW2tra3t7e4uLi5ubm6urq7vLy9vb2+vr6/v7/AwMDBwcHCwsLDw8PExMTFxcXGxsbHx8fIyMjJycnKysrLy8vMzMzNzc3Ozs7Pz8/Q0NDR0dHO0dHS0tLT09PU1NTV1dXW1tbX19fY2NjZ2dnW2Nja2trc3Nzd3d3e3t7f39/a3t7g4ODi4uLj4+Pk5OTl5eXm5ubn5+fh5+fo6Ojq6urr6+vs7Ozt7e3u7u7p7+/w8PDx8fHy8vLz8/P09PT19fXx9fX29vb4+Pj5+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v7/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////",
+                    ),
+                    endScreen: new Audio(
+                        "data:audio/wav;base64,UklGRl9JAABXQVZFZm10IBAAAAABAAEARKwAAESsAAABAAgAZGF0YTtJAACBgYGCgoKDg4OEhISFhYWGhoaHh4eIiIiJiYmKioqLi4uMjIyNjY2Oj4+QkJCRkZGSkpKTk5OUlJSVlZWWlpaXl5eYmJiZmZmampqbm5ucnJydnZ2enp6fn5+goKChoaGioqKjo6OkpKSlpaWmpqanp6eoqKipqaGqqqqrq6usrKytra2urq6vr6+wsLCxsrKzs7O0tLS1tbW2tra3t7e4uLi5ubm6urq7vLy9vb2+vr6/v7/AwMDBwcHCwsLDw8PExMTFxcXGxsbHx8fIyMjJycnKysrLy8vMzMzNzc3Ozs7Pz8/Q0NDR0dHO0dHS0tLT09PU1NTV1dXW1tbX19fY2NjZ2dnW2Nja2trc3Nzd3d3e3t7f39/a3t7g4ODi4uLj4+Pk5OTl5eXm5ubn5+fh5+fo6Ojq6urr6+vs7Ozt7e3u7u7p7+/w8PDx8fHy8vLz8/P09PT19fXx9fX29vb4+Pj5+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v75+fn6+vr7+/v8/Pz9/f3+/v7/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////",
+                    ),
+                };
+
+                // Sound toggle functionality
+                soundToggle.addEventListener("click", () => {
+                    soundEnabled = !soundEnabled;
+                    if (soundEnabled) {
+                        soundIcon.classList.remove("off");
+                        playSound("click");
+                    } else {
+                        soundIcon.classList.add("off");
                     }
-                    document.getElementById("loading-progress").style.width =
-                        `${loadingProgress}%`;
+                });
+
+                function playSound(soundName) {
+                    if (soundEnabled) {
+                        // Clone the sound to allow overlapping
+                        const sound = sounds[soundName].cloneNode();
+                        sound.volume = 0.3;
+                        sound.play().catch((e) => {
+                            // Silent error - browser may block autoplay
+                        });
+                    }
+                }
+
+                // Start loading animation
+                let progress = 0;
+                let messageIndex = 0;
+
+                const loadingInterval = setInterval(() => {
+                    progress += Math.random() * 15;
+
+                    if (progress >= 100) {
+                        progress = 100;
+                        clearInterval(loadingInterval);
+
+                        // Hide loading screen with fade out
+                        setTimeout(() => {
+                            loadingScreen.style.opacity = 0;
+                            loadingScreen.style.transition = "opacity 1s";
+
+                            setTimeout(() => {
+                                loadingScreen.style.display = "none";
+                                startGame();
+                            }, 1000);
+                        }, 500);
+                    }
+
+                    loadingProgress.style.width = `${progress}%`;
+
+                    // Update loading message occasionally
+                    if (
+                        progress > messageIndex * 15 &&
+                        messageIndex < loadingMessages.length
+                    ) {
+                        loadingText.textContent = loadingMessages[messageIndex];
+                        messageIndex++;
+                    }
                 }, 200);
 
-                // Function to start the game
+                // Terminal functionality
                 function startGame() {
-                    // Hide loading screen
-                    document.getElementById("loading-screen").style.display =
-                        "none";
+                    // Initialize UI interactions
+                    initializeUIInteractions();
 
-                    // Initialize voxel engine
-                    const gameContainer =
-                        document.getElementById("game-container");
-                    const blockchainWorld = new BlockchainWorld(gameContainer);
-                    console.log("blockchainWorld", blockchainWorld);
-                    // Generate the enhanced world
-                    blockchainWorld.generateWorld();
+                    // Generate Minecraft world with blocks
+                    generateMinecraftWorld();
 
-                    // Start the simulation
-                    blockchainWorld.start();
+                    // Animate day/night cycle
+                    animateDayCycle();
 
-                    // Set up hotbar selection
-                    const hotbarSlots =
-                        document.querySelectorAll(".hotbar-slot");
-                    hotbarSlots.forEach((slot) => {
+                    // Start caravan animation
+                    animateCaravan();
+
+                    // Start terminal
+                    startTerminal();
+
+                    // After short delay, start miner animation
+                    setTimeout(() => {
+                        startMinerAnimation();
+                    }, 15000); // 15 seconds delay
+                }
+
+                function initializeUIInteractions() {
+                    // Terminal buttons
+                    const minimizeBtn = document.getElementById("minimize-btn");
+                    const maximizeBtn = document.getElementById("maximize-btn");
+                    const closeBtn = document.getElementById("close-btn");
+                    const terminal =
+                        document.getElementById("terminal-container");
+
+                    minimizeBtn.addEventListener("click", () => {
+                        playSound("click");
+                        terminal.style.opacity = "0.5";
+                    });
+
+                    maximizeBtn.addEventListener("click", () => {
+                        playSound("click");
+                        terminal.style.opacity = "1";
+                    });
+
+                    closeBtn.addEventListener("click", () => {
+                        playSound("click");
+                        terminal.style.display = "none";
+                        terminalActive = false;
+                    });
+
+                    // Inventory slot selection
+                    const inventorySlots =
+                        document.querySelectorAll(".inventory-slot");
+
+                    inventorySlots.forEach((slot) => {
                         slot.addEventListener("click", () => {
+                            playSound("click");
+
                             // Remove selected class from all slots
-                            hotbarSlots.forEach((s) =>
+                            inventorySlots.forEach((s) =>
                                 s.classList.remove("selected"),
                             );
 
                             // Add selected class to clicked slot
                             slot.classList.add("selected");
-
-                            // Set current tool
-                            blockchainWorld.setCurrentTool(slot.dataset.tool);
                         });
                     });
 
-                    // Set up view toggle
-                    document
-                        .getElementById("view-toggle")
-                        .addEventListener("click", () => {
-                            window.location.href = "index.html";
-                        });
-
-                    // Set up keyboard number keys for hotbar
-                    document.addEventListener("keydown", (e) => {
-                        const key = parseInt(e.key);
-                        if (
-                            !isNaN(key) &&
-                            key >= 1 &&
-                            key <= hotbarSlots.length
-                        ) {
-                            // Trigger click on that hotbar slot
-                            hotbarSlots[key - 1].click();
-                        }
-
-                        // E key for interaction
-                        if (e.key === "e" || e.key === "E") {
-                            blockchainWorld.interact();
-                        }
-
-                        // I key for inventory
-                        if (e.key === "i" || e.key === "I") {
-                            blockchainWorld.toggleInventory();
-                        }
-
-                        // Q key for quests
-                        if (e.key === "q" || e.key === "Q") {
-                            blockchainWorld.toggleQuests();
-                        }
-
-                        // M key for mining
-                        if (e.key === "m" || e.key === "M") {
-                            blockchainWorld.toggleMining();
-                        }
-
-                        // T key for transactions
-                        if (e.key === "t" || e.key === "T") {
-                            blockchainWorld.createTransaction();
-                        }
-
-                        // WASD keys for movement
-                        if (
-                            ["w", "a", "s", "d", "W", "A", "S", "D"].includes(
-                                e.key,
-                            )
-                        ) {
-                            const key = e.key.toLowerCase();
-                            if (key === "w")
-                                blockchainWorld.engine.keyStates.moveForward = true;
-                            if (key === "a")
-                                blockchainWorld.engine.keyStates.moveLeft = true;
-                            if (key === "s")
-                                blockchainWorld.engine.keyStates.moveBackward = true;
-                            if (key === "d")
-                                blockchainWorld.engine.keyStates.moveRight = true;
-                        }
-
-                        // Space for jump
-                        if (e.key === " ") {
-                            blockchainWorld.engine.keyStates.jump = true;
-                        }
-                    });
-
-                    // Handle key up events
-                    document.addEventListener("keyup", (e) => {
-                        const key = e.key.toLowerCase();
-                        if (key === "w")
-                            blockchainWorld.engine.keyStates.moveForward = false;
-                        if (key === "a")
-                            blockchainWorld.engine.keyStates.moveLeft = false;
-                        if (key === "s")
-                            blockchainWorld.engine.keyStates.moveBackward = false;
-                        if (key === "d")
-                            blockchainWorld.engine.keyStates.moveRight = false;
-                        if (e.key === " ")
-                            blockchainWorld.engine.keyStates.jump = false;
-                    });
-
-                    console.log(
-                        "Enhanced BlockCraft: The Living Ledger started successfully!",
+                    // Add tooltips to elements
+                    const interactiveElements = document.querySelectorAll(
+                        ".minecraft-block, .mob, .miner, .inventory-slot, .sound-toggle",
                     );
+
+                    interactiveElements.forEach((element) => {
+                        element.addEventListener("mouseenter", (e) => {
+                            let tooltipText = "";
+
+                            if (element.classList.contains("minecraft-block")) {
+                                tooltipText = "Click to mine";
+
+                                if (element.classList.contains("diamond-ore"))
+                                    tooltipText = "Diamond Ore (Click to mine)";
+                                if (element.classList.contains("gold-ore"))
+                                    tooltipText = "Gold Ore (Click to mine)";
+                                if (element.classList.contains("stone"))
+                                    tooltipText = "Stone (Click to mine)";
+                                if (element.classList.contains("dirt"))
+                                    tooltipText = "Dirt (Click to mine)";
+                                if (element.classList.contains("grass"))
+                                    tooltipText = "Grass (Click to mine)";
+                                if (element.classList.contains("redstone-ore"))
+                                    tooltipText =
+                                        "Redstone Ore (Click to mine)";
+                                if (element.classList.contains("emerald-ore"))
+                                    tooltipText = "Emerald Ore (Click to mine)";
+                                if (element.classList.contains("coal-ore"))
+                                    tooltipText = "Coal Ore (Click to mine)";
+                            } else if (element.classList.contains("mob")) {
+                                tooltipText = "Blockchain Entity";
+
+                                if (element.classList.contains("creeper"))
+                                    tooltipText =
+                                        "Transaction Entity (Unconfirmed)";
+                                if (element.classList.contains("zombie"))
+                                    tooltipText = "Mining Node";
+                                if (element.classList.contains("skeleton"))
+                                    tooltipText = "Validation Entity";
+                            } else if (element.classList.contains("miner")) {
+                                tooltipText = "Blockchain Miner";
+                            } else if (
+                                element.classList.contains("inventory-slot")
+                            ) {
+                                tooltipText =
+                                    "Inventory Slot " + element.dataset.slot;
+                                const item =
+                                    element.querySelector(".inventory-item");
+                                if (item) {
+                                    if (
+                                        item.classList.contains("pickaxe-item")
+                                    ) {
+                                        tooltipText = "Mining Pickaxe";
+                                    }
+                                }
+                            } else if (
+                                element.classList.contains("sound-toggle")
+                            ) {
+                                tooltipText = soundEnabled
+                                    ? "Disable Sound"
+                                    : "Enable Sound";
+                            }
+
+                            showTooltip(
+                                tooltipText,
+                                e.clientX + 15,
+                                e.clientY + 15,
+                            );
+                        });
+
+                        element.addEventListener("mousemove", (e) => {
+                            tooltip.style.left = `${e.clientX + 15}px`;
+                            tooltip.style.top = `${e.clientY + 15}px`;
+                        });
+
+                        element.addEventListener("mouseleave", () => {
+                            hideTooltip();
+                        });
+                    });
                 }
+
+                function animateDayCycle() {
+                    const sky = document.getElementById("sky");
+                    sky.style.animation = "dayCycle 120s infinite linear";
+                }
+
+                function generateStars() {
+                    const starsContainer = document.getElementById("stars");
+                    const starCount = 100;
+
+                    for (let i = 0; i < starCount; i++) {
+                        const star = document.createElement("div");
+                        star.className = "star";
+
+                        // Random size (tiny)
+                        const size = 1 + Math.random() * 2;
+                        star.style.width = `${size}px`;
+                        star.style.height = `${size}px`;
+
+                        // Random position
+                        star.style.left = `${Math.random() * 100}%`;
+                        star.style.top = `${Math.random() * 60}%`;
+
+                        // Random opacity for twinkling effect
+                        star.style.opacity = 0.5 + Math.random() * 0.5;
+
+                        // Add twinkling animation
+                        star.style.animation = `twinkle ${
+                            3 + Math.random() * 5
+                        }s infinite ease-in-out ${Math.random() * 5}s`;
+
+                        starsContainer.appendChild(star);
+                    }
+                }
+
+                function generateMinecraftWorld() {
+                    const world = document.getElementById("minecraft-world");
+                    generateStars();
+
+                    const blockTypes = [
+                        "stone",
+                        "diamond-ore",
+                        "gold-ore",
+                        "dirt",
+                        "grass",
+                        "redstone-ore",
+                        "emerald-ore",
+                        "coal-ore",
+                    ];
+                    const blockCount = Math.min(
+                        30,
+                        Math.floor(
+                            (window.innerWidth * window.innerHeight) / 20000,
+                        ),
+                    );
+
+                    for (let i = 0; i < blockCount; i++) {
+                        // Determine block type with weighted probabilities
+                        let blockType;
+                        const roll = Math.random();
+                        if (roll < 0.1) blockType = "diamond-ore";
+                        else if (roll < 0.25) blockType = "gold-ore";
+                        else if (roll < 0.35) blockType = "redstone-ore";
+                        else if (roll < 0.45) blockType = "emerald-ore";
+                        else if (roll < 0.6) blockType = "coal-ore";
+                        else if (roll < 0.75) blockType = "dirt";
+                        else if (roll < 0.85) blockType = "grass";
+                        else blockType = "stone";
+
+                        const block = document.createElement("div");
+                        block.className = `minecraft-block ${blockType}`;
+
+                        // Random position
+                        block.style.left = `${Math.random() * 100}%`;
+                        block.style.top = `${Math.random() * 100}%`;
+
+                        // Random opacity for background effect
+                        block.style.opacity = 0.6 + Math.random() * 0.4;
+
+                        // Random size
+                        const size = 30 + Math.random() * 20;
+                        block.style.width = `${size}px`;
+                        block.style.height = `${size}px`;
+
+                        // Make blocks clickable for mining
+                        block.addEventListener("click", () => {
+                            mineBlock(block, blockType);
+                        });
+
+                        world.appendChild(block);
+                    }
+
+                    // Add some random mobs
+                    spawnMobs();
+                }
+
+                function spawnMobs() {
+                    const world = document.getElementById("minecraft-world");
+                    const mobTypes = ["creeper", "zombie", "skeleton"];
+                    const mobCount = 5;
+
+                    for (let i = 0; i < mobCount; i++) {
+                        const mobType =
+                            mobTypes[
+                                Math.floor(Math.random() * mobTypes.length)
+                            ];
+                        const mob = document.createElement("div");
+                        mob.className = `mob ${mobType}`;
+
+                        // Structure for mob
+                        const head = document.createElement("div");
+                        head.className = `${mobType}-head`;
+
+                        const face = document.createElement("div");
+                        face.className = `${mobType}-face`;
+                        head.appendChild(face);
+
+                        const body = document.createElement("div");
+                        body.className = `${mobType}-body`;
+
+                        mob.appendChild(head);
+                        mob.appendChild(body);
+
+                        // Random position
+                        mob.style.left = `${Math.random() * 80 + 10}%`;
+                        mob.style.top = `${Math.random() * 70 + 20}%`;
+
+                        // Add wandering animation
+                        animateMob(mob);
+
+                        // Add click handler for mob interaction
+                        mob.addEventListener("click", () => {
+                            playSound("click");
+                            let message = "";
+
+                            if (mobType === "creeper") {
+                                message =
+                                    "Transaction Entity: Waiting to be included in next block";
+                            } else if (mobType === "zombie") {
+                                message =
+                                    "Mining Node: Currently mining block #724,516";
+                            } else if (mobType === "skeleton") {
+                                message =
+                                    "Validation Entity: Verifying transaction signatures";
+                            }
+
+                            alert(message);
+                        });
+
+                        world.appendChild(mob);
+                    }
+                }
+
+                function animateMob(mob) {
+                    // Random movement pattern
+                    const duration = 10 + Math.random() * 20;
+
+                    // Random start position as percentage of viewport
+                    const startX = parseFloat(mob.style.left);
+                    const startY = parseFloat(mob.style.top);
+
+                    // Random end position
+                    const endX = Math.max(
+                        10,
+                        Math.min(90, startX + (Math.random() * 40 - 20)),
+                    );
+                    const endY = Math.max(
+                        20,
+                        Math.min(90, startY + (Math.random() * 30 - 15)),
+                    );
+
+                    // Animate to new position
+                    gsap.to(mob, {
+                        left: `${endX}%`,
+                        top: `${endY}%`,
+                        duration: duration,
+                        ease: "power1.inOut",
+                        onComplete: () => {
+                            // When complete, start a new animation
+                            animateMob(mob);
+                        },
+                    });
+                }
+
+                function mineBlock(block, blockType) {
+                    playSound("mining");
+
+                    // Add breaking animation
+                    block.classList.add("breaking");
+
+                    // Create particles
+                    createMiningParticles(block, blockType);
+
+                    // After animation, remove block and drop item
+                    setTimeout(() => {
+                        dropItem(block, blockType);
+                        block.remove();
+                    }, 500);
+                }
+
+                function createMiningParticles(block, blockType) {
+                    const rect = block.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+
+                    // Create multiple particles
+                    for (let i = 0; i < 8; i++) {
+                        const particle = document.createElement("div");
+                        particle.className = "particle";
+
+                        // Set color based on block type
+                        if (blockType === "diamond-ore")
+                            particle.style.backgroundColor = "#47A3FF";
+                        else if (blockType === "gold-ore")
+                            particle.style.backgroundColor = "#FFD700";
+                        else if (blockType === "redstone-ore")
+                            particle.style.backgroundColor = "#FF0000";
+                        else if (blockType === "emerald-ore")
+                            particle.style.backgroundColor = "#50C878";
+                        else if (blockType === "coal-ore")
+                            particle.style.backgroundColor = "#333333";
+                        else if (blockType === "dirt")
+                            particle.style.backgroundColor = "#866043";
+                        else if (blockType === "grass")
+                            particle.style.backgroundColor = "#67A337";
+                        else particle.style.backgroundColor = "#777777";
+
+                        particle.style.left = `${centerX}px`;
+                        particle.style.top = `${centerY}px`;
+
+                        document.body.appendChild(particle);
+
+                        // Animate particle
+                        const angle = Math.random() * Math.PI * 2;
+                        const distance = 50 + Math.random() * 100;
+                        const duration = 0.5 + Math.random() * 0.5;
+
+                        gsap.to(particle, {
+                            left: centerX + Math.cos(angle) * distance,
+                            top: centerY + Math.sin(angle) * distance,
+                            opacity: 0,
+                            scale: 0,
+                            duration: duration,
+                            onComplete: () => {
+                                particle.remove();
+                            },
+                        });
+                    }
+                }
+
+                function dropItem(block, blockType) {
+                    // Only drop items for ore blocks
+                    if (
+                        !blockType.includes("ore") &&
+                        blockType !== "diamond-ore"
+                    )
+                        return;
+
+                    const rect = block.getBoundingClientRect();
+                    const world = document.getElementById("minecraft-world");
+
+                    // Determine item type from block type
+                    let itemType;
+                    if (blockType === "diamond-ore") itemType = "diamond";
+                    else if (blockType === "gold-ore") itemType = "gold";
+                    else if (blockType === "redstone-ore")
+                        itemType = "redstone";
+                    else if (blockType === "emerald-ore") itemType = "emerald";
+                    else if (blockType === "coal-ore") itemType = "coal";
+                    else return; // No drop for other blocks
+
+                    const item = document.createElement("div");
+                    item.className = `item-pickup ${itemType}`;
+                    item.style.left = `${rect.left + rect.width / 2}px`;
+                    item.style.top = `${rect.top + rect.height / 2}px`;
+
+                    // Make item appear with fade-in
+                    gsap.fromTo(
+                        item,
+                        { opacity: 0, scale: 0 },
+                        { opacity: 1, scale: 1, duration: 0.5 },
+                    );
+
+                    world.appendChild(item);
+
+                    // Make item collectable
+                    item.addEventListener("click", () => {
+                        collectItem(item, itemType);
+                    });
+
+                    // Auto-collect after some time
+                    setTimeout(() => {
+                        if (item.parentNode) {
+                            collectItem(item, itemType);
+                        }
+                    }, 10000); // 10 seconds
+                }
+
+                function collectItem(item, itemType) {
+                    playSound("pickup");
+
+                    // Animate item towards inventory
+                    const rect = item.getBoundingClientRect();
+                    const inventory = document.getElementById("inventory");
+                    const inventoryRect = inventory.getBoundingClientRect();
+
+                    gsap.to(item, {
+                        left: inventoryRect.left + inventoryRect.width / 2,
+                        top: inventoryRect.top + inventoryRect.height / 2,
+                        scale: 0.5,
+                        opacity: 0,
+                        duration: 0.5,
+                        onComplete: () => {
+                            item.remove();
+
+                            // Update inventory count
+                            inventoryItems[itemType]++;
+                            updateInventory(itemType);
+                        },
+                    });
+                }
+
+                function updateInventory(itemType) {
+                    // Find an empty slot or slot with same item
+                    const slots = document.querySelectorAll(
+                        ".inventory-slot:not(.selected)",
+                    );
+                    let targetSlot = null;
+
+                    // Check for slot with same item type
+                    for (const slot of slots) {
+                        const existingItem = slot.querySelector(
+                            `.inventory-item.${itemType}-item`,
+                        );
+                        if (existingItem) {
+                            targetSlot = slot;
+                            break;
+                        }
+                    }
+
+                    // If no slot with same item, find empty slot
+                    if (!targetSlot) {
+                        for (const slot of slots) {
+                            if (!slot.querySelector(".inventory-item")) {
+                                targetSlot = slot;
+                                break;
+                            }
+                        }
+                    }
+
+                    // If found a slot
+                    if (targetSlot) {
+                        let item = targetSlot.querySelector(
+                            `.inventory-item.${itemType}-item`,
+                        );
+
+                        // Create item if it doesn't exist
+                        if (!item) {
+                            item = document.createElement("div");
+                            item.className = `inventory-item ${itemType}-item`;
+
+                            // Set background image based on item type
+                            if (itemType === "diamond") {
+                                item.style.backgroundImage =
+                                    'url(\'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><polygon points="5,0 10,5 5,10 0,5" fill="%2347A3FF"/></svg>\')';
+                            } else if (itemType === "gold") {
+                                item.style.backgroundImage =
+                                    'url(\'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23FFD700"/></svg>\')';
+                            } else if (itemType === "redstone") {
+                                item.style.backgroundImage =
+                                    'url(\'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23FF0000"/></svg>\')';
+                            } else if (itemType === "emerald") {
+                                item.style.backgroundImage =
+                                    'url(\'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><polygon points="5,0 10,5 5,10 0,5" fill="%2350C878"/></svg>\')';
+                            } else if (itemType === "coal") {
+                                item.style.backgroundImage =
+                                    'url(\'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 10 10"><rect width="10" height="10" fill="%23333"/></svg>\')';
+                            }
+
+                            targetSlot.appendChild(item);
+                        }
+
+                        // Update count
+                        let countElement =
+                            targetSlot.querySelector(".inventory-count");
+                        if (!countElement) {
+                            countElement = document.createElement("div");
+                            countElement.className = "inventory-count";
+                            targetSlot.appendChild(countElement);
+                        }
+
+                        countElement.textContent = inventoryItems[itemType];
+                    }
+                }
+
+                function animateCaravan() {
+                    const caravan =
+                        document.getElementById("caravan-container");
+                    const wheelLeft = document.getElementById("wheel-left");
+                    const wheelRight = document.getElementById("wheel-right");
+
+                    // First make caravan appear from top
+                    gsap.to(caravan, {
+                        y: 0,
+                        duration: 2,
+                        ease: "bounce.out",
+                        onComplete: () => {
+                            // Then start moving across the screen
+                            animateCaravanMovement();
+                        },
+                    });
+
+                    // Animate wheel rotation
+                    gsap.to([wheelLeft, wheelRight], {
+                        rotation: 360,
+                        duration: 2,
+                        repeat: -1,
+                        ease: "none",
+                    });
+                }
+
+                function animateCaravanMovement() {
+                    const caravan =
+                        document.getElementById("caravan-container");
+                    const viewportWidth = window.innerWidth;
+
+                    // Animate caravan moving across the screen
+                    gsap.to(caravan, {
+                        x: viewportWidth,
+                        duration: 20,
+                        ease: "none",
+                        onComplete: () => {
+                            // Reset position to left side
+                            gsap.set(caravan, { x: -200 });
+
+                            // Start again
+                            animateCaravanMovement();
+                        },
+                    });
+                }
+
+                function startTerminal() {
+                    const terminal = document.getElementById("terminal-body");
+
+                    const initialCommands = [
+                        {
+                            prompt: "caravan-x$",
+                            command: " ./initialize_blockchain.sh",
+                            response:
+                                "Initializing BlockCraft: The Living Ledger...\nConnecting to network nodes...\nSynchronizing with blockchain...\nBuilding block database...\nReady to explore the blockchain world!",
+                        },
+                        {
+                            prompt: "caravan-x$",
+                            command: " blockchain_status",
+                            response:
+                                "Current Blockchain Status:\n  - Chain Height: 784,256 blocks\n  - Latest Hash: 00000000000000000007b5a2d...\n  - Current Difficulty: 37.85T\n  - Mempool Size: 21,453 transactions\n  - Network Hashrate: 458.56 EH/s",
+                        },
+                        {
+                            prompt: "caravan-x$",
+                            command: " ./launch_minecraft_mode.sh",
+                            response:
+                                "Initializing Minecraft visualization mode...\nRendering voxel landscape...\nBuilding blockchain structures...\n\nWARNING: Miner approaching terminal. Potential breach detected!",
+                        },
+                    ];
+
+                    // Function to add a new line to the terminal
+                    function addTerminalLine(
+                        prompt,
+                        command = "",
+                        response = "",
+                        delay = 0,
+                    ) {
+                        setTimeout(() => {
+                            const lineElement = document.createElement("div");
+                            lineElement.className = "terminal-line";
+
+                            // Create prompt
+                            if (prompt) {
+                                const promptElement =
+                                    document.createElement("span");
+                                promptElement.className = "prompt";
+                                promptElement.textContent = prompt;
+                                lineElement.appendChild(promptElement);
+                            }
+
+                            // Create command
+                            if (command) {
+                                const commandElement =
+                                    document.createElement("span");
+                                commandElement.className = "command";
+                                lineElement.appendChild(commandElement);
+
+                                terminal.appendChild(lineElement);
+                                lineElement.classList.add("visible");
+
+                                // Type out the command
+                                let i = 0;
+                                const typeCommand = setInterval(() => {
+                                    commandElement.textContent =
+                                        command.substring(0, i);
+                                    i++;
+
+                                    // Scroll to bottom
+                                    terminal.scrollTop = terminal.scrollHeight;
+
+                                    if (i > command.length) {
+                                        clearInterval(typeCommand);
+
+                                        // Add response after command is typed
+                                        if (response) {
+                                            setTimeout(() => {
+                                                const responseElement =
+                                                    document.createElement(
+                                                        "div",
+                                                    );
+                                                responseElement.className =
+                                                    "terminal-line response";
+                                                responseElement.textContent =
+                                                    response;
+                                                terminal.appendChild(
+                                                    responseElement,
+                                                );
+                                                responseElement.classList.add(
+                                                    "visible",
+                                                );
+
+                                                // Scroll to bottom
+                                                terminal.scrollTop =
+                                                    terminal.scrollHeight;
+                                            }, 500);
+                                        }
+                                    }
+                                }, 50);
+                            } else if (response) {
+                                // Just add response without command
+                                lineElement.textContent = response;
+                                lineElement.classList.add("response");
+                                terminal.appendChild(lineElement);
+                                lineElement.classList.add("visible");
+                            }
+
+                            // Scroll to bottom
+                            terminal.scrollTop = terminal.scrollHeight;
+                        }, delay);
+                    }
+
+                    // Add initial commands with increasing delays
+                    let currentDelay = 500;
+                    initialCommands.forEach((cmd) => {
+                        addTerminalLine(
+                            cmd.prompt,
+                            cmd.command,
+                            cmd.response,
+                            currentDelay,
+                        );
+                        currentDelay +=
+                            cmd.command.length * 50 +
+                            cmd.response.length * 10 +
+                            1000;
+                    });
+
+                    // Add interactive input at the end
+                    setTimeout(() => {
+                        const lineElement = document.createElement("div");
+                        lineElement.className = "terminal-line";
+
+                        const promptElement = document.createElement("span");
+                        promptElement.className = "prompt";
+                        promptElement.textContent = "caravan-x$";
+                        lineElement.appendChild(promptElement);
+
+                        const inputContainer = document.createElement("span");
+                        inputContainer.className = "command";
+
+                        const inputElement = document.createElement("input");
+                        inputElement.type = "text";
+                        inputElement.className = "terminal-input";
+                        inputElement.spellcheck = false;
+                        inputElement.autocomplete = "off";
+
+                        inputContainer.appendChild(inputElement);
+                        lineElement.appendChild(inputContainer);
+
+                        terminal.appendChild(lineElement);
+                        lineElement.classList.add("visible");
+
+                        // Focus the input
+                        setTimeout(() => {
+                            inputElement.focus();
+                        }, 100);
+
+                        // Handle input
+                        inputElement.addEventListener("keydown", (e) => {
+                            if (e.key === "Enter") {
+                                const command = inputElement.value.trim();
+                                if (command) {
+                                    // Remove the input element
+                                    inputContainer.textContent = " " + command;
+
+                                    // Process command
+                                    processCommand(command);
+                                }
+                            }
+                        });
+
+                        // Scroll to bottom
+                        terminal.scrollTop = terminal.scrollHeight;
+                    }, currentDelay);
+
+                    // Process terminal commands
+                    function processCommand(command) {
+                        let response = "";
+
+                        // Simple command handling
+                        if (command === "help") {
+                            response =
+                                "Available commands:\n" +
+                                "  help          - Show this help\n" +
+                                "  blockchain    - Show blockchain info\n" +
+                                "  mempool       - Show mempool transactions\n" +
+                                "  mine          - Mine a new block\n" +
+                                "  clear         - Clear the terminal\n" +
+                                "  exit          - Exit the terminal";
+                        } else if (command === "blockchain") {
+                            response =
+                                "Blockchain Info:\n" +
+                                "  Name: Bitcoin\n" +
+                                "  Height: 784,256 blocks\n" +
+                                "  Last Block: 00000000000000000007b5a2d...\n" +
+                                "  Difficulty: 37.85T\n" +
+                                "  Total Transactions: 842,165,723\n" +
+                                "  Hashrate: 458.56 EH/s";
+                        } else if (command === "mempool") {
+                            response =
+                                "Current Mempool:\n" +
+                                "  Transactions: 21,453\n" +
+                                "  Size: 24.6 MB\n" +
+                                "  Fee Range: 8-124 sat/vB\n" +
+                                "  Estimated Next Block: 2,456 transactions";
+                        } else if (command === "mine") {
+                            response =
+                                "Starting mining process...\n" +
+                                "Collecting transactions from mempool...\n" +
+                                "Validating transaction signatures...\n" +
+                                "Computing merkle root...\n" +
+                                "Searching for nonce...\n\n" +
+                                "ERROR: Mining interrupted by external miner!";
+                        } else if (command === "clear") {
+                            terminal.innerHTML = "";
+                            addTerminalLine("caravan-x$", "", "", 0);
+                            return;
+                        } else if (command === "exit") {
+                            terminal.parentElement.style.display = "none";
+                            terminalActive = false;
+                            return;
+                        } else {
+                            response = `Command not found: ${command}`;
+                        }
+
+                        // Add response
+                        const responseElement = document.createElement("div");
+                        responseElement.className = "terminal-line response";
+                        responseElement.textContent = response;
+                        terminal.appendChild(responseElement);
+                        responseElement.classList.add("visible");
+
+                        // Add new prompt line
+                        setTimeout(() => {
+                            const newLineElement =
+                                document.createElement("div");
+                            newLineElement.className = "terminal-line";
+
+                            const newPromptElement =
+                                document.createElement("span");
+                            newPromptElement.className = "prompt";
+                            newPromptElement.textContent = "caravan-x$";
+                            newLineElement.appendChild(newPromptElement);
+
+                            const newInputContainer =
+                                document.createElement("span");
+                            newInputContainer.className = "command";
+
+                            const newInputElement =
+                                document.createElement("input");
+                            newInputElement.type = "text";
+                            newInputElement.className = "terminal-input";
+                            newInputElement.spellcheck = false;
+                            newInputElement.autocomplete = "off";
+
+                            newInputContainer.appendChild(newInputElement);
+                            newLineElement.appendChild(newInputContainer);
+
+                            terminal.appendChild(newLineElement);
+                            newLineElement.classList.add("visible");
+
+                            // Focus the input
+                            setTimeout(() => {
+                                newInputElement.focus();
+                            }, 100);
+
+                            // Handle input
+                            newInputElement.addEventListener("keydown", (e) => {
+                                if (e.key === "Enter") {
+                                    const newCommand =
+                                        newInputElement.value.trim();
+                                    if (newCommand) {
+                                        // Remove the input element
+                                        newInputContainer.textContent =
+                                            " " + newCommand;
+
+                                        // Process command
+                                        processCommand(newCommand);
+                                    }
+                                }
+                            });
+
+                            // Scroll to bottom
+                            terminal.scrollTop = terminal.scrollHeight;
+                        }, 500);
+                    }
+                }
+
+                function startMinerAnimation() {
+                    if (!terminalActive) return;
+
+                    const miner = document.getElementById("miner");
+                    const terminal = document.querySelector(
+                        ".terminal-container",
+                    );
+                    const terminalBody =
+                        document.getElementById("terminal-body");
+                    const armRight = miner.querySelector(".miner-arm-right");
+                    const armLeft = miner.querySelector(".miner-arm-left");
+                    const legRight = miner.querySelector(".miner-leg-right");
+                    const legLeft = miner.querySelector(".miner-leg-left");
+                    const pickaxe = miner.querySelector(".pickaxe");
+
+                    // Position miner off-screen
+                    miner.style.display = "block";
+                    miner.style.left = "-100px";
+                    miner.style.top = "50%";
+
+                    // Get terminal positions
+                    const terminalRect = terminal.getBoundingClientRect();
+                    const targetX = terminalRect.left - 80;
+                    const targetY =
+                        terminalRect.top + terminalRect.height / 2 - 60;
+
+                    // Animate miner walking to terminal
+                    gsap.to(miner, {
+                        left: targetX,
+                        top: targetY,
+                        duration: 3,
+                        ease: "power1.inOut",
+                        onUpdate: function () {
+                            // Walking animation
+                            const progress = this.progress();
+                            armRight.style.transform = `rotate(${
+                                Math.sin(progress * 10) * 20
+                            }deg)`;
+                            armLeft.style.transform = `rotate(${
+                                Math.sin(progress * 10 + Math.PI) * 20
+                            }deg)`;
+                            legRight.style.transform = `rotate(${
+                                Math.sin(progress * 10) * 20
+                            }deg)`;
+                            legLeft.style.transform = `rotate(${
+                                Math.sin(progress * 10 + Math.PI) * 20
+                            }deg)`;
+                        },
+                        onComplete: function () {
+                            // Start mining animation
+                            mineTerminal();
+                        },
+                    });
+
+                    function mineTerminal() {
+                        // Reposition for mining
+                        gsap.to(armLeft, {
+                            rotation: -45,
+                            duration: 0.5,
+                        });
+
+                        // Mining animation
+                        const miningTimeline = gsap.timeline({ repeat: 5 });
+
+                        miningTimeline.to(pickaxe, {
+                            rotation: -30,
+                            duration: 0.2,
+                        });
+
+                        miningTimeline.to(pickaxe, {
+                            rotation: 30,
+                            duration: 0.2,
+                            onComplete: function () {
+                                // Play mining sound
+                                playSound("mining");
+
+                                // Add crack effect on 3rd hit
+                                if (miningTimeline.repeat() === 3) {
+                                    addCrackEffect();
+                                }
+                            },
+                        });
+
+                        miningTimeline.eventCallback("onComplete", function () {
+                            // Break terminal completely
+                            breakTerminal();
+                        });
+                    }
+
+                    function addCrackEffect() {
+                        const crackEffect =
+                            document.getElementById("crack-effect");
+
+                        // Create random cracks
+                        for (let i = 0; i < 10; i++) {
+                            const crack = document.createElement("div");
+                            crack.className = "crack-line";
+
+                            // Random position
+                            const startX = Math.random() * 100;
+                            const startY = Math.random() * 100;
+
+                            // Random size
+                            const length = 20 + Math.random() * 80;
+                            const thickness = 1 + Math.random() * 2;
+
+                            // Random angle
+                            const angle = Math.random() * 180;
+
+                            crack.style.width = `${length}px`;
+                            crack.style.height = `${thickness}px`;
+                            crack.style.left = `${startX}%`;
+                            crack.style.top = `${startY}%`;
+                            crack.style.transform = `rotate(${angle}deg)`;
+
+                            crackEffect.appendChild(crack);
+                        }
+
+                        gsap.to(crackEffect, {
+                            opacity: 0.7,
+                            duration: 0.5,
+                        });
+                    }
+
+                    function breakTerminal() {
+                        // Show final break effect
+                        const crackEffect =
+                            document.getElementById("crack-effect");
+                        gsap.to(crackEffect, {
+                            opacity: 1,
+                            duration: 0.3,
+                        });
+
+                        // Play break sound
+                        playSound("break");
+
+                        // Clear terminal and add blockchain information
+                        setTimeout(() => {
+                            // Clear existing content
+                            terminalBody.innerHTML = "";
+
+                            // Add "broken through" message
+                            const breakMessage = document.createElement("div");
+                            breakMessage.className =
+                                "terminal-line response visible";
+                            breakMessage.style.color = "#ff5555";
+                            breakMessage.textContent =
+                                "[TERMINAL BREACH DETECTED]";
+                            terminalBody.appendChild(breakMessage);
+
+                            setTimeout(() => {
+                                // Add welcome message
+                                const welcomeMessage =
+                                    document.createElement("div");
+                                welcomeMessage.className =
+                                    "terminal-line response visible";
+                                welcomeMessage.style.color = "#ffbd2e";
+                                welcomeMessage.style.fontSize = "18px";
+                                welcomeMessage.style.marginTop = "20px";
+                                welcomeMessage.textContent =
+                                    "WELCOME TO BLOCKCRAFT: THE LIVING LEDGER";
+                                terminalBody.appendChild(welcomeMessage);
+
+                                setTimeout(() => {
+                                    // Display blockchain world information
+                                    const infoLines = [
+                                        "A Minecraft-inspired blockchain visualization platform.",
+                                        "",
+                                        "In this world:",
+                                        "• Blocks are physical buildings you can explore",
+                                        "• Transactions become entities moving between addresses",
+                                        "• Mining is visualized as construction",
+                                        "• The entire blockchain exists as an explorable landscape",
+                                        "",
+                                        "Coming Soon!",
+                                        "",
+                                        "Current Development Status:",
+                                        "• First-person exploration: 75% complete",
+                                        "• Block visualization: 90% complete",
+                                        "• Transaction animation: 60% complete",
+                                        "• Mining mechanics: 85% complete",
+                                        "• World generation: 70% complete",
+                                        "",
+                                        "Stay tuned for the full release where you'll be able to walk",
+                                        "through the blockchain, mine new blocks, and watch the living ledger grow!",
+                                    ];
+
+                                    let lineDelay = 0;
+                                    infoLines.forEach((line) => {
+                                        setTimeout(() => {
+                                            const infoLine =
+                                                document.createElement("div");
+                                            infoLine.className =
+                                                "terminal-line response visible";
+                                            infoLine.textContent = line;
+                                            terminalBody.appendChild(infoLine);
+
+                                            // Scroll to bottom
+                                            terminalBody.scrollTop =
+                                                terminalBody.scrollHeight;
+                                        }, lineDelay);
+
+                                        lineDelay += 100;
+                                    });
+
+                                    // Add final "press any key" prompt
+                                    setTimeout(() => {
+                                        const promptLine =
+                                            document.createElement("div");
+                                        promptLine.className =
+                                            "terminal-line response visible";
+                                        promptLine.style.marginTop = "20px";
+                                        promptLine.style.color = "#ffbd2e";
+                                        promptLine.textContent =
+                                            "Press any key to continue...";
+                                        terminalBody.appendChild(promptLine);
+
+                                        // Handle key press
+                                        document.addEventListener(
+                                            "keydown",
+                                            handleEndKeyPress,
+                                            {
+                                                once: true,
+                                            },
+                                        );
+                                        document.addEventListener(
+                                            "click",
+                                            handleEndKeyPress,
+                                            {
+                                                once: true,
+                                            },
+                                        );
+                                    }, lineDelay + 1000);
+                                }, 1000);
+                            }, 1000);
+                        }, 1000);
+                    }
+
+                    function handleEndKeyPress() {
+                        playSound("endScreen");
+
+                        // Hide terminal with animation
+                        gsap.to(terminal, {
+                            scale: 2,
+                            opacity: 0,
+                            duration: 1,
+                            onComplete: () => {
+                                terminal.style.display = "none";
+                            },
+                        });
+
+                        // Hide miner
+                        gsap.to(miner, {
+                            opacity: 0,
+                            duration: 0.5,
+                            onComplete: () => {
+                                miner.style.display = "none";
+                            },
+                        });
+
+                        // Show final message in center of screen
+                        const finalMessage = document.createElement("div");
+                        finalMessage.style.position = "absolute";
+                        finalMessage.style.top = "50%";
+                        finalMessage.style.left = "50%";
+                        finalMessage.style.transform = "translate(-50%, -50%)";
+                        finalMessage.style.color = "#ffbd2e";
+                        finalMessage.style.fontSize = "36px";
+                        finalMessage.style.textAlign = "center";
+                        finalMessage.style.fontFamily =
+                            "MinecraftFont, monospace, sans-serif";
+                        finalMessage.style.textShadow = "2px 2px 0 #000";
+                        finalMessage.style.zIndex = "100";
+                        finalMessage.innerHTML =
+                            "CARAVAN-X: BlockCraft<br><span style='font-size: 24px; color: #fff;'>Coming Soon</span>";
+
+                        document.body.appendChild(finalMessage);
+
+                        // Fade in message
+                        gsap.from(finalMessage, {
+                            opacity: 0,
+                            scale: 0.5,
+                            duration: 1,
+                            ease: "back.out(1.7)",
+                        });
+                    }
+                }
+            });
+
+            // Add this style tag dynamically
+            document.addEventListener("DOMContentLoaded", () => {
+                const style = document.createElement("style");
+                style.textContent = `
+        @keyframes twinkle {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
+    `;
+                document.head.appendChild(style);
             });
         </script>
     </body>

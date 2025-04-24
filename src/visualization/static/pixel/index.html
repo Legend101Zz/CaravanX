@@ -387,19 +387,19 @@
             }
 
             .caravan-icon {
-                background-image: url("../assets/icons/caravan.png");
+                background-image: url("./assets_pixel/icons_pixel/Caravan-X.png");
             }
 
             .trader-icon {
-                background-image: url("../assets/icons/trader.png");
+                background-image: url("./assets_pixel/characters_pixel/trader.png");
             }
 
             .miner-icon {
-                background-image: url("../assets/icons/miner.png");
+                background-image: url("./assets_pixel/characters_pixel/miner.png");
             }
 
             .outpost-icon {
-                background-image: url("../assets/icons/outpost.png");
+                background-image: url("./assets_pixel/characters_pixel/outpost.png");
             }
 
             /* ===== Details Panel ===== */
@@ -651,52 +651,70 @@
         <div id="game-container"></div>
 
         <div id="ui-overlay">
-            <button id="view-toggle">Switch to Standard View</button>
+            <button id="view-toggle" class="pixel-button">
+                Switch to Standard View
+            </button>
 
-            <div id="stats-panel">
-                <div>BLOCKS: <span id="block-count">0</span></div>
-                <div>TXs: <span id="tx-count">0</span></div>
-                <div>MEMPOOL: <span id="mempool-size">0</span></div>
-                <div>TIME: <span id="game-time">00:00</span></div>
+            <div id="stats-panel" class="stats-panel">
+                <div class="panel-header">CARAVAN STATS</div>
+                <div class="stat-row">
+                    <span class="stat-label">BLOCKS:</span>
+                    <span class="stat-value" id="block-count">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">TXs:</span>
+                    <span class="stat-value" id="tx-count">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">MEMPOOL:</span>
+                    <span class="stat-value" id="mempool-size">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">TIME:</span>
+                    <span class="stat-value" id="game-time">00:00</span>
+                </div>
+                <div class="weather-indicator" id="weather-indicator">
+                    <span class="pixel-icon-sun"></span>
+                </div>
             </div>
 
-            <div id="compass">
-                <div id="compass-arrow"></div>
-                <div id="compass-label">NORTH</div>
+            <div id="compass" class="compass">
+                <div class="compass-inner">
+                    <div class="compass-markings">
+                        <span class="n">N</span>
+                        <span class="e">E</span>
+                        <span class="s">S</span>
+                        <span class="w">W</span>
+                    </div>
+                    <div id="compass-arrow"></div>
+                </div>
+                <div id="compass-label">MINING NORTH</div>
             </div>
 
-            <div id="controls">
-                <button class="pixel-button" id="mine-btn">MINE BLOCK</button>
-                <button class="pixel-button" id="tx-btn">NEW TX</button>
-                <button class="pixel-button" id="zoom-in-btn">ZOOM+</button>
-                <button class="pixel-button" id="zoom-out-btn">ZOOM-</button>
+            <div id="controls" class="controls">
+                <button class="pixel-button action-button" id="mine-btn">
+                    <span class="pixel-icon-mine"></span>
+                    FORGE CARAVAN
+                </button>
+                <button class="pixel-button action-button" id="tx-btn">
+                    <span class="pixel-icon-tx"></span>
+                    CREATE CARGO
+                </button>
+                <div class="zoom-controls">
+                    <button class="pixel-button" id="zoom-in-btn">+</button>
+                    <button class="pixel-button" id="zoom-out-btn">-</button>
+                </div>
             </div>
 
-            <div id="details-panel">
-                <div id="details-close">X</div>
+            <div id="details-panel" class="details-panel">
+                <div class="panel-header">
+                    <span id="details-title">DETAILS</span>
+                    <span class="close-button" id="details-close">✕</span>
+                </div>
                 <div id="details-content"></div>
             </div>
 
-            <div id="legend" class="legend">
-                <div class="panel-header">LEGEND</div>
-                <div class="legend-item">
-                    <span class="legend-icon caravan-icon"></span>
-                    <span>Caravan (Block)</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-icon trader-icon"></span>
-                    <span>Trader (Transaction)</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-icon miner-icon"></span>
-                    <span>Miner (Validator)</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-icon outpost-icon"></span>
-                    <span>Outpost (Node)</span>
-                </div>
-            </div>
-            <div id="legend" class="legend">
+            <div class="legend">
                 <div class="panel-header">LEGEND</div>
                 <div class="legend-item">
                     <span class="legend-icon caravan-icon"></span>
@@ -752,6 +770,47 @@
 
         <div class="tooltip" id="tooltip"></div>
 
+        <!-- Compiled JavaScript is loaded here -->
         <script src="js/pixel-city.js"></script>
+        <script>
+            // Initialize the application when the page is loaded
+            document.addEventListener("DOMContentLoaded", () => {
+                try {
+                    // Setup loading bar first
+                    let loadingProgress = 0;
+                    const loadingInterval = setInterval(() => {
+                        loadingProgress += 5;
+                        if (loadingProgress > 100) {
+                            clearInterval(loadingInterval);
+                            return;
+                        }
+
+                        const loadingBar =
+                            document.getElementById("loading-bar");
+                        if (loadingBar) {
+                            loadingBar.style.width = `${loadingProgress}%`;
+                        }
+                    }, 100);
+
+                    // Create the game with try-catch
+                    try {
+                        window.game = new CaravanXBlockchain();
+                    } catch (error) {
+                        console.error("Failed to initialize game:", error);
+
+                        // Show error message in loading screen
+                        const loadingText =
+                            document.getElementById("loading-text");
+                        if (loadingText) {
+                            loadingText.textContent =
+                                "Error loading game: " + error.message;
+                            loadingText.style.color = "#ff5555";
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error in DOMContentLoaded:", error);
+                }
+            });
+        </script>
     </body>
 </html>

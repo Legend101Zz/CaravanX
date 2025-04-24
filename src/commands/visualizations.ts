@@ -18,7 +18,7 @@ import open from "open";
 import chalk from "chalk";
 
 /**
- * Enhanced commands for blockchain visualization
+ * Commands for blockchain visualization
  */
 export class VisualizationCommands {
   private readonly configManager: ConfigManager;
@@ -50,10 +50,10 @@ export class VisualizationCommands {
   }
 
   /**
-   * Start the enhanced blockchain visualization
+   * Start the blockchain visualization
    */
   async startVisualization(): Promise<void> {
-    displayCommandTitle("Enhanced Blockchain Visualization");
+    displayCommandTitle("Blockchain Visualization");
 
     try {
       // Check if Bitcoin Core is running
@@ -90,9 +90,7 @@ export class VisualizationCommands {
 
       // Check if server is already running
       if (vizManager.isServerRunning()) {
-        console.log(
-          formatWarning("Enhanced visualization server is already running."),
-        );
+        console.log(formatWarning("Visualization server is already running."));
 
         const openOptions = [
           { name: colors.highlight("Open in browser"), value: "open" },
@@ -133,9 +131,7 @@ export class VisualizationCommands {
       });
 
       // Start the visualization server
-      const startSpinner = ora(
-        "Starting enhanced visualization server...",
-      ).start();
+      const startSpinner = ora("Starting visualization server...").start();
 
       try {
         // Create a new visualization manager with the specified port
@@ -146,7 +142,7 @@ export class VisualizationCommands {
         );
 
         await this.visualizationManager.start(false);
-        startSpinner.succeed("Enhanced visualization server started");
+        startSpinner.succeed("Visualization server started");
 
         // Apply some animation to make the message more noticeable
         console.log("\n");
@@ -155,7 +151,7 @@ export class VisualizationCommands {
 
         console.log(
           boxText(
-            `The enhanced blockchain visualization is now running on port ${colors.highlight(port!.toString())}.\n\n` +
+            `The blockchain visualization is now running on port ${colors.highlight(port!.toString())}.\n\n` +
               `You can access it at: ${colors.highlight(`http://localhost:${port}/`)}\n\n` +
               `This visualization includes:\n` +
               `${colors.success("✓")} Interactive block explorer\n` +
@@ -166,7 +162,7 @@ export class VisualizationCommands {
               `Keep this terminal window open to maintain the visualization server.\n` +
               `Press Ctrl+C or select "Stop visualization" from the menu to stop the server.`,
             {
-              title: "Enhanced Visualization Running",
+              title: "Visualization Running",
               titleColor: colors.success,
             },
           ),
@@ -195,20 +191,18 @@ export class VisualizationCommands {
    * Stop the blockchain visualization
    */
   async stopVisualization(): Promise<void> {
-    displayCommandTitle("Stop Enhanced Visualization");
+    displayCommandTitle("Stop Visualization");
 
     try {
       const vizManager = await this.getVisualizationManager();
 
       if (!vizManager.isServerRunning()) {
-        console.log(
-          formatWarning("Enhanced visualization server is not running."),
-        );
+        console.log(formatWarning("Visualization server is not running."));
         return;
       }
 
       const confirmStop = await select({
-        message: "Stop the enhanced visualization server?",
+        message: "Stop the visualization server?",
         choices: [
           { name: colors.highlight("Yes, stop the server"), value: "yes" },
           { name: colors.highlight("No, keep it running"), value: "no" },
@@ -218,7 +212,7 @@ export class VisualizationCommands {
       if (confirmStop === "yes") {
         const spinner = ora("Stopping visualization server...").start();
         await vizManager.stop();
-        spinner.succeed("Enhanced visualization server stopped");
+        spinner.succeed("Visualization server stopped");
       } else {
         console.log(colors.info("Visualization server remains running."));
       }

@@ -10,6 +10,10 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*",
+    "src/visualization/static/pixel/pixel-city.ts",
+    "src/visualization/static/pixel/globals.d.ts"
+  ],
   "exclude": ["node_modules", "**/*.test.ts"]
 }

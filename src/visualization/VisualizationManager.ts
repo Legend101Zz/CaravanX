@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as fs from "fs-extra";
+import { exec } from "child_process";
 import * as open from "open";
 import { BitcoinRpcClient } from "../core/rpc";
 import { BlockchainDataService } from "./data/blockchain-data";
@@ -369,36 +370,165 @@ export class VisualizationManager {
    */
   private async createPixelArtVisualization(): Promise<void> {
     try {
-      // Create necessary directories
-      await fs.ensureDir(path.join(this.staticDir, "assets/buildings"));
-      await fs.ensureDir(path.join(this.staticDir, "assets/characters"));
-      await fs.ensureDir(path.join(this.staticDir, "assets/environment"));
-      await fs.ensureDir(path.join(this.staticDir, "assets/items"));
-      await fs.ensureDir(path.join(this.staticDir, "sounds"));
+      // --- 1) Prepare folders ---
+      const assetsPixelDir = path.join(this.staticDir, "assets_pixel");
+      const sourceDir = path.join(__dirname, "static", "pixel");
+      const sourceAssetsDir = path.join(sourceDir, "assets_pixel");
+      await fs.ensureDir(path.join(assetsPixelDir, "characters_pixel"));
+      await fs.ensureDir(path.join(assetsPixelDir, "icons_pixel"));
+      await fs.ensureDir(path.join(assetsPixelDir, "sounds_pixel"));
       await fs.ensureDir(path.join(this.staticDir, "js"));
 
-      // Define source directory for pixel visualization
-      const sourceDir = path.join(__dirname, "static", "pixel");
-
-      // Copy HTML file
+      // Copy pixel-art assets and HTML
+      await this.copyPixelArtAssets(sourceAssetsDir, assetsPixelDir);
       await fs.copy(
         path.join(sourceDir, "index.html"),
         path.join(this.staticDir, "index-pixel.html"),
       );
 
-      // Copy JavaScript file
-      await fs.copy(
-        path.join(sourceDir, "js", "pixel-city.js"),
-        path.join(this.staticDir, "js", "pixel-city.js"),
+      // --- 2) Create necessary type definitions ---
+      const typesDir = path.join(this.staticDir, "js", "types");
+      await fs.ensureDir(typesDir);
+
+      // Create simplified type definitions file
+      const typeDefContent = `
+       // Basic type definitions for browser globals
+       declare var PIXI: any;
+       declare var gsap: any;
+       declare var io: any;
+       declare var Howl: any;
+       `;
+
+      await fs.writeFile(path.join(typesDir, "globals.d.ts"), typeDefContent);
+
+      // --- 3) Copy TS source into static/js ---
+      const tsSourcePath = path.join(sourceDir, "pixel-city.ts");
+      const tsDestPath = path.join(this.staticDir, "js", "pixel-city.ts");
+      await fs.copy(tsSourcePath, tsDestPath);
+
+      // --- 4) Compile with simpler settings ---
+      console.log(chalk.blue("Compiling pixel-city.ts → pixel-city.js..."));
+
+      return new Promise<void>((resolve) => {
+        const outDir = path.join(this.staticDir, "js");
+
+        // Use simpler compilation approach for browser script
+        exec(
+          `tsc "${tsDestPath}" --outDir "${outDir}" --target ES2020 --lib DOM,ES2020 --module None --noImplicitAny false --skipLibCheck true --strictPropertyInitialization false`,
+          { cwd: process.cwd() },
+          (err, stdout, stderr) => {
+            if (err) {
+              console.error(
+                chalk.red("TypeScript error:"),
+                stderr || err.message,
+              );
+
+              return;
+            }
+
+            console.log(
+              chalk.green("pixel-city.ts compiled → js/pixel-city.js"),
+            );
+            resolve();
+          },
+        );
+      });
+    } catch (err) {
+      console.error("Error in createPixelArtVisualization:", err);
+    }
+  }
+
+  /**
+   * Copies existing pixel art assets to the new directory structure
+   * @param sourceDir The source directory containing existing assets
+   * @param assetsPixelDir The target directory for pixel assets
+   */
+  private async copyPixelArtAssets(
+    sourceDir: string,
+    assetsPixelDir: string,
+  ): Promise<void> {
+    try {
+      console.log(
+        chalk.blue("Copying existing pixel assets to new structure..."),
       );
-      // Create placeholder assets
-      await this.createPixelArtAssets();
+
+      // Define the mapping of source to target directories
+      const directoryMappings = [
+        // Characters
+        {
+          source: path.join(sourceDir, "characters_pixel"),
+          target: path.join(assetsPixelDir, "characters_pixel"),
+        },
+        // Icons
+        {
+          source: path.join(sourceDir, "icons_pixel"),
+          target: path.join(assetsPixelDir, "icons_pixel"),
+        },
+        // Sounds
+        {
+          source: path.join(sourceDir, "sounds_pixel"),
+          target: path.join(assetsPixelDir, "sounds_pixel"),
+        },
+      ];
+
+      // Track total files copied for reporting
+      let totalFilesCopied = 0;
+
+      // Copy files for each directory mapping
+      for (const mapping of directoryMappings) {
+        try {
+          // Check if source directory exists
+          const exists = await fs.pathExists(mapping.source);
+          if (!exists) {
+            console.log(
+              chalk.yellow(`Source directory not found: ${mapping.source}`),
+            );
+            continue;
+          }
+
+          // Get list of files in the source directory
+          const files = await fs.readdir(mapping.source);
+
+          // Copy each file to the target directory
+          for (const file of files) {
+            const sourcePath = path.join(mapping.source, file);
+            const targetPath = path.join(mapping.target, file);
+
+            // Check if source is a file (not a directory)
+            const stats = await fs.stat(sourcePath);
+            if (stats.isFile()) {
+              await fs.copy(sourcePath, targetPath, { overwrite: true });
+              totalFilesCopied++;
+              console.log(chalk.green(`Copied: ${file} to ${mapping.target}`));
+            } else if (stats.isDirectory()) {
+              // Handle subdirectories if needed
+              await fs.copy(sourcePath, path.join(mapping.target, file), {
+                overwrite: true,
+              });
+              console.log(
+                chalk.green(`Copied directory: ${file} to ${mapping.target}`),
+              );
+
+              // Count files in subdirectory
+              const subFiles = await fs.readdir(sourcePath);
+              totalFilesCopied += subFiles.length;
+            }
+          }
+        } catch (error) {
+          console.error(
+            chalk.red(`Error copying files from ${mapping.source}: ${error}`),
+          );
+        }
+      }
 
       console.log(
-        chalk.green("Pixel art visualization files created successfully."),
+        chalk.green(
+          `Successfully copied ${totalFilesCopied} pixel art assets.`,
+        ),
       );
     } catch (error) {
-      console.error("Error creating pixel art visualization files:", error);
+      console.error(chalk.red("Error copying pixel art assets:", error));
+      throw error; // Re-throw to allow calling function to handle the error
     }
   }
 
@@ -489,7 +619,7 @@ export class VisualizationManager {
 
       console.log(
         chalk.green(
-          `Enhanced blockchain visualization server running at http://localhost:${this.port}/`,
+          `Blockchain visualization server running at http://localhost:${this.port}/`,
         ),
       );
 

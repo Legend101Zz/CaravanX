@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>BlockCraft: The Living Ledger</title>
+        <link rel="stylesheet" href="styles/minecraft-style.css" />
+        <link rel="stylesheet" href="styles/blockchain.css" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r132/three.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r132/examples/js/controls/PointerLockControls.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js"></script>
+    </head>
+    <body>
+        <div class="loading-screen" id="loading-screen">
+            <h1>BlockCraft: The Living Ledger</h1>
+            <div class="loading-container">
+                <div class="loading-bar">
+                    <div class="progress" id="loading-progress"></div>
+                </div>
+            </div>
+            <p id="loading-message">Loading blockchain world...</p>
+        </div>
+
+        <div class="game-container" id="game-container">
+            <!-- Game canvas will be inserted here -->
+        </div>
+
+        <div class="crosshair" id="crosshair"></div>
+
+        <div class="stats-panel hud-element" id="stats-panel">
+            <h3>BLOCKCHAIN</h3>
+            <div>
+                Blocks: <span class="stat-value" id="block-count">0</span>
+            </div>
+            <div>
+                Transactions: <span class="stat-value" id="tx-count">0</span>
+            </div>
+            <div>
+                Mempool: <span class="stat-value" id="mempool-size">0</span>
+            </div>
+            <div>
+                BTC:
+                <span class="stat-value" id="bitcoin-balance">0.00000000</span>
+            </div>
+        </div>
+
+        <div class="hotbar hud-element" id="hotbar">
+            <div class="hotbar-slot selected" data-tool="pickaxe">
+                <img src="assets/items/pickaxe.png" alt="Pickaxe" />
+                <div class="item-hint">Mine Blocks</div>
+            </div>
+            <div class="hotbar-slot" data-tool="shovel">
+                <img src="assets/items/shovel.png" alt="Shovel" />
+                <div class="item-hint">Clear Area</div>
+            </div>
+            <div class="hotbar-slot" data-tool="signkey">
+                <img src="assets/items/signkey.png" alt="Signing Key" />
+                <div class="item-hint">Sign Transactions</div>
+            </div>
+            <div class="hotbar-slot" data-tool="verifier">
+                <img src="assets/items/verifier.png" alt="Verifier" />
+                <div class="item-hint">Verify Blocks</div>
+            </div>
+            <div class="hotbar-slot" data-tool="compass">
+                <img src="assets/items/compass.png" alt="Compass" />
+                <div class="item-hint">Block Explorer</div>
+            </div>
+        </div>
+
+        <button id="view-toggle" class="view-toggle">
+            Switch to Standard View
+        </button>
+
+        <!-- Load basic engine files -->
+        <script src="js/voxel-engine.js"></script>
+        <script src="js/character-system.js"></script>
+
+        <!-- Load enhanced blockchain system files -->
+        <script src="js/world/BlockchainWorld.js"></script>
+
+        <!-- Integration with blockchain data -->
+        <script src="js/blockchain-game-integration.js"></script>
+        <script>
+            // Main entry point
+            document.addEventListener("DOMContentLoaded", () => {
+                // Start loading process
+                let loadingProgress = 0;
+                const loadingInterval = setInterval(() => {
+                    loadingProgress += 5;
+                    if (loadingProgress >= 100) {
+                        clearInterval(loadingInterval);
+                        startGame();
+                    }
+                    document.getElementById("loading-progress").style.width =
+                        `${loadingProgress}%`;
+                }, 200);
+
+                // Function to start the game
+                function startGame() {
+                    // Hide loading screen
+                    document.getElementById("loading-screen").style.display =
+                        "none";
+
+                    // Initialize voxel engine
+                    const gameContainer =
+                        document.getElementById("game-container");
+                    const blockchainWorld = new BlockchainWorld(gameContainer);
+                    console.log("blockchainWorld", blockchainWorld);
+                    // Generate the enhanced world
+                    blockchainWorld.generateWorld();
+
+                    // Start the simulation
+                    blockchainWorld.start();
+
+                    // Set up hotbar selection
+                    const hotbarSlots =
+                        document.querySelectorAll(".hotbar-slot");
+                    hotbarSlots.forEach((slot) => {
+                        slot.addEventListener("click", () => {
+                            // Remove selected class from all slots
+                            hotbarSlots.forEach((s) =>
+                                s.classList.remove("selected"),
+                            );
+
+                            // Add selected class to clicked slot
+                            slot.classList.add("selected");
+
+                            // Set current tool
+                            blockchainWorld.setCurrentTool(slot.dataset.tool);
+                        });
+                    });
+
+                    // Set up view toggle
+                    document
+                        .getElementById("view-toggle")
+                        .addEventListener("click", () => {
+                            window.location.href = "index.html";
+                        });
+
+                    // Set up keyboard number keys for hotbar
+                    document.addEventListener("keydown", (e) => {
+                        const key = parseInt(e.key);
+                        if (
+                            !isNaN(key) &&
+                            key >= 1 &&
+                            key <= hotbarSlots.length
+                        ) {
+                            // Trigger click on that hotbar slot
+                            hotbarSlots[key - 1].click();
+                        }
+
+                        // E key for interaction
+                        if (e.key === "e" || e.key === "E") {
+                            blockchainWorld.interact();
+                        }
+
+                        // I key for inventory
+                        if (e.key === "i" || e.key === "I") {
+                            blockchainWorld.toggleInventory();
+                        }
+
+                        // Q key for quests
+                        if (e.key === "q" || e.key === "Q") {
+                            blockchainWorld.toggleQuests();
+                        }
+
+                        // M key for mining
+                        if (e.key === "m" || e.key === "M") {
+                            blockchainWorld.toggleMining();
+                        }
+
+                        // T key for transactions
+                        if (e.key === "t" || e.key === "T") {
+                            blockchainWorld.createTransaction();
+                        }
+
+                        // WASD keys for movement
+                        if (
+                            ["w", "a", "s", "d", "W", "A", "S", "D"].includes(
+                                e.key,
+                            )
+                        ) {
+                            const key = e.key.toLowerCase();
+                            if (key === "w")
+                                blockchainWorld.engine.keyStates.moveForward = true;
+                            if (key === "a")
+                                blockchainWorld.engine.keyStates.moveLeft = true;
+                            if (key === "s")
+                                blockchainWorld.engine.keyStates.moveBackward = true;
+                            if (key === "d")
+                                blockchainWorld.engine.keyStates.moveRight = true;
+                        }
+
+                        // Space for jump
+                        if (e.key === " ") {
+                            blockchainWorld.engine.keyStates.jump = true;
+                        }
+                    });
+
+                    // Handle key up events
+                    document.addEventListener("keyup", (e) => {
+                        const key = e.key.toLowerCase();
+                        if (key === "w")
+                            blockchainWorld.engine.keyStates.moveForward = false;
+                        if (key === "a")
+                            blockchainWorld.engine.keyStates.moveLeft = false;
+                        if (key === "s")
+                            blockchainWorld.engine.keyStates.moveBackward = false;
+                        if (key === "d")
+                            blockchainWorld.engine.keyStates.moveRight = false;
+                        if (e.key === " ")
+                            blockchainWorld.engine.keyStates.jump = false;
+                    });
+
+                    console.log(
+                        "Enhanced BlockCraft: The Living Ledger started successfully!",
+                    );
+                }
+            });
+        </script>
+    </body>
+</html>
