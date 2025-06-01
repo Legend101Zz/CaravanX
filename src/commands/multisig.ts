@@ -637,7 +637,7 @@ export class MultisigCommands {
       );
 
       // Find watcher wallet name
-      let watcherWalletName = `${selectedWallet.name.replace(/\\s+/g, "_").toLowerCase()}_watch`;
+      let watcherWalletName = `${selectedWallet.name.replace(/\\s+/g, "_").toLowerCase()}_watcher`;
 
       // Check if watcher wallet exists
       const bitcoinWallets = await this.bitcoinService.listWallets();
