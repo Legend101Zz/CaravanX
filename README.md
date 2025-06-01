@@ -41,7 +41,7 @@ A terminal-based utility for managing Caravan multisig wallets in regtest mode. 
 
 ## Prerequisites
 
-- Node.js v14 or later
+- Node.js v22 or later
 - Bitcoin Core running in regtest mode
 - Caravan (optional, for UI-based multisig wallet management)
 
@@ -55,10 +55,6 @@ Install globally using npm:
 npm install -g caravan-x
 ```
 
-## Requirements
-
-- Node.js 22 or later
-- Bitcoin Core running in regtest mode
 
 ## Quick Start
 
