@@ -45,7 +45,34 @@ A terminal-based utility for managing Caravan multisig wallets in regtest mode. 
 - Bitcoin Core running in regtest mode
 - Caravan (optional, for UI-based multisig wallet management)
 
+
+
 ## Installation
+
+Install globally using npm:
+
+```bash
+npm install -g caravan-x
+```
+
+## Requirements
+
+- Node.js 22 or later
+- Bitcoin Core running in regtest mode
+
+## Quick Start
+
+1. Make sure Bitcoin Core is running in regtest mode
+2. Run the command:
+
+```bash
+caravan-x
+```
+
+This will start the interactive menu interface.
+
+
+## Installation for development
 
 1. Clone the repository:
    ```
@@ -81,32 +108,9 @@ npm start
 Or if you've linked it globally:
 
 ```
-caravan-regtest
+caravan-x
 ```
 
-### CLI Commands
-
-You can also use direct commands:
-
-```
-# List all wallets
-caravan-regtest list-wallets
-
-# Create a new wallet
-caravan-regtest create-wallet
-
-# Create a new Caravan multisig wallet
-caravan-regtest create-caravan
-
-# Fund a wallet with regtest coins
-caravan-regtest fund-wallet --wallet <wallet-name>
-
-# Create a new PSBT
-caravan-regtest create-psbt
-
-# Sign a PSBT with a wallet
-caravan-regtest sign-psbt --file <psbt-file> --wallet <wallet-name>
-```
 
 ## Configuration
 
@@ -115,6 +119,43 @@ The default configuration is stored in `~/.caravan-regtest/config.json`. You can
 - Bitcoin Core RPC connection settings
 - Directory paths for Caravan wallet configurations
 - Key storage locations
+
+
+## Command Line Usage
+
+You can also use various commands directly:
+
+```bash
+# List all wallets
+caravan-x list-wallets
+
+# Create a new wallet
+caravan-x create-wallet
+
+# List Caravan wallets
+caravan-x list-caravan
+
+# Create a new Caravan multisig wallet
+caravan-x create-caravan
+
+# Fund a wallet with regtest coins
+caravan-x fund-wallet --wallet <wallet-name>
+
+# Create a new PSBT
+caravan-x create-psbt
+
+# Sign a PSBT with a wallet
+caravan-x sign-psbt --file <psbt-file> --wallet <wallet-name>
+
+# Mine blocks
+caravan-x mine --blocks 10 --wallet mywallet
+
+# Start blockchain visualization
+caravan-x start-visualization
+```
+
+Run `caravan-x --help` to see all available commands.
+
 
 ## Development
 

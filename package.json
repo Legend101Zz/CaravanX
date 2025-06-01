@@ -3,16 +3,22 @@
   "version": "1.0.0",
   "description": "A terminal-based utility for managing Caravan multisig wallets in regtest mode. This tool simplifies development and testing with Caravan by providing an easy-to-use interface",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
-    "caravan-regtest": "dist/cli.js"
+    "caravan-x": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
-    "start": "ts-node src/index.ts",
+    "build": "tsc && node scripts/build.js",
+    "start": "node dist/cli.js",
     "dev": "ts-node-dev --respawn src/index.ts",
     "lint": "eslint src/**/*.ts",
     "test": "jest",
-    "prepare": "npm run build"
+    "prepublishOnly": "npm run build",
+    "postinstall": "echo 'Thank you for installing Caravan-X! Run caravan-x to get started.'"
+  },
+  "engines": {
+    "node": ">=v22.14.0",
+    "npm": ">=10.9.2"
   },
   "repository": {
     "type": "git",

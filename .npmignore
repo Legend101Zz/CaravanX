@@ -1,0 +1,29 @@
+# Source files
+src/
+
+# TypeScript configs
+tsconfig.json
+
+# Development files
+.git/
+.github/
+.gitignore
+.vscode/
+node_modules/
+
+# Test files
+tests/
+*.test.ts
+*.spec.ts
+
+# Documentation files
+docs/
+*.md
+!README.md
+
+# Asset source files
+assets/
+
+# Others
+.DS_Store
+*.log
