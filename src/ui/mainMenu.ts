@@ -95,6 +95,12 @@ export class MainMenu {
       //   value: "configure-keys",
       // },
 
+      {
+        name: "🧪 Create Test Wallets (Privacy Levels)",
+        value: "create-test-wallets",
+        description:
+          "Create test multisig wallets with different privacy levels",
+      },
       { name: colors.muted("Back to main menu"), value: "back" },
     ],
     transactions: [
@@ -476,6 +482,9 @@ export class MainMenu {
           break;
         case "fund-caravan":
           await this.app.multisigCommands.fundCaravanWallet();
+          break;
+        case "create-test-wallets":
+          await this.app.multisigCommands.createTestMultisigWallets();
           break;
 
         // Transactions

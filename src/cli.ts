@@ -418,6 +418,70 @@ program
     }
   });
 
+program
+  .command("create-test-wallets")
+  .description("Create test multisig wallets with different privacy levels")
+  .option(
+    "-n, --name <name>",
+    "Base name for test wallets",
+    "test_privacy_wallet",
+  )
+  .option("-t, --tx-count <count>", "Number of test transactions", "10")
+  .option("-m, --required <m>", "Required signatures (M in M-of-N)", "1")
+  .option("-s, --total <n>", "Total signers (N in M-of-N)", "2")
+  .option(
+    "-p, --privacy <level>",
+    "Privacy level: good, moderate, bad, or all",
+    "all",
+  )
+  .option(
+    "-a, --address-type <type>",
+    "Address type: p2wsh, p2sh-p2wsh, p2sh",
+    "p2wsh",
+  )
+  .action(async (options) => {
+    const spinner = ora("Initializing...").start();
+    const app = new CaravanRegtestManager();
+    spinner.succeed("Initialized");
+
+    try {
+      // Validate privacy level
+      const validPrivacyLevels = ["good", "moderate", "bad", "all"];
+      if (!validPrivacyLevels.includes(options.privacy.toLowerCase())) {
+        console.error(formatError(`Invalid privacy level: ${options.privacy}`));
+        console.log(formatWarning("Valid options: good, moderate, bad, all"));
+        return;
+      }
+
+      // Validate address type
+      const addressTypeMap: { [key: string]: any } = {
+        p2wsh: "P2WSH",
+        "p2sh-p2wsh": "P2SH_P2WSH",
+        p2sh: "P2SH",
+      };
+
+      if (!addressTypeMap[options.addressType.toLowerCase()]) {
+        console.error(
+          formatError(`Invalid address type: ${options.addressType}`),
+        );
+        console.log(formatWarning("Valid options: p2wsh, p2sh-p2wsh, p2sh"));
+        return;
+      }
+
+      // Call the method with CLI options
+      await app.multisigCommands.createTestMultisigWalletsWithOptions({
+        baseName: options.name,
+        privacyLevel: options.privacy.toLowerCase(),
+        addressType: addressTypeMap[options.addressType.toLowerCase()],
+        requiredSigners: parseInt(options.required),
+        totalSigners: parseInt(options.total),
+        transactionCount: parseInt(options.txCount),
+      });
+    } catch (error) {
+      console.error(formatError("Error creating test wallets:"), error);
+    }
+  });
+
 // Blockchain info command
 program
   .command("blockchain-info")
