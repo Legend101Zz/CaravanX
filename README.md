@@ -72,8 +72,8 @@ This will start the interactive menu interface.
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/caravan-regtest-manager.git
-   cd caravan-regtest-manager
+   git clone https://github.com/yourusername/CaravanX.git
+   cd CaravanX
    ```
 
 2. Install dependencies:
