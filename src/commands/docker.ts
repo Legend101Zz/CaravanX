@@ -35,9 +35,18 @@ export class DockerCommands {
       message: "What would you like to do?",
       choices: [
         { name: "📊 Container Status", value: "status" },
+        {
+          name: "🚀 Complete Setup (Container + Nginx + Wallet)",
+          value: "complete_setup",
+        },
+        { name: "🧪 Test Connection", value: "test_connection" },
+        { name: "📡 Show Connection Info", value: "connection_info" },
+        { name: "📡 Show Connection Info", value: "connection_info" },
         { name: "▶️  Start Container", value: "start" },
         { name: "⏸️  Stop Container", value: "stop" },
         { name: "🔄 Restart Container", value: "restart" },
+        { name: "🌐 Setup Nginx Proxy", value: "nginx" },
+        { name: "💼 Create Watch-Only Wallet", value: "wallet" },
         { name: "🗑️  Remove Container", value: "remove" },
         { name: "📜 View Logs", value: "logs" },
         { name: "🐚 Open Shell", value: "shell" },
@@ -48,6 +57,25 @@ export class DockerCommands {
 
     try {
       switch (action) {
+        case "complete_setup":
+          await this.dockerService.completeSetup();
+          break;
+        case "test_connection":
+          await this.dockerService.testConnection();
+          break;
+        case "connection_info":
+          await this.dockerService.displayConnectionInfo();
+          break;
+        case "nginx":
+          await this.dockerService.setupNginxProxy();
+          break;
+        case "wallet":
+          const walletName = await input({
+            message: "Enter wallet name:",
+            default: "caravan_watcher",
+          });
+          await this.dockerService.createWatchOnlyWallet(walletName);
+          break;
         case "status":
           await this.showStatus();
           break;
@@ -85,7 +113,6 @@ export class DockerCommands {
       await this.displayDockerError(error);
     }
 
-    // Show menu again unless user chose back
     if (action !== "back") {
       await input({ message: "\nPress Enter to continue..." });
       await this.showDockerMenu();

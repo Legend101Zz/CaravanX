@@ -190,6 +190,8 @@ export class SetupWizard {
       }
     }
 
+    console.log(chalk.white("\n📋 Docker Configuration:\n"));
+
     // Configure Docker settings
     const containerName = await input({
       message: "Docker container name:",
@@ -206,21 +208,47 @@ export class SetupWizard {
       default: DEFAULT_DOCKER_CONFIG.ports.p2p,
     });
 
+    console.log(chalk.white("\n🔐 RPC Authentication:\n"));
+    console.log(
+      chalk.dim("These credentials will be used to connect to Bitcoin Core\n"),
+    );
+
     const rpcUser = await input({
       message: "RPC username:",
-      default: "user",
+      default: "caravan_user",
+      validate: (input) => input.length > 0 || "Username cannot be empty",
     });
 
     const rpcPassword = await input({
       message: "RPC password:",
-      default: "pass",
+      default: "caravan_pass",
+      validate: (input) => input.length > 0 || "Password cannot be empty",
+    });
+
+    console.log(chalk.white("\n💼 Wallet Configuration:\n"));
+    console.log(chalk.dim("A watch-only wallet will be created for Caravan\n"));
+
+    const walletName = await input({
+      message: "Watch-only wallet name:",
+      default: "caravan_watcher",
+      validate: (input) => {
+        if (input.length === 0) return "Wallet name cannot be empty";
+        if (!/^[a-zA-Z0-9_]+$/.test(input))
+          return "Only alphanumeric and underscore allowed";
+        return true;
+      },
+    });
+
+    const preGenerateBlocks = await confirm({
+      message: "Generate 101 initial blocks? (Needed for spending)",
+      default: true,
     });
 
     // Create shared config
     const sharedConfig: SharedConfig = {
       version: "1.0.0",
       name: "default",
-      description: "Default Caravan-X Docker configuration",
+      description: "Caravan-X Docker configuration",
       mode: SetupMode.DOCKER,
       bitcoin: {
         network: "regtest",
@@ -239,7 +267,7 @@ export class SetupWizard {
       },
       initialState: {
         blockHeight: 101,
-        preGenerateBlocks: true,
+        preGenerateBlocks,
         wallets: [],
         transactions: [],
       },
@@ -249,15 +277,16 @@ export class SetupWizard {
         autoStart: false,
       },
       nginx: {
-        enabled: false,
+        enabled: true,
         port: 8080,
         proxyRpc: true,
-        proxyCoordinator: true,
+        proxyCoordinator: false,
       },
       snapshots: {
         enabled: true,
         autoSnapshot: false,
       },
+      walletName, // Store wallet name in config
     };
 
     // Create enhanced config
@@ -266,8 +295,8 @@ export class SetupWizard {
       sharedConfig,
       bitcoin: {
         protocol: "http",
-        host: "127.0.0.1",
-        port: rpcPort!,
+        host: "localhost",
+        port: 8080, // Use nginx proxy port
         user: rpcUser,
         pass: rpcPassword,
         dataDir: path.join(this.appDir, "bitcoin-data"),

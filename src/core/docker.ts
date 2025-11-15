@@ -36,6 +36,8 @@ interface PortCheckResult {
 export class DockerService {
   private config: DockerConfig;
   private dataDir: string;
+  private rpcUser: string = "user";
+  private rpcPassword: string = "pass";
 
   constructor(config: DockerConfig, dataDir: string) {
     this.config = config;
@@ -67,29 +69,31 @@ export class DockerService {
   }
 
   /**
+   * Check if a port is in use
+   */
+  async isPortInUse(port: number): Promise<boolean> {
+    try {
+      const { stdout } = await execAsync(
+        `lsof -i :${port} 2>/dev/null || netstat -an 2>/dev/null | grep ${port} || true`,
+      );
+      return stdout.trim().length > 0;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
    * Check if ports are available
    */
   async checkPortsAvailable(): Promise<PortCheckResult> {
     const conflicts: string[] = [];
 
-    try {
-      // Check RPC port
-      const rpcCheck = await execAsync(
-        `lsof -i :${this.config.ports.rpc} || netstat -an | grep ${this.config.ports.rpc} || true`,
-      );
-      if (rpcCheck.stdout.trim()) {
-        conflicts.push(`Port ${this.config.ports.rpc} (RPC) is already in use`);
-      }
+    if (await this.isPortInUse(this.config.ports.rpc)) {
+      conflicts.push(`Port ${this.config.ports.rpc} (RPC) is already in use`);
+    }
 
-      // Check P2P port
-      const p2pCheck = await execAsync(
-        `lsof -i :${this.config.ports.p2p} || netstat -an | grep ${this.config.ports.p2p} || true`,
-      );
-      if (p2pCheck.stdout.trim()) {
-        conflicts.push(`Port ${this.config.ports.p2p} (P2P) is already in use`);
-      }
-    } catch (error) {
-      // If commands fail, assume ports are available
+    if (await this.isPortInUse(this.config.ports.p2p)) {
+      conflicts.push(`Port ${this.config.ports.p2p} (P2P) is already in use`);
     }
 
     return {
@@ -135,229 +139,7 @@ export class DockerService {
     try {
       await execAsync(`docker network inspect ${this.config.network}`);
     } catch (error) {
-      // Network doesn't exist, create it
       await execAsync(`docker network create ${this.config.network}`);
-    }
-  }
-
-  /**
-   * Setup nginx proxy for Docker container
-   */
-  async setupNginxProxy(): Promise<void> {
-    const spinner = ora("Setting up nginx proxy...").start();
-
-    try {
-      // Check if nginx is already running
-      const { stdout: nginxContainers } = await execAsync(
-        "docker ps -a --filter name=caravan-x-nginx --format '{{.ID}}'",
-      );
-
-      if (nginxContainers.trim()) {
-        spinner.info("Nginx proxy already exists");
-        return;
-      }
-
-      // Create nginx config
-      const nginxConfig = this.generateNginxConfig();
-      const nginxConfigDir = path.join(this.dataDir, "nginx");
-      await fs.ensureDir(nginxConfigDir);
-      await fs.writeFile(path.join(nginxConfigDir, "nginx.conf"), nginxConfig);
-
-      // Start nginx container
-      const nginxCommand = `docker run -d \
-        --name caravan-x-nginx \
-        --network ${this.config.network} \
-        -p 8080:8080 \
-        -v "${nginxConfigDir}/nginx.conf":/etc/nginx/nginx.conf:ro \
-        nginx:alpine`;
-
-      await execAsync(nginxCommand.replace(/\s+/g, " "));
-
-      spinner.succeed("Nginx proxy started on http://localhost:8080");
-    } catch (error: any) {
-      spinner.fail("Failed to setup nginx proxy");
-      console.error(
-        chalk.yellow(
-          "Warning: Nginx setup failed, but you can still use direct connection",
-        ),
-      );
-      console.error(chalk.dim(error.message));
-    }
-  }
-
-  /**
-   * Generate nginx configuration
-   */
-  private generateNginxConfig(): string {
-    return `
-  events {
-      worker_connections 1024;
-  }
-
-  http {
-      upstream bitcoin_regtest {
-          server ${this.config.containerName}:${this.config.ports.rpc};
-      }
-
-      server {
-          listen 8080;
-          server_name regtest.localhost localhost;
-
-          location / {
-              proxy_pass http://bitcoin_regtest;
-              proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-              # CORS headers for Caravan
-              add_header 'Access-Control-Allow-Origin' '*' always;
-              add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
-              add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
-              add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
-
-              if ($request_method = 'OPTIONS') {
-                  return 204;
-              }
-          }
-      }
-  }
-  `.trim();
-  }
-
-  /**
-   * Create watch-only wallet for Caravan
-   */
-  async createWatchOnlyWallet(
-    walletName: string = "caravan_watcher",
-  ): Promise<void> {
-    const spinner = ora(`Creating watch-only wallet: ${walletName}...`).start();
-
-    try {
-      // Check if wallet already exists
-      const wallets = await this.execBitcoinCli("listwallets");
-      if (wallets.includes(walletName)) {
-        spinner.info(`Wallet "${walletName}" already exists`);
-        return;
-      }
-
-      // Create watch-only wallet
-      await this.execBitcoinCli(
-        `createwallet "${walletName}" true true "" false false false`,
-      );
-
-      spinner.succeed(`Watch-only wallet "${walletName}" created`);
-    } catch (error: any) {
-      spinner.fail("Failed to create watch-only wallet");
-      throw error;
-    }
-  }
-
-  /**
-   * Get Bitcoin Core info for display
-   */
-  async getBitcoinInfo(): Promise<{
-    blocks: number;
-    chain: string;
-    wallets: string[];
-  }> {
-    try {
-      const info = JSON.parse(await this.execBitcoinCli("getblockchaininfo"));
-      const walletsStr = await this.execBitcoinCli("listwallets");
-      const wallets = JSON.parse(walletsStr);
-
-      return {
-        blocks: info.blocks,
-        chain: info.chain,
-        wallets: wallets,
-      };
-    } catch (error) {
-      throw new Error("Failed to get Bitcoin info");
-    }
-  }
-
-  /**
-   * Complete setup - Start container, nginx, and create wallet
-   */
-  async completeSetup(sharedConfig?: SharedConfig): Promise<void> {
-    console.log(chalk.bold.cyan("\n🚀 Complete Docker Setup\n"));
-
-    // Start Bitcoin Core container
-    await this.startContainer(sharedConfig);
-
-    // Setup nginx proxy
-    await this.setupNginxProxy();
-
-    // Create watch-only wallet
-    await this.createWatchOnlyWallet("caravan_watcher");
-
-    // Display connection info
-    await this.displayConnectionInfo();
-  }
-
-  /**
-   * Display connection information for Caravan
-   */
-  async displayConnectionInfo(): Promise<void> {
-    try {
-      const info = await this.getBitcoinInfo();
-
-      console.log(chalk.bold.green("\n✅ Setup Complete! Ready for Caravan\n"));
-
-      console.log(
-        chalk.bold.cyan("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
-      );
-      console.log(chalk.bold.white("\n📡 Connection Settings for Caravan:\n"));
-      console.log(chalk.cyan("  Protocol:       ") + chalk.white("http"));
-      console.log(chalk.cyan("  Host:           ") + chalk.white("localhost"));
-      console.log(chalk.cyan("  Port:           ") + chalk.white("8080"));
-      console.log(chalk.cyan("  Network:        ") + chalk.white("regtest"));
-      console.log(
-        chalk.cyan("  Wallet Name:    ") + chalk.white("caravan_watcher"),
-      );
-
-      console.log(chalk.bold.white("\n🔐 RPC Authentication:\n"));
-      console.log(
-        chalk.cyan("  Username:       ") +
-          chalk.white(this.config.ports.rpc === 18443 ? "user" : "user"),
-      );
-      console.log(chalk.cyan("  Password:       ") + chalk.white("pass"));
-
-      console.log(chalk.bold.white("\n📊 Current Status:\n"));
-      console.log(chalk.cyan("  Chain:          ") + chalk.white(info.chain));
-      console.log(chalk.cyan("  Blocks:         ") + chalk.white(info.blocks));
-      console.log(
-        chalk.cyan("  Wallets:        ") +
-          chalk.white(info.wallets.join(", ") || "none"),
-      );
-
-      console.log(chalk.bold.white("\n🌐 Access URLs:\n"));
-      console.log(
-        chalk.cyan("  Via Proxy:      ") + chalk.white("http://localhost:8080"),
-      );
-      console.log(
-        chalk.cyan("  Direct RPC:     ") +
-          chalk.white(`http://localhost:${this.config.ports.rpc}`),
-      );
-
-      console.log(
-        chalk.bold.cyan(
-          "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n",
-        ),
-      );
-
-      console.log(chalk.bold.yellow("📝 Next Steps:\n"));
-      console.log(
-        chalk.white("  1. Open Caravan: ") +
-          chalk.cyan("https://caravanmultisig.com"),
-      );
-      console.log(chalk.white("  2. Settings → Bitcoin Network → Custom"));
-      console.log(chalk.white("  3. Enter the connection settings above"));
-      console.log(chalk.white("  4. Create/Import your multisig wallet"));
-      console.log(
-        chalk.white("  5. Click 'Import Addresses' to watch your wallet\n"),
-      );
-    } catch (error: any) {
-      console.error(chalk.red("Error getting connection info:"), error.message);
     }
   }
 
@@ -370,6 +152,10 @@ export class DockerService {
       rpcPassword: "pass",
       rpcPort: 18443,
     };
+
+    // Store credentials for later use
+    this.rpcUser = config.rpcUser;
+    this.rpcPassword = config.rpcPassword;
 
     return `
 # Bitcoin Core Configuration for Caravan-X Regtest
@@ -403,12 +189,58 @@ port=${this.config.ports.p2p}
   }
 
   /**
+   * Generate nginx configuration
+   */
+  private generateNginxConfig(rpcPort: number): string {
+    return `
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream bitcoin_regtest {
+        server ${this.config.containerName}:${rpcPort};
+    }
+
+    server {
+        listen 8080;
+        server_name regtest.localhost localhost;
+
+        location / {
+            proxy_pass http://bitcoin_regtest;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_http_version 1.1;
+
+            # CORS headers for Caravan
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
+            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' '*';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+            }
+        }
+    }
+}
+`.trim();
+  }
+
+  /**
    * Start Bitcoin Core container with beautiful progress UI
    */
   async startContainer(sharedConfig?: SharedConfig): Promise<void> {
     console.log(chalk.bold.cyan("\n🚀 Starting Bitcoin Core Container\n"));
 
-    // Create multi-bar progress
     const multibar = new cliProgress.MultiBar(
       {
         clearOnComplete: false,
@@ -428,9 +260,7 @@ port=${this.config.ports.p2p}
       const dockerAvailable = await this.checkDockerAvailable();
       if (!dockerAvailable) {
         multibar.stop();
-        throw new Error(
-          "Docker is not installed or not running. Please install Docker first.",
-        );
+        throw new Error("Docker is not installed or not running");
       }
       mainProgress.update(10, { status: "Docker OK ✓" });
 
@@ -442,15 +272,24 @@ port=${this.config.ports.p2p}
       // Step 3: Check Ports (30%)
       mainProgress.update(25, { status: "Checking ports..." });
       const portStatus = await this.checkPortsAvailable();
-      if (portStatus.conflicts.length > 0) {
+      try {
+        await this.checkAndCleanupPorts();
+        mainProgress.update(30, { status: "Ports available ✓" });
+      } catch (error: any) {
         multibar.stop();
-        const conflictError = new Error(
-          `Port conflict detected:\n${portStatus.conflicts.join("\n")}`,
+
+        // Show detailed error
+        console.error(chalk.red("\n❌ Port Conflict Error\n"));
+        console.error(chalk.white(error.message));
+        console.error(chalk.yellow("\n💡 Solutions:"));
+        console.error(chalk.dim("  1. Manually stop the conflicting process"));
+        console.error(chalk.dim("  2. Change the ports in your config"));
+        console.error(
+          chalk.dim("  3. Use Docker Management → Troubleshoot Port Issues\n"),
         );
-        conflictError.name = "PortConflictError";
-        throw conflictError;
+
+        throw error;
       }
-      mainProgress.update(30, { status: "Ports available ✓" });
 
       // Step 4: Setup Network (40%)
       mainProgress.update(35, { status: "Setting up network..." });
@@ -482,7 +321,6 @@ port=${this.config.ports.p2p}
           );
           return;
         } else {
-          // Remove old container
           mainProgress.update(58, { status: "Removing old container..." });
           await execAsync(`docker rm ${this.config.containerName}`);
         }
@@ -494,50 +332,36 @@ port=${this.config.ports.p2p}
 
       let dockerCommand = `docker run -d --name ${this.config.containerName}`;
 
-      // Add platform flag for ARM64 systems (Apple Silicon)
       if (arch.includes("arm64") || arch.includes("aarch64")) {
         dockerCommand += ` --platform linux/amd64`;
       }
 
-      // Add network and ports
       dockerCommand += ` --network ${this.config.network}`;
       dockerCommand += ` -p ${this.config.ports.rpc}:${this.config.ports.rpc}`;
       dockerCommand += ` -p ${this.config.ports.p2p}:${this.config.ports.p2p}`;
-
-      // Add volume with proper quoting for paths with spaces
       dockerCommand += ` -v "${bitcoinDataDir}":/bitcoin/.bitcoin`;
-
-      // Add image
       dockerCommand += ` ${this.config.image}`;
-
-      // CRITICAL: Add -regtest flag to run in regtest mode!
       dockerCommand += ` -regtest -conf=/bitcoin/.bitcoin/bitcoin.conf`;
 
       await execAsync(dockerCommand);
       mainProgress.update(70, { status: "Container created ✓" });
 
       // Step 8: Wait for Container to Start (75%)
-      mainProgress.update(72, { status: "Waiting for container to start..." });
+      mainProgress.update(72, { status: "Waiting for container..." });
       await new Promise((resolve) => setTimeout(resolve, 3000));
 
-      // Check if container is still running
       const newStatus = await this.getContainerStatus();
       if (!newStatus.running) {
         multibar.stop();
-
         const logs = await this.getLogs(50);
         console.error("\n" + chalk.red("❌ Container failed to start!"));
-        console.error(chalk.yellow("\n📜 Container logs:"));
         console.error(chalk.dim(logs));
-
-        throw new Error(
-          "Bitcoin Core container stopped immediately after starting. Check the logs above for details.",
-        );
+        throw new Error("Container stopped immediately after starting");
       }
       mainProgress.update(75, { status: "Container running ✓" });
 
       // Step 9: Wait for RPC (90%)
-      mainProgress.update(78, { status: "Waiting for RPC to be ready..." });
+      mainProgress.update(78, { status: "Waiting for RPC..." });
       await this.waitForRpcReady(multibar, mainProgress);
       mainProgress.update(90, { status: "RPC ready ✓" });
 
@@ -553,31 +377,7 @@ port=${this.config.ports.p2p}
       mainProgress.update(100, { status: "Complete ✓" });
 
       multibar.stop();
-
-      console.log(
-        chalk.bold.green("\n✅ Bitcoin Core container started successfully!\n"),
-      );
-      console.log(
-        chalk.cyan("  📡 RPC Port:"),
-        chalk.white(this.config.ports.rpc),
-      );
-      console.log(
-        chalk.cyan("  🌐 P2P Port:"),
-        chalk.white(this.config.ports.p2p),
-      );
-      console.log(
-        chalk.cyan("  🔗 Network:"),
-        chalk.white(this.config.network),
-      );
-      console.log(chalk.cyan("  📂 Data Dir:"), chalk.white(bitcoinDataDir));
-
-      if (sharedConfig?.initialState.preGenerateBlocks) {
-        console.log(
-          chalk.cyan("  📦 Blocks:"),
-          chalk.white(sharedConfig.initialState.blockHeight),
-        );
-      }
-      console.log();
+      console.log(chalk.bold.green("\n✅ Bitcoin Core container started!\n"));
     } catch (error: any) {
       multibar.stop();
       throw error;
@@ -585,54 +385,43 @@ port=${this.config.ports.p2p}
   }
 
   /**
-   * Wait for RPC to be ready with progress updates
+   * Wait for RPC to be ready
    */
   private async waitForRpcReady(
     multibar: cliProgress.MultiBar,
     mainProgress: cliProgress.SingleBar,
     maxAttempts = 60,
   ): Promise<void> {
-    // Initial wait for container to fully start
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     for (let i = 0; i < maxAttempts; i++) {
       try {
-        // Check if container is still running
         const status = await this.getContainerStatus();
         if (!status.running) {
-          throw new Error(
-            "Container stopped unexpectedly. Check logs with:\n" +
-              `docker logs ${this.config.containerName}`,
-          );
+          throw new Error("Container stopped unexpectedly");
         }
 
-        // Try to call RPC
         await this.execBitcoinCli("getblockchaininfo");
-        return; // Success!
+        return;
       } catch (error: any) {
-        // Update progress
         const progress = 78 + (i / maxAttempts) * 12;
         mainProgress.update(progress, {
           status: `Waiting for RPC (${i + 1}/${maxAttempts})...`,
         });
 
         if (i === maxAttempts - 1) {
-          // Last attempt failed
           throw new Error(
-            `Bitcoin Core RPC did not become ready after ${maxAttempts} attempts.\n` +
-              `This might indicate a configuration issue.\n` +
-              `Check logs with: docker logs ${this.config.containerName}`,
+            `RPC did not become ready after ${maxAttempts} attempts`,
           );
         }
 
-        // Wait 1 second before trying again
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
   }
 
   /**
-   * Generate initial blocks with progress
+   * Generate initial blocks
    */
   private async generateInitialBlocks(
     targetHeight: number,
@@ -640,17 +429,14 @@ port=${this.config.ports.p2p}
     mainProgress: cliProgress.SingleBar,
   ): Promise<void> {
     try {
-      // Create a temporary wallet for mining
       mainProgress.update(93, { status: "Creating mining wallet..." });
       await this.execBitcoinCli('createwallet "mining_wallet"');
 
-      // Get a mining address
       mainProgress.update(95, { status: "Getting mining address..." });
       const address = await this.execBitcoinCli(
         "-rpcwallet=mining_wallet getnewaddress",
       );
 
-      // Generate blocks
       mainProgress.update(97, {
         status: `Generating ${targetHeight} blocks...`,
       });
@@ -658,32 +444,467 @@ port=${this.config.ports.p2p}
         `-rpcwallet=mining_wallet generatetoaddress ${targetHeight} ${address.trim()}`,
       );
     } catch (error: any) {
-      console.error(
-        chalk.yellow("\n⚠️  Warning: Could not generate initial blocks"),
-      );
+      console.error(chalk.yellow("\n⚠️  Could not generate initial blocks"));
       console.error(chalk.dim(error.message));
-      // Don't throw - this is not critical
     }
   }
 
   /**
-   * Stop Bitcoin Core container
+   * Setup nginx proxy
    */
-  async stopContainer(): Promise<void> {
-    const spinner = ora("Stopping Bitcoin Core container...").start();
+  /**
+   * Setup nginx proxy
+   */
+  async setupNginxProxy(
+    sharedConfig?: SharedConfig,
+    force: boolean = false,
+  ): Promise<void> {
+    const spinner = ora("Setting up nginx proxy...").start();
 
     try {
-      const status = await this.getContainerStatus();
+      // Check if nginx container exists
+      const { stdout: nginxContainers } = await execAsync(
+        "docker ps -a --filter name=caravan-x-nginx --format '{{.ID}}'",
+      );
 
-      if (!status.running) {
-        spinner.info("Bitcoin Core container is not running");
+      if (nginxContainers.trim() && !force) {
+        // Check if running
+        const { stdout: runningStatus } = await execAsync(
+          "docker ps --filter name=caravan-x-nginx --format '{{.Status}}'",
+        );
+
+        if (runningStatus.trim()) {
+          spinner.succeed("Nginx proxy already running");
+          return;
+        } else {
+          // Start existing container
+          spinner.text = "Starting nginx proxy...";
+          await execAsync("docker start caravan-x-nginx");
+          spinner.succeed("Nginx proxy started");
+          return;
+        }
+      }
+
+      // Remove old container if exists
+      if (nginxContainers.trim()) {
+        spinner.text = "Removing old nginx container...";
+        await execAsync("docker rm -f caravan-x-nginx 2>/dev/null || true");
+      }
+
+      // Create new nginx setup
+      const rpcPort = sharedConfig?.bitcoin.rpcPort || 18443;
+      const nginxConfigDir = path.join(this.dataDir, "nginx");
+      await fs.ensureDir(nginxConfigDir);
+
+      const nginxConfig = this.generateNginxConfig(rpcPort);
+      await fs.writeFile(path.join(nginxConfigDir, "nginx.conf"), nginxConfig);
+
+      spinner.text = "Creating nginx container...";
+
+      // Start nginx container with proper network connection
+      const nginxCommand = `docker run -d \
+         --name caravan-x-nginx \
+         --network ${this.config.network} \
+         -p 8080:8080 \
+         -v "${nginxConfigDir}/nginx.conf":/etc/nginx/nginx.conf:ro \
+         nginx:alpine`;
+
+      await execAsync(nginxCommand.replace(/\s+/g, " "));
+
+      // Wait for nginx to start
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      spinner.succeed("Nginx proxy started on http://localhost:8080");
+    } catch (error: any) {
+      spinner.fail("Failed to setup nginx proxy");
+      throw error;
+    }
+  }
+  /**
+   * Create watch-only wallet
+   */
+  async createWatchOnlyWallet(walletName: string): Promise<void> {
+    const spinner = ora(`Creating watch-only wallet: ${walletName}...`).start();
+
+    try {
+      // Check if wallet exists
+      const wallets = await this.execBitcoinCli("listwallets");
+      if (wallets.includes(walletName)) {
+        spinner.info(`Wallet "${walletName}" already exists`);
         return;
       }
 
-      await execAsync(`docker stop ${this.config.containerName}`);
-      spinner.succeed("Bitcoin Core container stopped");
+      // Create watch-only wallet
+      // Parameters: wallet_name, disable_private_keys, blank, passphrase, avoid_reuse, descriptors, load_on_startup
+      await this.execBitcoinCli(
+        `createwallet "${walletName}" true true "" false true true`,
+      );
+
+      spinner.succeed(`Watch-only wallet "${walletName}" created`);
     } catch (error: any) {
-      spinner.fail("Failed to stop Bitcoin Core container");
+      spinner.fail("Failed to create watch-only wallet");
+      throw error;
+    }
+  }
+
+  /**
+   * Test RPC connection
+   */
+  async testConnection(
+    host: string = "localhost",
+    port: number = 8080,
+  ): Promise<boolean> {
+    const spinner = ora("Testing connection...").start();
+
+    try {
+      const axios = require("axios");
+      const response = await axios.post(
+        `http://${host}:${port}`,
+        {
+          jsonrpc: "1.0",
+          id: "test",
+          method: "getblockchaininfo",
+          params: [],
+        },
+        {
+          auth: {
+            username: this.rpcUser,
+            password: this.rpcPassword,
+          },
+          timeout: 5000,
+        },
+      );
+
+      if (response.data && response.data.result) {
+        spinner.succeed(chalk.green("Connection successful!"));
+        console.log(
+          chalk.cyan("  Chain:"),
+          chalk.white(response.data.result.chain),
+        );
+        console.log(
+          chalk.cyan("  Blocks:"),
+          chalk.white(response.data.result.blocks),
+        );
+        return true;
+      } else {
+        spinner.fail("Unexpected response from Bitcoin Core");
+        return false;
+      }
+    } catch (error: any) {
+      spinner.fail("Connection failed");
+      console.error(chalk.red("  Error:"), error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Get Bitcoin info
+   */
+  async getBitcoinInfo(): Promise<{
+    blocks: number;
+    chain: string;
+    wallets: string[];
+  }> {
+    const info = JSON.parse(await this.execBitcoinCli("getblockchaininfo"));
+    const walletsStr = await this.execBitcoinCli("listwallets");
+    const wallets = JSON.parse(walletsStr);
+
+    return {
+      blocks: info.blocks,
+      chain: info.chain,
+      wallets: wallets,
+    };
+  }
+
+  /**
+   * Complete setup - Container + Nginx + Wallet
+   */
+  /**
+   * Complete setup - Container + Nginx + Wallet
+   */
+  /**
+   * Complete setup - Container + Nginx + Wallet
+   */
+  async completeSetup(sharedConfig?: SharedConfig): Promise<void> {
+    console.log(chalk.bold.cyan("\n🚀 Complete Docker Setup\n"));
+
+    try {
+      // First cleanup any conflicts
+      console.log(chalk.cyan("🔍 Checking for port conflicts...\n"));
+      await this.checkAndCleanupPorts();
+
+      // Start Bitcoin Core
+      await this.startContainer(sharedConfig);
+
+      // IMPORTANT: Restart nginx to ensure proper connection
+      console.log();
+      const spinner = ora("Ensuring nginx connection...").start();
+      try {
+        // Stop nginx if running
+        await execAsync("docker stop caravan-x-nginx 2>/dev/null || true");
+        await execAsync("docker rm caravan-x-nginx 2>/dev/null || true");
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        spinner.text = "Setting up nginx proxy...";
+      } catch (e) {}
+      spinner.stop();
+
+      // Setup nginx proxy (fresh start)
+      await this.setupNginxProxy(sharedConfig);
+
+      // Wait for nginx to be ready
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Create watch-only wallet
+      const walletName = sharedConfig?.walletName || "caravan_watcher";
+      await this.createWatchOnlyWallet(walletName);
+
+      // Test connection
+      console.log();
+      const connected = await this.testConnection();
+
+      if (!connected) {
+        console.log(
+          chalk.yellow(
+            "\n⚠️  Connection test failed, but containers are running",
+          ),
+        );
+        console.log(chalk.dim("You can test manually with:"));
+        console.log(
+          chalk.cyan(`  curl -u ${this.rpcUser}:${this.rpcPassword} \\`),
+        );
+        console.log(
+          chalk.cyan(
+            `    -d '{"jsonrpc":"1.0","method":"getblockchaininfo","params":[]}' \\`,
+          ),
+        );
+        console.log(chalk.cyan(`    http://localhost:8080\n`));
+      }
+
+      // Display connection info
+      await this.displayConnectionInfo(sharedConfig);
+    } catch (error: any) {
+      console.error(chalk.red("\n❌ Setup failed:"), error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Find what's using a port
+   */
+  async findPortUser(port: number): Promise<{
+    type: "docker" | "system" | "unknown";
+    containerId?: string;
+    containerName?: string;
+    pid?: number;
+  }> {
+    try {
+      // Check if it's a Docker container
+      const { stdout: dockerCheck } = await execAsync(
+        `docker ps --format "{{.ID}}|{{.Names}}|{{.Ports}}" | grep ":${port}"`,
+      );
+
+      if (dockerCheck.trim()) {
+        const [containerId, containerName] = dockerCheck.trim().split("|");
+        return {
+          type: "docker",
+          containerId: containerId.trim(),
+          containerName: containerName.trim(),
+        };
+      }
+
+      // Check system process
+      const { stdout: processCheck } = await execAsync(
+        `lsof -i :${port} -t 2>/dev/null || netstat -anp 2>/dev/null | grep ${port} | awk '{print $7}' | cut -d'/' -f1 || echo ""`,
+      );
+
+      if (processCheck.trim()) {
+        return {
+          type: "system",
+          pid: parseInt(processCheck.trim()),
+        };
+      }
+
+      return { type: "unknown" };
+    } catch (error) {
+      return { type: "unknown" };
+    }
+  }
+
+  /**
+   * Clean up port conflicts automatically
+   */
+  async cleanupPortConflicts(): Promise<void> {
+    const spinner = ora("Cleaning up port conflicts...").start();
+
+    try {
+      const portsToCheck = [this.config.ports.rpc, this.config.ports.p2p];
+      const conflicts: Array<{ port: number; info: any }> = [];
+
+      // Find all conflicts
+      for (const port of portsToCheck) {
+        if (await this.isPortInUse(port)) {
+          const info = await this.findPortUser(port);
+          conflicts.push({ port, info });
+        }
+      }
+
+      if (conflicts.length === 0) {
+        spinner.succeed("No port conflicts found");
+        return;
+      }
+
+      // Handle Docker container conflicts
+      const dockerConflicts = conflicts.filter((c) => c.info.type === "docker");
+      if (dockerConflicts.length > 0) {
+        spinner.text = "Stopping conflicting Docker containers...";
+
+        for (const conflict of dockerConflicts) {
+          const { containerId, containerName } = conflict.info;
+
+          console.log(
+            chalk.yellow(
+              `\n  Stopping container: ${containerName} (${containerId})`,
+            ),
+          );
+
+          try {
+            await execAsync(`docker stop ${containerId}`);
+            await execAsync(`docker rm ${containerId}`);
+            console.log(chalk.green(`  ✓ Removed ${containerName}`));
+          } catch (err) {
+            console.log(chalk.red(`  ✗ Failed to remove ${containerName}`));
+          }
+        }
+      }
+
+      // Handle system process conflicts
+      const systemConflicts = conflicts.filter((c) => c.info.type === "system");
+      if (systemConflicts.length > 0) {
+        spinner.warn("Some ports are used by system processes");
+
+        for (const conflict of systemConflicts) {
+          console.log(
+            chalk.yellow(
+              `\n  Port ${conflict.port} is used by PID ${conflict.info.pid}`,
+            ),
+          );
+        }
+
+        spinner.fail("Cannot auto-cleanup system processes");
+        throw new Error(
+          "Please manually stop the processes using ports: " +
+            systemConflicts.map((c) => c.port).join(", "),
+        );
+      }
+
+      // Wait a moment for ports to be released
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      spinner.succeed("Port conflicts cleaned up");
+    } catch (error: any) {
+      spinner.fail("Failed to cleanup port conflicts");
+      throw error;
+    }
+  }
+
+  /**
+   * Check and cleanup ports before starting
+   */
+  async checkAndCleanupPorts(): Promise<void> {
+    const portStatus = await this.checkPortsAvailable();
+
+    if (portStatus.conflicts.length > 0) {
+      console.log(chalk.yellow("\n⚠️  Port conflicts detected:"));
+      portStatus.conflicts.forEach((conflict) => {
+        console.log(chalk.dim(`  • ${conflict}`));
+      });
+
+      console.log(chalk.cyan("\n🔧 Attempting automatic cleanup...\n"));
+      await this.cleanupPortConflicts();
+
+      // Verify cleanup worked
+      const recheckStatus = await this.checkPortsAvailable();
+      if (recheckStatus.conflicts.length > 0) {
+        throw new Error(
+          "Port conflicts remain after cleanup:\n" +
+            recheckStatus.conflicts.join("\n"),
+        );
+      }
+
+      console.log(chalk.green("✓ All ports are now available\n"));
+    }
+  }
+
+  /**
+   * Display connection information
+   */
+  async displayConnectionInfo(sharedConfig?: SharedConfig): Promise<void> {
+    try {
+      const info = await this.getBitcoinInfo();
+      const walletName = sharedConfig?.walletName || "caravan_watcher";
+
+      console.log(chalk.bold.green("\n✅ Setup Complete! Ready for Caravan\n"));
+      console.log(chalk.bold.cyan("━".repeat(70)));
+      console.log(chalk.bold.white("\n📡 Connection Settings for Caravan:\n"));
+      console.log(
+        chalk.cyan("  URL:            ") + chalk.white("http://localhost:8080"),
+      );
+      console.log(chalk.cyan("  Username:       ") + chalk.white(this.rpcUser));
+      console.log(
+        chalk.cyan("  Password:       ") + chalk.white(this.rpcPassword),
+      );
+      console.log(chalk.cyan("  Wallet Name:    ") + chalk.white(walletName));
+
+      console.log(chalk.bold.white("\n📊 Current Status:\n"));
+      console.log(chalk.cyan("  Chain:          ") + chalk.white(info.chain));
+      console.log(chalk.cyan("  Blocks:         ") + chalk.white(info.blocks));
+      console.log(
+        chalk.cyan("  Wallets:        ") +
+          chalk.white(info.wallets.join(", ") || "none"),
+      );
+
+      console.log(chalk.bold.cyan("\n━".repeat(70)));
+      console.log(
+        chalk.bold.yellow(
+          "\n📝 Connect from Local Caravan (http://localhost:5173):\n",
+        ),
+      );
+      console.log(chalk.white("  1. Navigate to Wallet Settings"));
+      console.log(chalk.white("  2. Choose 'Private' → 'Custom'"));
+      console.log(chalk.white("  3. Enter connection details:"));
+      console.log(
+        chalk.cyan("     URL:         ") + chalk.white("http://localhost:8080"),
+      );
+      console.log(chalk.cyan("     Username:    ") + chalk.white(this.rpcUser));
+      console.log(
+        chalk.cyan("     Password:    ") + chalk.white(this.rpcPassword),
+      );
+      console.log(chalk.cyan("     Wallet Name: ") + chalk.white(walletName));
+      console.log(chalk.white("  4. Click 'Test Connection'"));
+      console.log(chalk.white("  5. Create/Import multisig wallet"));
+      console.log(
+        chalk.white("  6. Click 'Import Addresses' to watch wallet\n"),
+      );
+    } catch (error: any) {
+      console.error(chalk.red("Error getting info:"), error.message);
+    }
+  }
+
+  /**
+   * Stop container
+   */
+  async stopContainer(): Promise<void> {
+    const spinner = ora("Stopping Bitcoin Core...").start();
+    try {
+      const status = await this.getContainerStatus();
+      if (!status.running) {
+        spinner.info("Container not running");
+        return;
+      }
+      await execAsync(`docker stop ${this.config.containerName}`);
+      spinner.succeed("Container stopped");
+    } catch (error: any) {
+      spinner.fail("Failed to stop container");
       throw error;
     }
   }
@@ -692,72 +913,41 @@ port=${this.config.ports.p2p}
    * Restart container
    */
   async restartContainer(): Promise<void> {
-    const spinner = ora("Restarting Bitcoin Core container...").start();
-
+    const spinner = ora("Restarting Bitcoin Core...").start();
     try {
       await execAsync(`docker restart ${this.config.containerName}`);
-
-      // Wait for RPC to be ready
-      spinner.text = "Waiting for Bitcoin Core to be ready...";
-
-      // Simple wait without multibar for restart
-      await this.waitForRpcReadySimple();
-
-      spinner.succeed("Bitcoin Core container restarted");
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      spinner.succeed("Container restarted");
     } catch (error: any) {
-      spinner.fail("Failed to restart Bitcoin Core container");
+      spinner.fail("Failed to restart");
       throw error;
     }
   }
 
   /**
-   * Simple RPC wait (for restart operations)
-   */
-  private async waitForRpcReadySimple(maxAttempts = 60): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    for (let i = 0; i < maxAttempts; i++) {
-      try {
-        await this.execBitcoinCli("getblockchaininfo");
-        return;
-      } catch (error) {
-        if (i === maxAttempts - 1) {
-          throw new Error("Bitcoin Core RPC did not become ready in time");
-        }
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    }
-  }
-
-  /**
-   * Remove Bitcoin Core container
+   * Remove container
    */
   async removeContainer(): Promise<void> {
-    const spinner = ora("Removing Bitcoin Core container...").start();
-
+    const spinner = ora("Removing container...").start();
     try {
       const status = await this.getContainerStatus();
-
       if (!status.containerId) {
-        spinner.info("Bitcoin Core container does not exist");
+        spinner.info("Container does not exist");
         return;
       }
-
-      // Stop if running
       if (status.running) {
         await execAsync(`docker stop ${this.config.containerName}`);
       }
-
       await execAsync(`docker rm ${this.config.containerName}`);
-      spinner.succeed("Bitcoin Core container removed");
+      spinner.succeed("Container removed");
     } catch (error: any) {
-      spinner.fail("Failed to remove Bitcoin Core container");
+      spinner.fail("Failed to remove container");
       throw error;
     }
   }
 
   /**
-   * Execute bitcoin-cli command in container
+   * Execute bitcoin-cli command
    */
   async execBitcoinCli(command: string): Promise<string> {
     try {
@@ -766,12 +956,12 @@ port=${this.config.ports.p2p}
       );
       return stdout.trim();
     } catch (error: any) {
-      throw new Error(`Bitcoin CLI command failed: ${error.message}`);
+      throw new Error(`Bitcoin CLI failed: ${error.message}`);
     }
   }
 
   /**
-   * Get container logs
+   * Get logs
    */
   async getLogs(tail = 100): Promise<string> {
     try {
@@ -780,16 +970,16 @@ port=${this.config.ports.p2p}
       );
       return stdout;
     } catch (error: any) {
-      throw new Error(`Failed to get container logs: ${error.message}`);
+      throw new Error(`Failed to get logs: ${error.message}`);
     }
   }
 
   /**
-   * Open a shell in the container
+   * Open shell
    */
   async openShell(): Promise<void> {
-    console.log(chalk.cyan("\n🐚 Opening shell in Bitcoin Core container..."));
-    console.log(chalk.yellow("Type 'exit' to return to Caravan-X\n"));
+    console.log(chalk.cyan("\n🐚 Opening shell..."));
+    console.log(chalk.yellow("Type 'exit' to return\n"));
 
     const shell = spawn(
       "docker",
@@ -799,11 +989,9 @@ port=${this.config.ports.p2p}
 
     return new Promise((resolve, reject) => {
       shell.on("close", (code) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`Shell exited with code ${code}`));
-        }
+        code === 0
+          ? resolve()
+          : reject(new Error(`Shell exited with code ${code}`));
       });
     });
   }

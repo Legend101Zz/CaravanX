@@ -9,6 +9,7 @@ import ora from "ora";
 import { DockerCommands } from "../commands/docker";
 import { SnapshotCommands } from "../commands/snapshot";
 import { ScenarioCommands } from "../commands/scenario";
+import { SettingsCommands } from "../commands/settings";
 
 // Define a consistent color scheme
 const colors = {
@@ -32,6 +33,7 @@ export class MainMenu {
   private dockerCommands?: DockerCommands;
   private snapshotCommands: SnapshotCommands;
   private scenarioCommands: ScenarioCommands;
+  private settingsCommands: SettingsCommands;
 
   // Menu categories
   private readonly mainMenuCategories = [
@@ -44,6 +46,7 @@ export class MainMenu {
     { name: colors.header("📸 Snapshots"), value: "snapshots" },
     { name: colors.header("🎬 Test Scenarios"), value: "scenarios" },
     { name: colors.header("⚙️ System"), value: "system" },
+    { name: "⚙️  Settings", value: "settings" },
     { name: colors.header("❓ Help"), value: "help" },
     { name: colors.header("🚪 Exit"), value: "exit" },
   ];
@@ -185,6 +188,9 @@ export class MainMenu {
     }
     this.snapshotCommands = new SnapshotCommands(app.snapshotService);
     this.scenarioCommands = new ScenarioCommands(app.scenarioService);
+    this.settingsCommands = new SettingsCommands(
+      app.configManager.getConfig().appDir,
+    );
   }
 
   /**

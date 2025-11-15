@@ -183,13 +183,15 @@ export interface SharedConfig {
   snapshots?: {
     enabled: boolean;
     autoSnapshot: boolean;
-    snapshotInterval?: number; // in minutes
+    snapshotInterval?: number;
   };
 
   // Test scenarios to include
   scenarios?: string[];
-}
 
+  // Watch-only wallet name
+  walletName?: string; //
+}
 /**
  * Extended app configuration
  */

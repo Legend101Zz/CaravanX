@@ -148,6 +148,9 @@ export class CaravanRegtestManager {
   /**
    * Start the application
    */
+  /**
+   * Start the application
+   */
   async start(): Promise<void> {
     // Check if this is first-time setup
     const isFirstTime = await this.setupWizard.isFirstTimeSetup();
@@ -161,8 +164,6 @@ export class CaravanRegtestManager {
 
       if (runSetup) {
         this.enhancedConfig = await this.setupWizard.run();
-
-        // Reinitialize services with new config
         await this.reinitializeWithConfig(this.enhancedConfig);
       }
     }
@@ -172,75 +173,250 @@ export class CaravanRegtestManager {
       this.enhancedConfig = await this.loadEnhancedConfig();
     }
 
-    // Initialize Docker service if in Docker mode
-    if (this.enhancedConfig?.mode === "docker" && this.enhancedConfig.docker) {
+    // CRITICAL: Determine which mode we're in and configure accordingly
+    const isDockerMode = this.enhancedConfig?.mode === "docker";
+
+    if (isDockerMode && this.enhancedConfig?.docker) {
+      // === DOCKER MODE ===
+      console.log(chalk.cyan("\n🐳 Initializing Docker mode...\n"));
+
       this.dockerService = new DockerService(
         this.enhancedConfig.docker,
         this.enhancedConfig.appDir,
       );
-    }
 
-    console.log(chalk.bold.cyan("\n=== Caravan-X ==="));
+      // Check if Docker container is running
+      const dockerStatus = await this.dockerService.getContainerStatus();
 
-    // Check if Bitcoin Core is running
-    let bitcoinCoreRunning = await this.checkBitcoinCore();
+      if (dockerStatus.running) {
+        console.log(chalk.green("✓ Docker container is running\n"));
 
-    if (!bitcoinCoreRunning && this.dockerService) {
-      // Try to start Docker container
-      console.log(
-        chalk.yellow(
-          "\nBitcoin Core not running. Starting Docker container...",
-        ),
-      );
-      try {
-        await this.dockerService.startContainer(
-          this.enhancedConfig?.sharedConfig,
+        // Configure RPC client for Docker (via nginx proxy)
+        const dockerRpcConfig = {
+          protocol: "http",
+          host: "localhost",
+          port: 8080, // nginx proxy
+          user: this.enhancedConfig.sharedConfig?.bitcoin.rpcUser || "user",
+          pass: this.enhancedConfig.sharedConfig?.bitcoin.rpcPassword || "pass",
+          dataDir: path.join(this.enhancedConfig.appDir, "bitcoin-data"), // Docker data dir
+        };
+
+        // Reinitialize EVERYTHING with Docker settings
+        this.bitcoinRpcClient = new BitcoinRpcClient(dockerRpcConfig);
+        this.bitcoinService = new BitcoinService(this.bitcoinRpcClient, true);
+        this.caravanService = new CaravanService(
+          this.bitcoinRpcClient,
+          this.enhancedConfig.caravanDir,
+          this.enhancedConfig.keysDir,
         );
-        bitcoinCoreRunning = await this.checkBitcoinCore();
-      } catch (error: any) {
+        this.transactionService = new TransactionService(
+          this.bitcoinRpcClient,
+          true,
+        );
+
+        // Update command modules with new services
+        this.walletCommands = new WalletCommands(this.bitcoinService);
+        this.multisigCommands = new MultisigCommands(
+          this.caravanService,
+          this.bitcoinService,
+          this.bitcoinRpcClient,
+          this.transactionService,
+        );
+        this.transactionCommands = new TransactionCommands(
+          this.transactionService,
+          this.caravanService,
+          this.bitcoinService,
+        );
+
         console.log(
-          chalk.red("Failed to start Docker container:", error.message),
+          chalk.dim("Using Docker connection: http://localhost:8080\n"),
         );
+      } else {
+        console.log(chalk.yellow("⚠️  Docker container not running\n"));
+
+        const startDocker = await confirm({
+          message: "Start complete Docker setup (Container + Nginx + Wallet)?",
+          default: true,
+        });
+
+        if (startDocker) {
+          try {
+            await this.dockerService.completeSetup(
+              this.enhancedConfig?.sharedConfig,
+            );
+
+            // After successful setup, configure RPC client
+            const dockerRpcConfig = {
+              protocol: "http",
+              host: "localhost",
+              port: 8080,
+              user: this.enhancedConfig.sharedConfig?.bitcoin.rpcUser || "user",
+              pass:
+                this.enhancedConfig.sharedConfig?.bitcoin.rpcPassword || "pass",
+              dataDir: path.join(this.enhancedConfig.appDir, "bitcoin-data"),
+            };
+
+            // Reinitialize all services
+            this.bitcoinRpcClient = new BitcoinRpcClient(dockerRpcConfig);
+            this.bitcoinService = new BitcoinService(
+              this.bitcoinRpcClient,
+              true,
+            );
+            this.caravanService = new CaravanService(
+              this.bitcoinRpcClient,
+              this.enhancedConfig.caravanDir,
+              this.enhancedConfig.keysDir,
+            );
+            this.transactionService = new TransactionService(
+              this.bitcoinRpcClient,
+              true,
+            );
+
+            // Update command modules
+            this.walletCommands = new WalletCommands(this.bitcoinService);
+            this.multisigCommands = new MultisigCommands(
+              this.caravanService,
+              this.bitcoinService,
+              this.bitcoinRpcClient,
+              this.transactionService,
+            );
+            this.transactionCommands = new TransactionCommands(
+              this.transactionService,
+              this.caravanService,
+              this.bitcoinService,
+            );
+          } catch (error: any) {
+            console.log(chalk.red("Failed to start Docker:", error.message));
+          }
+        }
       }
+    } else {
+      // === MANUAL MODE ===
+      console.log(chalk.yellow("\n🔧 Using Manual mode\n"));
+      console.log(chalk.dim("Connecting to existing Bitcoin Core node...\n"));
+
+      // Already initialized with manual config in constructor
+      // No changes needed - use existing configuration
     }
+
+    // Display header with current configuration
+    this.displayHeader();
+
+    // Check if Bitcoin Core is accessible
+    const bitcoinCoreRunning = await this.checkBitcoinCore();
 
     if (!bitcoinCoreRunning) {
-      console.log(chalk.red("\nERROR: Could not connect to Bitcoin Core."));
-      console.log(
-        chalk.yellow(
-          "Please make sure Bitcoin Core is running in regtest mode.",
-        ),
-      );
-      console.log(
-        chalk.yellow(
-          "You may need to update your RPC settings in the config file.",
-        ),
-      );
+      console.log(chalk.red("\n❌ Could not connect to Bitcoin Core\n"));
 
-      const config = this.configManager.getConfig();
-      console.log(chalk.cyan("\nCurrent RPC settings:"));
-      console.log(
-        `URL: ${config.bitcoin.protocol}://${config.bitcoin.host}:${config.bitcoin.port}`,
-      );
-      console.log(`User: ${config.bitcoin.user}`);
-      console.log(`Data Directory: ${config.bitcoin.dataDir}`);
-
-      const setupConfig = await confirm({
-        message:
-          "Would you like to update your Bitcoin Core connection settings?",
-        default: true,
-      });
-
-      if (setupConfig) {
-        await this.setupBitcoinConfig();
-        // Try connecting again
-        bitcoinCoreRunning = await this.checkBitcoinCore();
+      if (isDockerMode && this.dockerService) {
+        console.log(chalk.yellow("Try: Docker Management → Complete Setup\n"));
+      } else {
+        console.log(chalk.yellow("Please start Bitcoin Core manually\n"));
+        this.setupWizard.displayManualModeInstructions();
       }
+    } else {
+      console.log(chalk.green("✓ Connected to Bitcoin Core\n"));
     }
 
     // Start the main menu
     const mainMenu = new MainMenu(this);
     await mainMenu.start();
+  }
+
+  /**
+   * Display header with current configuration
+   */
+  private displayHeader(): void {
+    const config = this.enhancedConfig || this.configManager.getConfig();
+
+    console.log(chalk.bold.cyan("\n=== Caravan-X ==="));
+
+    if (this.enhancedConfig?.mode === "docker") {
+      console.log(chalk.bold.green("\n🐳 DOCKER MODE"));
+      console.log(chalk.cyan("━".repeat(70)));
+      console.log(chalk.white("Bitcoin RPC Connection:"));
+      console.log(chalk.dim("  Protocol:         ") + chalk.white("http"));
+      console.log(chalk.dim("  Host:             ") + chalk.white("localhost"));
+      console.log(
+        chalk.dim("  Port:             ") +
+          chalk.white("8080") +
+          chalk.dim(" (nginx proxy)"),
+      );
+      console.log(
+        chalk.dim("  Direct Port:      ") +
+          chalk.white(this.enhancedConfig.docker?.ports.rpc || "18448"),
+      );
+      console.log(
+        chalk.dim("  User:             ") +
+          chalk.white(
+            this.enhancedConfig.sharedConfig?.bitcoin.rpcUser || "user",
+          ),
+      );
+      console.log(
+        chalk.dim("  Wallet Name:      ") +
+          chalk.white(
+            this.enhancedConfig.sharedConfig?.walletName || "caravan_watcher",
+          ),
+      );
+
+      console.log(chalk.white("\nDocker Configuration:"));
+      console.log(
+        chalk.dim("  Container:        ") +
+          chalk.white(this.enhancedConfig.docker?.containerName),
+      );
+      console.log(
+        chalk.dim("  Network:          ") +
+          chalk.white(this.enhancedConfig.docker?.network),
+      );
+      console.log(
+        chalk.dim("  Data Directory:   ") +
+          chalk.white(path.join(this.enhancedConfig.appDir, "bitcoin-data")),
+      );
+
+      console.log(chalk.white("\nApplication Directories:"));
+      console.log(
+        chalk.dim("  App Directory:    ") + chalk.white(config.appDir),
+      );
+      console.log(
+        chalk.dim("  Wallets:          ") + chalk.white(config.caravanDir),
+      );
+      console.log(
+        chalk.dim("  Keys:             ") + chalk.white(config.keysDir),
+      );
+      console.log(chalk.cyan("━".repeat(70)));
+    } else {
+      console.log(chalk.bold.yellow("\n🔧 MANUAL MODE"));
+      console.log(chalk.cyan("━".repeat(70)));
+      console.log(chalk.white("Bitcoin RPC Settings:"));
+      console.log(
+        chalk.dim("  Protocol:         ") +
+          chalk.white(config.bitcoin.protocol),
+      );
+      console.log(
+        chalk.dim("  Host:             ") + chalk.white(config.bitcoin.host),
+      );
+      console.log(
+        chalk.dim("  Port:             ") + chalk.white(config.bitcoin.port),
+      );
+      console.log(
+        chalk.dim("  User:             ") + chalk.white(config.bitcoin.user),
+      );
+      console.log(
+        chalk.dim("  Data Directory:   ") + chalk.white(config.bitcoin.dataDir),
+      );
+
+      console.log(chalk.white("\nApplication Directories:"));
+      console.log(
+        chalk.dim("  App Directory:    ") + chalk.white(config.appDir),
+      );
+      console.log(
+        chalk.dim("  Wallets:          ") + chalk.white(config.caravanDir),
+      );
+      console.log(
+        chalk.dim("  Keys:             ") + chalk.white(config.keysDir),
+      );
+      console.log(chalk.cyan("━".repeat(70)));
+    }
   }
 
   /**

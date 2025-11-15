@@ -3,7 +3,7 @@ import * as fs from "fs-extra";
 import { execSync } from "child_process";
 import { BitcoinRpcConfig } from "../types/config";
 import chalk from "chalk";
-
+import path from "path";
 /**
  * Client for communicating with the Bitcoin Core via RPC
  */
@@ -20,6 +20,9 @@ export class BitcoinRpcClient {
 
   /**
    * Call a Bitcoin Core RPC method (Inspired from `@caravan/clients` bitcoind method)
+   */
+  /**
+   * Call a Bitcoin Core RPC method
    */
   async callRpc<T>(
     method: string,
@@ -38,7 +41,7 @@ export class BitcoinRpcClient {
           method,
           params,
         },
-        timeout: 5000,
+        timeout: 10000, // Increased timeout
       };
 
       const response = await axios(requestConfig);
@@ -52,55 +55,87 @@ export class BitcoinRpcClient {
       // More descriptive error message
       if (error.code === "ECONNREFUSED") {
         throw new Error(
-          `Connection refused - Bitcoin Core not running at ${this.baseUrl}`,
+          `Connection refused - Bitcoin Core not running at ${this.baseUrl}\n` +
+            `Check your configuration and ensure Bitcoin Core is accessible.`,
         );
       } else if (error.response && error.response.status === 401) {
         throw new Error(
-          `Authentication failed - Check RPC username and password`,
+          `Authentication failed - Check RPC username (${this.auth.username}) and password`,
+        );
+      } else if (error.response && error.response.status === 502) {
+        throw new Error(
+          `Bad Gateway (502) - Proxy cannot reach Bitcoin Core\n` +
+            `If using Docker mode, ensure containers are running:\n` +
+            `  docker ps | grep caravan-x`,
         );
       } else if (error.message.includes("timeout")) {
-        throw new Error(`Connection timed out - Bitcoin Core not responding`);
+        throw new Error(
+          `Connection timed out - Bitcoin Core not responding at ${this.baseUrl}`,
+        );
       }
 
       // Log the error for debugging
-      console.error(`RPC call failed for method: ${method}`, error.message);
+      console.error(
+        chalk.red(`RPC call failed for method: ${method}`),
+        error.message,
+      );
 
-      // Try fallback method if possible
-      try {
-        if (this.config.dataDir && fs.existsSync(this.config.dataDir)) {
+      // Try fallback method ONLY if dataDir exists and is accessible
+      if (this.config.dataDir && fs.existsSync(this.config.dataDir)) {
+        try {
           const cliCommand = `${method} ${params.map((p) => JSON.stringify(p)).join(" ")}`;
           const result = this.executeCliCommand(cliCommand, wallet);
           return JSON.parse(result) as T;
-        } else {
+        } catch (cliError: any) {
+          // Fallback also failed
           throw new Error(
-            `Specified data directory "${this.config.dataDir}" does not exist.`,
+            `RPC Error: ${error.message}\n` +
+              `Fallback CLI also failed: ${cliError.message}`,
           );
         }
-      } catch (cliError: any) {
-        throw new Error(
-          `${error.message}${cliError.message ? "\n" + cliError.message : ""}`,
-        );
       }
+
+      // No fallback available
+      throw new Error(error.message);
     }
   }
 
   /**
    * Alternative method that uses bitcoin-cli command
-   * Useful as a fallback when the RPC method doesn't work
    */
   executeCliCommand(command: string, wallet?: string): string {
     try {
-      let cliCommand = `bitcoin-cli -conf="${this.config.dataDir}/bitcoin.conf" -datadir="${this.config.dataDir}" -regtest`;
-
-      if (wallet) {
-        cliCommand += ` -rpcwallet=${wallet}`;
+      // Check if dataDir is accessible
+      if (!fs.existsSync(this.config.dataDir)) {
+        throw new Error(
+          `Data directory not accessible: ${this.config.dataDir}`,
+        );
       }
 
-      cliCommand += ` ${command}`;
+      // Check if bitcoin.conf exists
+      const bitcoinConfPath = path.join(this.config.dataDir, "bitcoin.conf");
+      if (!fs.existsSync(bitcoinConfPath)) {
+        throw new Error(`bitcoin.conf not found at: ${bitcoinConfPath}`);
+      }
 
-      return execSync(cliCommand).toString().trim();
+      // Build bitcoin-cli command
+      let cliCmd = `bitcoin-cli -conf="${bitcoinConfPath}" -datadir="${this.config.dataDir}" -regtest`;
+
+      if (wallet) {
+        cliCmd += ` -rpcwallet=${wallet}`;
+      }
+
+      cliCmd += ` ${command}`;
+
+      // Execute the command
+      const result = execSync(cliCmd, {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+
+      return result.trim();
     } catch (error: any) {
-      throw new Error(`Error executing bitcoin-cli command: ${error.message}`);
+      throw new Error(`CLI command failed: ${error.message}`);
     }
   }
 
