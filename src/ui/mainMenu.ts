@@ -6,6 +6,10 @@ import * as fs from "fs-extra";
 import gradient from "gradient-string";
 import ora from "ora";
 
+import { DockerCommands } from "../commands/docker";
+import { SnapshotCommands } from "../commands/snapshot";
+import { ScenarioCommands } from "../commands/scenario";
+
 // Define a consistent color scheme
 const colors = {
   primary: chalk.hex("#F7931A"), // Bitcoin orange
@@ -25,6 +29,9 @@ const colors = {
  */
 export class MainMenu {
   private app: CaravanRegtestManager;
+  private dockerCommands?: DockerCommands;
+  private snapshotCommands: SnapshotCommands;
+  private scenarioCommands: ScenarioCommands;
 
   // Menu categories
   private readonly mainMenuCategories = [
@@ -33,6 +40,9 @@ export class MainMenu {
     { name: colors.header("💸 Transactions"), value: "transactions" },
     { name: colors.header("📜 Blockchain Scripts"), value: "scripts" },
     { name: colors.header("₿ Visualization"), value: "visualization" },
+    { name: colors.header("🐳 Docker Management"), value: "docker" },
+    { name: colors.header("📸 Snapshots"), value: "snapshots" },
+    { name: colors.header("🎬 Test Scenarios"), value: "scenarios" },
     { name: colors.header("⚙️ System"), value: "system" },
     { name: colors.header("❓ Help"), value: "help" },
     { name: colors.header("🚪 Exit"), value: "exit" },
@@ -168,6 +178,13 @@ export class MainMenu {
 
   constructor(app: CaravanRegtestManager) {
     this.app = app;
+
+    // Initialize new command classes
+    if (app.dockerService) {
+      this.dockerCommands = new DockerCommands(app.dockerService);
+    }
+    this.snapshotCommands = new SnapshotCommands(app.snapshotService);
+    this.scenarioCommands = new ScenarioCommands(app.scenarioService);
   }
 
   /**
@@ -345,7 +362,7 @@ export class MainMenu {
     let exit = false;
 
     while (!exit) {
-      console.clear(); // Clear the console before displaying the menu
+      console.clear();
       this.displayLogo();
 
       try {
@@ -370,7 +387,27 @@ export class MainMenu {
           continue;
         }
 
-        // Show submenu for selected category
+        if (category === "docker") {
+          if (this.dockerCommands) {
+            await this.dockerCommands.showDockerMenu();
+          } else {
+            console.log(colors.warning("\nDocker mode is not enabled."));
+            await input({ message: "Press Enter to continue..." });
+          }
+          continue;
+        }
+
+        if (category === "snapshots") {
+          await this.snapshotCommands.showSnapshotMenu();
+          continue;
+        }
+
+        if (category === "scenarios") {
+          await this.scenarioCommands.showScenarioMenu();
+          continue;
+        }
+
+        // Show submenu for selected category (existing categories)
         await this.showSubMenu(category);
       } catch (error) {
         await this.handleError(error, "main menu");

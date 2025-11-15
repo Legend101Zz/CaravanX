@@ -3,15 +3,22 @@ import { BitcoinRpcClient } from "./core/rpc";
 import { BitcoinService } from "./core/bitcoin";
 import { CaravanService } from "./core/caravan";
 import { TransactionService } from "./core/transaction";
+import { DockerService } from "./core/docker";
+import { SnapshotService } from "./core/snapshot";
+import { ScenarioService } from "./core/scenario";
+import { EnhancedAppConfig } from "./types/config";
 import { WalletCommands } from "./commands/wallet";
 import { MultisigCommands } from "./commands/multisig";
 import { TransactionCommands } from "./commands/transaction";
 import { VisualizationCommands } from "./commands/visualizations";
 import { ScriptCommands } from "./commands/scripts";
 import { MainMenu } from "./ui/mainMenu";
+import { SetupWizard } from "./ui/setupWizard";
 
 import { confirm, input, number } from "@inquirer/prompts";
 import chalk from "chalk";
+import path from "path";
+import fs from "fs-extra";
 
 /**
  * Main application class
@@ -29,10 +36,19 @@ export class CaravanRegtestManager {
   public visualizationCommands: VisualizationCommands;
   public scriptCommands: ScriptCommands;
 
+  public setupWizard: SetupWizard;
+  public dockerService?: DockerService;
+  public snapshotService: SnapshotService;
+  public scenarioService: ScenarioService;
+  private enhancedConfig?: EnhancedAppConfig;
+
   constructor() {
     // Initialize configuration
     this.configManager = new ConfigManager();
     const config = this.configManager.getConfig();
+
+    // Check if enhanced config exists
+    this.setupWizard = new SetupWizard(config.appDir);
 
     // Initialize RPC client
     this.bitcoinRpcClient = new BitcoinRpcClient(config.bitcoin);
@@ -48,6 +64,20 @@ export class CaravanRegtestManager {
       this.bitcoinRpcClient,
       true,
     ); // true for regtest mode
+
+    this.snapshotService = new SnapshotService(
+      this.bitcoinRpcClient,
+      path.join(config.appDir, "snapshots"),
+      config.bitcoin.dataDir,
+    );
+
+    this.scenarioService = new ScenarioService(
+      this.bitcoinService,
+      this.caravanService,
+      this.transactionService,
+      this.bitcoinRpcClient,
+      path.join(config.appDir, "scenarios"),
+    );
 
     // Initialize command modules
     this.walletCommands = new WalletCommands(this.bitcoinService);
@@ -119,10 +149,61 @@ export class CaravanRegtestManager {
    * Start the application
    */
   async start(): Promise<void> {
-    console.log(chalk.bold.cyan("\n=== Caravan Regtest Manager ==="));
+    // Check if this is first-time setup
+    const isFirstTime = await this.setupWizard.isFirstTimeSetup();
+
+    if (isFirstTime) {
+      console.log(chalk.cyan("\n🎉 Welcome to Caravan-X!\n"));
+      const runSetup = await confirm({
+        message: "Would you like to run the setup wizard?",
+        default: true,
+      });
+
+      if (runSetup) {
+        this.enhancedConfig = await this.setupWizard.run();
+
+        // Reinitialize services with new config
+        await this.reinitializeWithConfig(this.enhancedConfig);
+      }
+    }
+
+    // Load enhanced config if it exists
+    if (!this.enhancedConfig) {
+      this.enhancedConfig = await this.loadEnhancedConfig();
+    }
+
+    // Initialize Docker service if in Docker mode
+    if (this.enhancedConfig?.mode === "docker" && this.enhancedConfig.docker) {
+      this.dockerService = new DockerService(
+        this.enhancedConfig.docker,
+        this.enhancedConfig.appDir,
+      );
+    }
+
+    console.log(chalk.bold.cyan("\n=== Caravan-X ==="));
 
     // Check if Bitcoin Core is running
     let bitcoinCoreRunning = await this.checkBitcoinCore();
+
+    if (!bitcoinCoreRunning && this.dockerService) {
+      // Try to start Docker container
+      console.log(
+        chalk.yellow(
+          "\nBitcoin Core not running. Starting Docker container...",
+        ),
+      );
+      try {
+        await this.dockerService.startContainer(
+          this.enhancedConfig?.sharedConfig,
+        );
+        bitcoinCoreRunning = await this.checkBitcoinCore();
+      } catch (error: any) {
+        console.log(
+          chalk.red("Failed to start Docker container:", error.message),
+        );
+      }
+    }
+
     if (!bitcoinCoreRunning) {
       console.log(chalk.red("\nERROR: Could not connect to Bitcoin Core."));
       console.log(
@@ -157,22 +238,62 @@ export class CaravanRegtestManager {
       }
     }
 
-    if (!bitcoinCoreRunning) {
-      console.log(
-        chalk.yellow("\nContinuing without Bitcoin Core connection."),
-      );
-      console.log(
-        chalk.yellow("Some features will not be available until connected."),
-      );
-    } else {
-      console.log(
-        chalk.green("\nSuccessfully connected to Bitcoin Core (regtest mode)."),
-      );
-    }
-
     // Start the main menu
     const mainMenu = new MainMenu(this);
     await mainMenu.start();
+  }
+
+  /**
+   * Load enhanced configuration
+   */
+  private async loadEnhancedConfig(): Promise<EnhancedAppConfig | undefined> {
+    try {
+      const config = this.configManager.getConfig();
+      const enhancedConfigPath = path.join(config.appDir, "config.json");
+
+      if (await fs.pathExists(enhancedConfigPath)) {
+        return await fs.readJson(enhancedConfigPath);
+      }
+    } catch (error) {
+      console.error("Error loading enhanced config:", error);
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Reinitialize services with new configuration
+   */
+  private async reinitializeWithConfig(
+    config: EnhancedAppConfig,
+  ): Promise<void> {
+    // Update config manager
+    this.configManager.updateBitcoinConfig({
+      protocol: config.bitcoin.protocol,
+      host: config.bitcoin.host,
+      port: config.bitcoin.port,
+      user: config.bitcoin.user,
+      pass: config.bitcoin.pass,
+      dataDir: config.bitcoin.dataDir,
+    });
+
+    // Reinitialize RPC client
+    this.bitcoinRpcClient = new BitcoinRpcClient(config.bitcoin);
+
+    // Reinitialize services
+    this.bitcoinService = new BitcoinService(this.bitcoinRpcClient, true);
+    this.snapshotService = new SnapshotService(
+      this.bitcoinRpcClient,
+      config.snapshots.directory,
+      config.bitcoin.dataDir,
+    );
+    this.scenarioService = new ScenarioService(
+      this.bitcoinService,
+      this.caravanService,
+      this.transactionService,
+      this.bitcoinRpcClient,
+      config.scenariosDir,
+    );
   }
 
   /**

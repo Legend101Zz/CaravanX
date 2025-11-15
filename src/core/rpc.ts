@@ -252,6 +252,35 @@ export class BitcoinRpcClient {
   }
 
   /**
+   * Sends an amount to a given address.
+   *
+   * This method calls the Bitcoin Core RPC method `sendtoaddress`, which creates a transaction
+   * sending the specified amount to the given address and broadcasts it to the network.
+   *
+   * @param {string} wallet - The wallet to send from.
+   * @param {string} address - The Bitcoin address to send to.
+   * @param {number} amount - The amount in BTC to send.
+   * @param {string} [comment=''] - Optional comment for the transaction.
+   * @param {string} [commentTo=''] - Optional comment about the recipient.
+   * @returns {Promise<string>} A promise that resolves to the transaction ID (txid).
+   *
+   * @see https://developer.bitcoin.org/reference/rpc/sendtoaddress.html
+   */
+  async sendToAddress(
+    wallet: string,
+    address: string,
+    amount: number,
+    comment = "",
+    commentTo = "",
+  ): Promise<string> {
+    return this.callRpc<string>(
+      "sendtoaddress",
+      [address, amount, comment, commentTo],
+      wallet,
+    );
+  }
+
+  /**
    * Imports one or more descriptors into the specified wallet.
    *
    * This method calls the Bitcoin Core RPC method `importdescriptors`, which takes an array

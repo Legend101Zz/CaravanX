@@ -1,6 +1,6 @@
 {
   "name": "caravan-x",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A terminal-based utility for managing Caravan multisig wallets in regtest mode. This tool simplifies development and testing with Caravan by providing an easy-to-use interface",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -55,6 +55,7 @@
   "dependencies": {
     "@caravan/clients": "^0.4.0",
     "@inquirer/prompts": "^7.4.1",
+    "@types/js-yaml": "^4.0.9",
     "ansi-escapes": "^7.0.0",
     "axios": "^1.8.4",
     "bip32": "^5.0.0-rc.0",
@@ -74,6 +75,7 @@
     "fs-extra": "^11.3.0",
     "gradient-string": "^3.0.0",
     "gsap": "^3.12.7",
+    "js-yaml": "^4.1.0",
     "open": "^10.1.1",
     "ora": "^8.2.0",
     "pixi.js": "^8.9.1",
@@ -85,7 +87,8 @@
     "three.js": "^0.77.1",
     "tiny-secp256k1": "^2.2.3",
     "vis-network": "^9.1.9",
-    "vm2": "^3.9.19"
+    "vm2": "^3.9.19",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.1",
