@@ -8,6 +8,7 @@ import chalk from "chalk";
 import boxen from "boxen";
 import figlet from "figlet";
 import ora from "ora";
+import { promisify } from "util";
 import * as fs from "fs-extra";
 import * as path from "path";
 import {
@@ -16,9 +17,11 @@ import {
   EnhancedAppConfig,
   DEFAULT_DOCKER_CONFIG,
   BUILT_IN_SCENARIOS,
+  DockerConfig,
 } from "../types/config";
 import { DockerService } from "../core/docker";
 import { colors } from "../utils/terminal";
+import { execAsync } from "../utils/exec";
 
 export class SetupWizard {
   private appDir: string;
@@ -67,7 +70,7 @@ export class SetupWizard {
       config = await this.setupManualMode();
     }
 
-    // Step 3: Choose initial scenarios (optional)
+    // Step 3: Choose initial scenarios (optional) - ONLY ASKED ONCE HERE
     const includeScenarios = await confirm({
       message: "Would you like to include pre-configured test scenarios?",
       default: true,
@@ -92,7 +95,6 @@ export class SetupWizard {
 
     return config;
   }
-
   /**
    * Display welcome message
    */
@@ -152,47 +154,234 @@ export class SetupWizard {
   /**
    * Setup Docker mode
    */
+  /**
+   * Setup Docker mode configuration
+   */
   private async setupDockerMode(): Promise<EnhancedAppConfig> {
-    console.log(chalk.bold.cyan("\n🐳 Docker Mode Setup\n"));
+    console.log(
+      boxen(
+        chalk.white.bold("🐳 Docker Mode - Local Storage Setup\n\n") +
+          chalk.cyan(
+            "Docker will store blockchain data locally on your machine.\n",
+          ) +
+          chalk.cyan("This includes:\n") +
+          chalk.white("  • Blockchain data (blocks, chainstate)\n") +
+          chalk.white("  • Wallet files\n") +
+          chalk.white("  • Configuration files\n\n") +
+          chalk.yellow("⚠️  Make sure you have sufficient disk space!\n") +
+          chalk.gray("Regtest typically uses < 1GB"),
+        {
+          padding: 1,
+          margin: 1,
+          borderStyle: "round",
+          borderColor: "cyan",
+        },
+      ),
+    );
 
-    // Check if Docker is available
-    const dockerService = new DockerService(DEFAULT_DOCKER_CONFIG, this.appDir);
-    const dockerAvailable = await dockerService.checkDockerAvailable();
+    // Detect platform and suggest appropriate default
+    const isMacOS = process.platform === "darwin";
+    const homeDir = process.env.HOME || "~";
 
-    if (!dockerAvailable) {
+    // Recommend home directory path for Docker compatibility
+    const recommendedPath = path.join(
+      homeDir,
+      ".caravan-x",
+      "docker-data",
+      "bitcoin-data",
+    );
+
+    if (isMacOS) {
       console.log(
         boxen(
-          chalk.yellow.bold("⚠️  Docker Not Found\n\n") +
+          chalk.cyan.bold("🍎 macOS Docker Desktop Note\n\n") +
             chalk.white(
-              "Docker is required for Docker mode but was not detected on your system.\n\n",
+              "For best compatibility, use a path under your home directory.\n",
             ) +
-            chalk.dim("Please install Docker:\n") +
-            chalk.dim(
-              "• macOS/Windows: https://www.docker.com/products/docker-desktop\n",
+            chalk.gray(
+              "Docker Desktop has restricted access to external volumes.\n\n",
             ) +
-            chalk.dim("• Linux: https://docs.docker.com/engine/install/"),
+            chalk.cyan("Recommended: ") +
+            chalk.white(recommendedPath),
           {
             padding: 1,
             margin: 1,
             borderStyle: "round",
-            borderColor: "yellow",
+            borderColor: "cyan",
           },
         ),
       );
+    }
 
-      const continueAnyway = await confirm({
-        message: "Continue anyway? (You can install Docker later)",
-        default: false,
-      });
+    const useCustomLocation = await confirm({
+      message: "Use custom storage location?",
+      default: false,
+    });
 
-      if (!continueAnyway) {
-        process.exit(0);
+    let bitcoinDataDir = recommendedPath;
+
+    if (useCustomLocation) {
+      let validPath = false;
+
+      while (!validPath) {
+        bitcoinDataDir = await input({
+          message: "Enter local directory path for Bitcoin data:",
+          default: recommendedPath,
+          validate: (input) => {
+            if (!input || input.trim().length === 0) {
+              return "Path cannot be empty";
+            }
+            return true;
+          },
+        });
+
+        // Expand tilde and make absolute
+        bitcoinDataDir = bitcoinDataDir.replace(/^~/, homeDir);
+        bitcoinDataDir = path.resolve(bitcoinDataDir);
+
+        // Validate path for macOS Docker
+        if (isMacOS) {
+          const isExternalVolume =
+            bitcoinDataDir.startsWith("/Volumes/") &&
+            !bitcoinDataDir.startsWith("/Volumes/Macintosh HD");
+          const isHomeDirectory = bitcoinDataDir.startsWith(homeDir);
+          const isCommonPath =
+            bitcoinDataDir.startsWith("/Users/") ||
+            bitcoinDataDir.startsWith("/tmp/") ||
+            bitcoinDataDir.startsWith("/private/");
+
+          if (isExternalVolume || (!isHomeDirectory && !isCommonPath)) {
+            console.log(
+              boxen(
+                chalk.yellow.bold("⚠️  Docker Access Warning\n\n") +
+                  chalk.white(
+                    "This path may not be accessible to Docker Desktop.\n",
+                  ) +
+                  chalk.cyan("Path: ") +
+                  chalk.yellow(bitcoinDataDir) +
+                  "\n\n" +
+                  (isExternalVolume
+                    ? chalk.white(
+                        "External drives require File Sharing setup in Docker Desktop.\n\n",
+                      )
+                    : chalk.white(
+                        "This path is outside typical Docker-accessible directories.\n\n",
+                      )) +
+                  chalk.gray("You can either:\n") +
+                  chalk.white("  1. Choose a path under ") +
+                  chalk.cyan(homeDir) +
+                  "\n" +
+                  chalk.white(
+                    "  2. Continue and set up File Sharing later if it fails",
+                  ),
+                {
+                  padding: 1,
+                  margin: 1,
+                  borderStyle: "round",
+                  borderColor: "yellow",
+                },
+              ),
+            );
+
+            const continueAnyway = await confirm({
+              message: "Continue with this path anyway?",
+              default: false,
+            });
+
+            if (!continueAnyway) {
+              continue; // Ask for path again
+            }
+          }
+        }
+
+        validPath = true;
       }
+    }
+
+    console.log(
+      boxen(
+        chalk.white.bold("📁 Storage Configuration\n\n") +
+          chalk.gray("Data will be stored at:\n") +
+          chalk.cyan(bitcoinDataDir) +
+          "\n\n" +
+          chalk.white(
+            "This directory will be mounted into the Docker container",
+          ),
+        {
+          padding: 1,
+          margin: 1,
+          borderStyle: "round",
+          borderColor: "green",
+        },
+      ),
+    );
+
+    const proceed = await confirm({
+      message: "Continue with this location?",
+      default: true,
+    });
+
+    if (!proceed) {
+      console.log(chalk.yellow("\n⚠️  Setup cancelled\n"));
+      process.exit(0);
+    }
+
+    // Create directory structure with proper permissions
+    const spinner = ora("Creating storage directories...").start();
+
+    try {
+      await fs.ensureDir(bitcoinDataDir);
+      await fs.ensureDir(path.join(bitcoinDataDir, "regtest"));
+      await fs.ensureDir(path.join(bitcoinDataDir, "regtest", "wallets"));
+
+      // Set permissions (readable/writable for all)
+      if (process.platform !== "win32") {
+        try {
+          await execAsync(`chmod -R 755 "${bitcoinDataDir}"`);
+        } catch (err) {
+          // Permission errors are okay, might not be needed
+        }
+      }
+
+      spinner.succeed(chalk.green("Storage directories created"));
+    } catch (error: any) {
+      spinner.fail(chalk.red("Failed to create directories"));
+      console.error(chalk.red("\nError: ") + error.message);
+
+      if (error.code === "EACCES" || error.code === "EPERM") {
+        console.log(
+          boxen(
+            chalk.yellow.bold("⚠️  Permission Denied\n\n") +
+              chalk.white("Cannot create directory at:\n") +
+              chalk.yellow(bitcoinDataDir) +
+              "\n\n" +
+              chalk.cyan("Try:\n") +
+              chalk.white("  1. Use default location (") +
+              chalk.cyan("~/.caravan-x") +
+              ")\n" +
+              chalk.white(
+                "  2. Choose a directory you have write access to\n",
+              ) +
+              chalk.white("  3. Fix permissions: ") +
+              chalk.gray(
+                `sudo chown -R $USER "${path.dirname(bitcoinDataDir)}"`,
+              ),
+            {
+              padding: 1,
+              margin: 1,
+              borderStyle: "round",
+              borderColor: "red",
+            },
+          ),
+        );
+      }
+
+      throw error;
     }
 
     console.log(chalk.white("\n📋 Docker Configuration:\n"));
 
-    // Configure Docker settings
+    // Configure Docker settings (rest of your existing code...)
     const containerName = await input({
       message: "Docker container name:",
       default: DEFAULT_DOCKER_CONFIG.containerName,
@@ -209,9 +398,6 @@ export class SetupWizard {
     });
 
     console.log(chalk.white("\n🔐 RPC Authentication:\n"));
-    console.log(
-      chalk.dim("These credentials will be used to connect to Bitcoin Core\n"),
-    );
 
     const rpcUser = await input({
       message: "RPC username:",
@@ -226,7 +412,6 @@ export class SetupWizard {
     });
 
     console.log(chalk.white("\n💼 Wallet Configuration:\n"));
-    console.log(chalk.dim("A watch-only wallet will be created for Caravan\n"));
 
     const walletName = await input({
       message: "Watch-only wallet name:",
@@ -244,11 +429,28 @@ export class SetupWizard {
       default: true,
     });
 
+    // Create Docker config
+    const dockerConfig: DockerConfig = {
+      enabled: true,
+      image: DEFAULT_DOCKER_CONFIG.image,
+      containerName,
+      ports: {
+        rpc: rpcPort!,
+        p2p: p2pPort!,
+        nginx: 8080,
+      },
+      volumes: {
+        bitcoinData: bitcoinDataDir,
+        coordinator: path.join(this.appDir, "coordinator"),
+      },
+      network: DEFAULT_DOCKER_CONFIG.network,
+      autoStart: true,
+    };
+
     // Create shared config
     const sharedConfig: SharedConfig = {
       version: "1.0.0",
-      name: "default",
-      description: "Caravan-X Docker configuration",
+      name: "Caravan-X Docker Setup",
       mode: SetupMode.DOCKER,
       bitcoin: {
         network: "regtest",
@@ -257,54 +459,37 @@ export class SetupWizard {
         rpcUser,
         rpcPassword,
       },
-      docker: {
-        ...DEFAULT_DOCKER_CONFIG,
-        containerName,
-        ports: {
-          rpc: rpcPort!,
-          p2p: p2pPort!,
-        },
-      },
+      docker: dockerConfig,
       initialState: {
-        blockHeight: 101,
+        blockHeight: preGenerateBlocks ? 101 : 0,
         preGenerateBlocks,
         wallets: [],
         transactions: [],
       },
-      coordinator: {
-        enabled: false,
-        port: 5000,
-        autoStart: false,
-      },
-      nginx: {
-        enabled: true,
-        port: 8080,
-        proxyRpc: true,
-        proxyCoordinator: false,
-      },
+      scenarios: [], // Will be filled in by run() method
+      walletName,
       snapshots: {
         enabled: true,
         autoSnapshot: false,
       },
-      walletName, // Store wallet name in config
     };
 
     // Create enhanced config
     const config: EnhancedAppConfig = {
       mode: SetupMode.DOCKER,
       sharedConfig,
+      docker: dockerConfig,
       bitcoin: {
         protocol: "http",
         host: "localhost",
-        port: 8080, // Use nginx proxy port
+        port: 8080, // nginx proxy port
         user: rpcUser,
         pass: rpcPassword,
-        dataDir: path.join(this.appDir, "bitcoin-data"),
+        dataDir: bitcoinDataDir,
       },
       appDir: this.appDir,
       caravanDir: path.join(this.appDir, "wallets"),
       keysDir: path.join(this.appDir, "keys"),
-      docker: sharedConfig.docker,
       snapshots: {
         enabled: true,
         directory: path.join(this.appDir, "snapshots"),

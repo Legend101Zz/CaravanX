@@ -235,7 +235,7 @@ export interface EnhancedAppConfig {
  */
 export const DEFAULT_DOCKER_CONFIG: DockerConfig = {
   enabled: false,
-  image: "kylemanna/bitcoind:latest",
+  image: "bitcoin/bitcoin:27.0",
   containerName: "caravan-x-bitcoin",
   ports: {
     rpc: 18443,

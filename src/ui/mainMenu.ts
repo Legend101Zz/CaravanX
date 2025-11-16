@@ -11,6 +11,8 @@ import { SnapshotCommands } from "../commands/snapshot";
 import { ScenarioCommands } from "../commands/scenario";
 import { SettingsCommands } from "../commands/settings";
 
+import { SetupMode } from "../types/config";
+
 // Define a consistent color scheme
 const colors = {
   primary: chalk.hex("#F7931A"), // Bitcoin orange
@@ -36,20 +38,63 @@ export class MainMenu {
   private settingsCommands: SettingsCommands;
 
   // Menu categories
-  private readonly mainMenuCategories = [
-    { name: colors.header("🏦 Bitcoin Wallets"), value: "bitcoin-wallets" },
-    { name: colors.header("🔐 Caravan Multisig"), value: "caravan-multisig" },
-    { name: colors.header("💸 Transactions"), value: "transactions" },
-    { name: colors.header("📜 Blockchain Scripts"), value: "scripts" },
-    { name: colors.header("₿ Visualization"), value: "visualization" },
-    { name: colors.header("🐳 Docker Management"), value: "docker" },
-    { name: colors.header("📸 Snapshots"), value: "snapshots" },
-    { name: colors.header("🎬 Test Scenarios"), value: "scenarios" },
-    { name: colors.header("⚙️ System"), value: "system" },
-    { name: "⚙️  Settings", value: "settings" },
-    { name: colors.header("❓ Help"), value: "help" },
-    { name: colors.header("🚪 Exit"), value: "exit" },
-  ];
+  // private readonly mainMenuCategories = [
+  //   { name: colors.header("🏦 Bitcoin Wallets"), value: "bitcoin-wallets" },
+  //   { name: colors.header("🔐 Caravan Multisig"), value: "caravan-multisig" },
+  //   { name: colors.header("💸 Transactions"), value: "transactions" },
+  //   { name: colors.header("📜 Blockchain Scripts"), value: "scripts" },
+  //   { name: colors.header("₿ Visualization"), value: "visualization" },
+  //   { name: colors.header("🐳 Docker Management"), value: "docker" },
+  //   { name: colors.header("📸 Snapshots"), value: "snapshots" },
+  //   { name: colors.header("🎬 Test Scenarios"), value: "scenarios" },
+  //   { name: colors.header("⚙️ System"), value: "system" },
+  //   { name: "⚙️  Settings", value: "settings" },
+  //   { name: colors.header("❓ Help"), value: "help" },
+  //   { name: colors.header("🚪 Exit"), value: "exit" },
+  // ];
+
+  private getMainMenuCategories() {
+    // @ts-ignore
+    const mode = this.app.enhancedConfig?.mode || SetupMode.MANUAL;
+
+    const commonCategories = [
+      { name: colors.header("🏦 Bitcoin Wallets"), value: "bitcoin-wallets" },
+      { name: colors.header("🔐 Caravan Multisig"), value: "caravan-multisig" },
+      { name: colors.header("💸 Transactions"), value: "transactions" },
+      { name: colors.header("📜 Blockchain Scripts"), value: "scripts" },
+    ];
+
+    const dockerOnlyCategories = [
+      { name: colors.header("🐳 Docker Management"), value: "docker" },
+      { name: colors.header("📸 Snapshots"), value: "snapshots" },
+    ];
+
+    const manualOnlyCategories = [
+      { name: colors.header("₿ Visualization"), value: "visualization" },
+    ];
+
+    const bottomCategories = [
+      { name: colors.header("🎬 Test Scenarios"), value: "scenarios" },
+      { name: colors.header("⚙️ System"), value: "system" },
+      { name: "⚙️  Settings", value: "settings" },
+      { name: colors.header("❓ Help"), value: "help" },
+      { name: colors.header("🚪 Exit"), value: "exit" },
+    ];
+
+    if (mode === SetupMode.DOCKER) {
+      return [
+        ...commonCategories,
+        ...dockerOnlyCategories,
+        ...bottomCategories,
+      ];
+    } else {
+      return [
+        ...commonCategories,
+        ...manualOnlyCategories,
+        ...bottomCategories,
+      ];
+    }
+  }
 
   // Submenu items
   private readonly subMenus = {
@@ -262,7 +307,9 @@ export class MainMenu {
 
       // Output the gradient text
       console.log(gradientText);
-
+      console.log(colors.muted("━".repeat(70)));
+      console.log(colors.primary("  Mode: ") + this.getModeBadge());
+      console.log(colors.muted("━".repeat(70)) + "\n");
       // Add the subtitle with accent color
       console.log(
         colors.accent("========== R E G T E S T   M O D E =========="),
@@ -375,7 +422,7 @@ export class MainMenu {
         const category = await select({
           message: "What would you like to do?",
           pageSize: 10,
-          choices: this.mainMenuCategories,
+          choices: this.getMainMenuCategories(),
         });
 
         if (category === "exit") {
@@ -982,6 +1029,18 @@ export class MainMenu {
     console.log(colors.info(`App Directory: ${config.appDir}`));
     console.log(colors.info(`Caravan Directory: ${config.caravanDir}`));
     console.log(colors.info(`Keys Directory: ${config.keysDir}`));
+  }
+
+  private getModeBadge(): string {
+    const config = this.app.configManager.getConfig();
+    // @ts-ignore - accessing enhancedConfig
+    const mode = this.app.enhancedConfig?.mode || SetupMode.MANUAL;
+
+    if (mode === SetupMode.DOCKER) {
+      return chalk.bgCyan.black.bold(" 🐳 DOCKER ");
+    } else {
+      return chalk.bgYellow.black.bold(" ⚙️  MANUAL ");
+    }
   }
 
   /**

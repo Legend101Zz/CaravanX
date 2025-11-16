@@ -1,19 +1,11 @@
-import { execSync, spawn } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
 import * as fs from "fs-extra";
 import * as path from "path";
 import ora from "ora";
 import chalk from "chalk";
 import cliProgress from "cli-progress";
 import { DockerConfig, SharedConfig } from "../types/config";
-
-const exec = promisify(require("child_process").exec);
-
-const execAsync = async (
-  command: string,
-): Promise<{ stdout: string; stderr: string }> => {
-  return exec(command);
-};
+import { execAsync } from "../utils/exec";
 
 interface ContainerStatus {
   running: boolean;
@@ -146,46 +138,45 @@ export class DockerService {
   /**
    * Generate bitcoin.conf file
    */
+  /**
+   * Generate bitcoin.conf file
+   */
   private generateBitcoinConf(sharedConfig?: SharedConfig): string {
-    const config = sharedConfig?.bitcoin || {
-      rpcUser: "user",
-      rpcPassword: "pass",
-      rpcPort: 18443,
-    };
+    // Use sharedConfig credentials if available, otherwise use instance defaults
+    const rpcUser = sharedConfig?.bitcoin.rpcUser || this.rpcUser || "user";
+    const rpcPassword =
+      sharedConfig?.bitcoin.rpcPassword || this.rpcPassword || "pass";
+    const rpcPort = sharedConfig?.bitcoin.rpcPort || 18443;
 
-    // Store credentials for later use
-    this.rpcUser = config.rpcUser;
-    this.rpcPassword = config.rpcPassword;
+    // Store credentials for later use (for bitcoin-cli commands)
+    this.rpcUser = rpcUser;
+    this.rpcPassword = rpcPassword;
 
-    return `
-# Bitcoin Core Configuration for Caravan-X Regtest
+    return `# Bitcoin Core Configuration for Caravan-X Regtest
+   # Global Settings
+   server=1
+   # NOTE: Do NOT use daemon=1 in Docker - it must run in foreground!
+   # RPC Authentication (global)
+   rpcuser=${rpcUser}
+   rpcpassword=${rpcPassword}
 
-# Global Settings
-server=1
-# NOTE: Do NOT use daemon=1 in Docker - it must run in foreground!
+   # Wallet Settings
+   fallbackfee=0.00001
 
-# RPC Authentication (global)
-rpcuser=${config.rpcUser}
-rpcpassword=${config.rpcPassword}
+   # Performance
+   dbcache=512
 
-# Wallet Settings
-fallbackfee=0.00001
+   # Logging (verbose for development)
+   debug=1
+   printtoconsole=1
 
-# Performance
-dbcache=512
-
-# Logging (verbose for development)
-debug=1
-printtoconsole=1
-
-# Regtest-specific settings
-[regtest]
-rpcport=${config.rpcPort}
-rpcallowip=0.0.0.0/0
-rpcbind=0.0.0.0
-listen=1
-port=${this.config.ports.p2p}
-    `.trim();
+   # Regtest-specific settings
+   [regtest]
+   rpcport=${rpcPort}
+   rpcallowip=0.0.0.0/0
+   rpcbind=0.0.0.0
+   listen=1
+   port=${this.config.ports.p2p}`.trim();
   }
 
   /**
@@ -193,46 +184,64 @@ port=${this.config.ports.p2p}
    */
   private generateNginxConfig(rpcPort: number): string {
     return `
-events {
-    worker_connections 1024;
-}
+  events {
+      worker_connections 1024;
+  }
 
-http {
-    upstream bitcoin_regtest {
-        server ${this.config.containerName}:${rpcPort};
-    }
+  http {
+      upstream bitcoin_regtest {
+          server ${this.config.containerName}:${rpcPort};
+      }
 
-    server {
-        listen 8080;
-        server_name regtest.localhost localhost;
+      server {
+          listen 8080;
+          server_name localhost;
 
-        location / {
-            proxy_pass http://bitcoin_regtest;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_http_version 1.1;
+          # Disable request size limits for large transactions
+          client_max_body_size 100m;
 
-            # CORS headers for Caravan
-            add_header 'Access-Control-Allow-Origin' '*' always;
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
-            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
-            add_header 'Access-Control-Allow-Credentials' 'true' always;
+          location / {
+              # Proxy to Bitcoin Core
+              proxy_pass http://bitcoin_regtest;
 
-            if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' '*';
-                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
-                add_header 'Access-Control-Allow-Headers' '*';
-                add_header 'Access-Control-Max-Age' 1728000;
-                add_header 'Content-Type' 'text/plain; charset=utf-8';
-                add_header 'Content-Length' 0;
-                return 204;
-            }
-        }
-    }
-}
-`.trim();
+              # Essential headers
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+
+              # HTTP version
+              proxy_http_version 1.1;
+
+              # Don't buffer - important for RPC
+              proxy_buffering off;
+
+              # Timeouts
+              proxy_connect_timeout 300s;
+              proxy_send_timeout 300s;
+              proxy_read_timeout 300s;
+
+              # CORS headers for Caravan (allow all methods including POST)
+              add_header 'Access-Control-Allow-Origin' '*' always;
+              add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+              add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since' always;
+              add_header 'Access-Control-Expose-Headers' 'Content-Length, Content-Range' always;
+              add_header 'Access-Control-Allow-Credentials' 'true' always;
+
+              # Handle preflight OPTIONS requests
+              if ($request_method = 'OPTIONS') {
+                  add_header 'Access-Control-Allow-Origin' '*' always;
+                  add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+                  add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since' always;
+                  add_header 'Access-Control-Max-Age' 1728000;
+                  add_header 'Content-Type' 'text/plain; charset=utf-8';
+                  add_header 'Content-Length' 0;
+                  return 204;
+              }
+          }
+      }
+  }
+  `.trim();
   }
 
   /**
@@ -269,16 +278,35 @@ http {
       const arch = await this.detectArchitecture();
       mainProgress.update(20, { status: `Architecture: ${arch} ✓` });
 
+      if (sharedConfig?.bitcoin.rpcUser && sharedConfig?.bitcoin.rpcPassword) {
+        this.rpcUser = sharedConfig.bitcoin.rpcUser;
+        this.rpcPassword = sharedConfig.bitcoin.rpcPassword;
+
+        console.log(
+          chalk.dim(`\n  [DEBUG] Credentials set from sharedConfig:`),
+        );
+        console.log(chalk.dim(`    User: ${this.rpcUser}`));
+        console.log(
+          chalk.dim(`    Pass: ${this.rpcPassword.substring(0, 3)}***\n`),
+        );
+      } else {
+        console.log(
+          chalk.yellow(`\n  [WARNING] No sharedConfig credentials found!`),
+        );
+        console.log(
+          chalk.yellow(
+            `    Using defaults: ${this.rpcUser}:${this.rpcPassword}\n`,
+          ),
+        );
+      }
+
       // Step 3: Check Ports (30%)
       mainProgress.update(25, { status: "Checking ports..." });
-      const portStatus = await this.checkPortsAvailable();
       try {
         await this.checkAndCleanupPorts();
         mainProgress.update(30, { status: "Ports available ✓" });
       } catch (error: any) {
         multibar.stop();
-
-        // Show detailed error
         console.error(chalk.red("\n❌ Port Conflict Error\n"));
         console.error(chalk.white(error.message));
         console.error(chalk.yellow("\n💡 Solutions:"));
@@ -287,7 +315,6 @@ http {
         console.error(
           chalk.dim("  3. Use Docker Management → Troubleshoot Port Issues\n"),
         );
-
         throw error;
       }
 
@@ -298,34 +325,54 @@ http {
 
       // Step 5: Prepare Data Directory (50%)
       mainProgress.update(45, { status: "Preparing data directory..." });
-      const bitcoinDataDir = path.join(this.dataDir, "bitcoin-data");
+      const bitcoinDataDir = this.config.volumes.bitcoinData;
+
       await fs.ensureDir(bitcoinDataDir);
+      await fs.ensureDir(path.join(bitcoinDataDir, "regtest"));
+      await fs.ensureDir(path.join(bitcoinDataDir, "regtest", "wallets"));
 
-      const bitcoinConf = this.generateBitcoinConf(sharedConfig);
-      await fs.writeFile(
-        path.join(bitcoinDataDir, "bitcoin.conf"),
-        bitcoinConf,
+      // Clean up any existing mining_wallet to prevent conflicts**
+      const miningWalletPath = path.join(
+        bitcoinDataDir,
+        "regtest",
+        "wallets",
+        "mining_wallet",
       );
-      mainProgress.update(50, { status: "Config generated ✓" });
+      if (await fs.pathExists(miningWalletPath)) {
+        mainProgress.update(47, { status: "Cleaning old mining wallet..." });
+        await fs.remove(miningWalletPath);
+      }
 
-      // Step 6: Check Container Status (60%)
+      if (process.platform !== "win32") {
+        try {
+          // **CHANGED: Use 777 instead of 755 for Docker container access**
+          await execAsync(`chmod -R 777 "${bitcoinDataDir}"`);
+        } catch (error) {
+          console.warn(
+            chalk.yellow("Warning: Could not set directory permissions"),
+          );
+        }
+      }
+      mainProgress.update(50, { status: "Directories ready ✓" });
+
+      // Step 6: Check Container Status & Clean Up (60%)
       mainProgress.update(55, { status: "Checking container status..." });
       const status = await this.getContainerStatus();
 
       if (status.containerId) {
-        if (status.running) {
-          mainProgress.update(100, { status: "Already running ✓" });
-          multibar.stop();
-          console.log(
-            chalk.green("\n✅ Bitcoin Core container is already running!"),
-          );
-          return;
-        } else {
-          mainProgress.update(58, { status: "Removing old container..." });
+        mainProgress.update(57, { status: "Removing old container..." });
+        try {
+          // Stop if running
+          if (status.running) {
+            await execAsync(`docker stop ${this.config.containerName}`);
+          }
+          // Remove container
           await execAsync(`docker rm ${this.config.containerName}`);
+        } catch (error) {
+          // Ignore errors, container might already be gone
         }
       }
-      mainProgress.update(60, { status: "Container check complete ✓" });
+      mainProgress.update(60, { status: "Ready to create ✓" });
 
       // Step 7: Create Container (70%)
       mainProgress.update(65, { status: "Creating container..." });
@@ -339,12 +386,37 @@ http {
       dockerCommand += ` --network ${this.config.network}`;
       dockerCommand += ` -p ${this.config.ports.rpc}:${this.config.ports.rpc}`;
       dockerCommand += ` -p ${this.config.ports.p2p}:${this.config.ports.p2p}`;
-      dockerCommand += ` -v "${bitcoinDataDir}":/bitcoin/.bitcoin`;
-      dockerCommand += ` ${this.config.image}`;
-      dockerCommand += ` -regtest -conf=/bitcoin/.bitcoin/bitcoin.conf`;
+      dockerCommand += ` -v "${bitcoinDataDir}":/home/bitcoin/.bitcoin`;
 
-      await execAsync(dockerCommand);
-      mainProgress.update(70, { status: "Container created ✓" });
+      // Bitcoin Core official image
+      dockerCommand += ` ${this.config.image}`;
+      dockerCommand += ` -regtest=1`;
+      dockerCommand += ` -server=1`;
+      dockerCommand += ` -rest=1`;
+      dockerCommand += ` -txindex=1`;
+      dockerCommand += ` -printtoconsole=1`;
+      dockerCommand += ` -rpcallowip=0.0.0.0/0`;
+      dockerCommand += ` -rpcbind=0.0.0.0`;
+      dockerCommand += ` -rpcport=${this.config.ports.rpc}`;
+      dockerCommand += ` -port=${this.config.ports.p2p}`;
+      dockerCommand += ` -rpcuser=${this.rpcUser}`;
+      dockerCommand += ` -rpcpassword=${this.rpcPassword}`;
+      dockerCommand += ` -fallbackfee=0.00001`;
+
+      try {
+        console.log(chalk.dim("\n  Starting Bitcoin Core with:"));
+        console.log(chalk.dim(`  Image: ${this.config.image}`));
+        console.log(chalk.dim(`  User: ${this.rpcUser}`));
+        console.log(
+          chalk.dim(`  Pass: ${this.rpcPassword.substring(0, 3)}***\n`),
+        );
+
+        await execAsync(dockerCommand);
+        mainProgress.update(70, { status: "Container created ✓" });
+      } catch (error: any) {
+        multibar.stop();
+        throw error;
+      }
 
       // Step 8: Wait for Container to Start (75%)
       mainProgress.update(72, { status: "Waiting for container..." });
@@ -401,7 +473,11 @@ http {
           throw new Error("Container stopped unexpectedly");
         }
 
+        // Use the stored credentials
         await this.execBitcoinCli("getblockchaininfo");
+
+        // Success!
+        mainProgress.update(90, { status: "RPC connected ✓" });
         return;
       } catch (error: any) {
         const progress = 78 + (i / maxAttempts) * 12;
@@ -409,9 +485,34 @@ http {
           status: `Waiting for RPC (${i + 1}/${maxAttempts})...`,
         });
 
+        // Log password attempt errors for debugging
+        if (
+          error.message.includes("incorrect password") ||
+          error.message.includes("401")
+        ) {
+          console.log(chalk.dim(`\n  Debug: Password mismatch detected`));
+          console.log(
+            chalk.dim(
+              `  Using: ${this.rpcUser}:${this.rpcPassword.substring(0, 3)}***`,
+            ),
+          );
+        }
+
         if (i === maxAttempts - 1) {
+          multibar.stop();
+
+          // Show helpful error message
+          console.error(chalk.red("\n❌ RPC Connection Failed\n"));
+          console.error(chalk.white("Credentials being used:"));
+          console.error(chalk.cyan(`  User: ${this.rpcUser}`));
+          console.error(chalk.cyan(`  Pass: ${this.rpcPassword}`));
+          console.error(chalk.white("\nCheck container logs:"));
+          console.error(
+            chalk.gray(`  docker logs ${this.config.containerName} | tail -20`),
+          );
+
           throw new Error(
-            `RPC did not become ready after ${maxAttempts} attempts`,
+            `RPC did not become ready after ${maxAttempts} attempts. Credential mismatch likely.`,
           );
         }
 
@@ -951,9 +1052,20 @@ http {
    */
   async execBitcoinCli(command: string): Promise<string> {
     try {
-      const { stdout } = await execAsync(
-        `docker exec ${this.config.containerName} bitcoin-cli -regtest ${command}`,
+      // DEBUG: Log what we're actually using
+      console.log(
+        chalk.dim(
+          `\n  [DEBUG] execBitcoinCli using: ${this.rpcUser}:${this.rpcPassword.substring(0, 3)}***`,
+        ),
       );
+
+      const cliCommand = `docker exec ${this.config.containerName} bitcoin-cli -regtest -rpcuser="${this.rpcUser}" -rpcpassword="${this.rpcPassword}" ${command}`;
+
+      console.log(
+        chalk.dim(`  [DEBUG] Full command: ${cliCommand.substring(0, 100)}...`),
+      );
+
+      const { stdout } = await execAsync(cliCommand);
       return stdout.trim();
     } catch (error: any) {
       throw new Error(`Bitcoin CLI failed: ${error.message}`);
