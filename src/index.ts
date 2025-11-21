@@ -152,6 +152,7 @@ export class CaravanRegtestManager {
     this.enhancedConfig = await this.loadEnhancedConfig();
 
     let needsSetup = !this.enhancedConfig;
+    let justCompletedSetup = false; // Track if we just did setup
 
     // If config exists, ask if user wants to reconfigure
     if (this.enhancedConfig) {
@@ -187,6 +188,7 @@ export class CaravanRegtestManager {
       try {
         this.enhancedConfig = await this.runSetupWizard();
         await this.reinitializeWithConfig(this.enhancedConfig);
+        justCompletedSetup = true;
       } catch (error: any) {
         console.log(chalk.red("\n❌ Setup failed:", error.message));
         process.exit(1);
@@ -196,8 +198,16 @@ export class CaravanRegtestManager {
       await this.reinitializeWithConfig(this.enhancedConfig!);
     }
 
-    // Check Bitcoin Core connection
-    await this.verifyBitcoinConnection();
+    // Check Bitcoin Core connection ONLY if we didn't just complete setup
+    // (setup already tested the connection)
+    if (!justCompletedSetup) {
+      await this.verifyBitcoinConnection();
+    } else {
+      // Just cleared the screen and show we're ready
+      console.clear();
+      console.log(chalk.green("\n✅ Setup complete! Starting Caravan-X...\n"));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
 
     // Start main menu
     const mainMenu = new MainMenu(this);
@@ -213,7 +223,7 @@ export class CaravanRegtestManager {
       const logoGradient = gradient(["#F7931A", "#F7931A", "#00ACED"]);
 
       // Generate the figlet text
-      const figletText = figlet.textSync("Caravan", {
+      const figletText = figlet.textSync("Caravan - X", {
         font: "Big",
         horizontalLayout: "default",
         verticalLayout: "default",
@@ -256,7 +266,7 @@ export class CaravanRegtestManager {
     const mode = await this.selectMode();
 
     if (mode === SetupMode.DOCKER) {
-      return await this.setupDockerMode();
+      return await this.setupDockerMode(mode);
     } else {
       return await this.setupManualMode();
     }
@@ -288,22 +298,19 @@ export class CaravanRegtestManager {
   }
 
   /**
-   * Setup Docker mode
+   * Setup Docker mode configuration and optionally start containers
    */
-  private async setupDockerMode(): Promise<EnhancedAppConfig> {
+  private async setupDockerMode(mode: SetupMode): Promise<EnhancedAppConfig> {
     console.log(
       boxen(
-        chalk.white.bold("🐳 Docker Mode Setup\n\n") +
+        chalk.white.bold("🐳 Docker Mode Configuration\n\n") +
           chalk.gray("Caravan-X will:\n") +
           chalk.white("  • Create a Bitcoin Core regtest container\n") +
           chalk.white("  • Configure RPC authentication\n") +
+          chalk.white("  • Set up nginx proxy for easy access\n") +
           chalk.white("  • Generate initial blockchain\n") +
           chalk.white("  • Create watch-only wallet\n\n") +
-          chalk.cyan("After setup, run Caravan coordinator locally:\n") +
-          chalk.yellow("  cd caravan && npm start\n\n") +
-          chalk.cyan("Then access: ") +
-          chalk.green.bold("http://localhost:5173/\n") +
-          chalk.cyan("Connect using: ") +
+          chalk.cyan("Access via: ") +
           chalk.green.bold("http://localhost:8080"),
         {
           padding: 1,
@@ -320,12 +327,12 @@ export class CaravanRegtestManager {
     });
 
     if (!proceed) {
-      console.log(chalk.gray("Setup cancelled"));
+      console.log(chalk.gray("\nSetup cancelled"));
       process.exit(0);
     }
 
-    // Run the full setup wizard
-    const config = await this.setupWizard.run();
+    // Run the full setup wizard to get configuration
+    const config = await this.setupWizard.run(mode);
 
     return config;
   }

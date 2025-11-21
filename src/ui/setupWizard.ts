@@ -45,7 +45,7 @@ export class SetupWizard {
   /**
    * Run the setup wizard
    */
-  async run(): Promise<EnhancedAppConfig> {
+  async run(mode: SetupMode): Promise<EnhancedAppConfig> {
     console.clear();
     this.displayWelcome();
 
@@ -57,9 +57,6 @@ export class SetupWizard {
     } else {
       console.log(chalk.cyan("\n⚙️  Reconfiguring Caravan-X\n"));
     }
-
-    // Step 1: Choose setup mode
-    const mode = await this.chooseSetupMode();
 
     // Step 2: Configure based on mode
     let config: EnhancedAppConfig;
@@ -91,7 +88,7 @@ export class SetupWizard {
       await this.initializeDockerMode(config);
     }
 
-    this.displaySuccess(config);
+    // this.displaySuccess(config);
 
     return config;
   }
@@ -628,8 +625,34 @@ export class SetupWizard {
     });
 
     if (startNow) {
-      const dockerService = new DockerService(config.docker, config.appDir);
-      await dockerService.startContainer(config.sharedConfig);
+      const dockerService = new DockerService(
+        config.docker,
+        path.join(config.appDir, "docker-data"),
+      );
+
+      // Run complete setup - this handles everything
+      const nginxPort = await dockerService.completeSetup(config.sharedConfig);
+
+      // CRITICAL: Update the config with the ACTUAL nginx port used
+      config.bitcoin.port = nginxPort;
+      // Save the updated config
+      const configPath = path.join(config.appDir, "config.json");
+      await fs.writeJson(configPath, config, { spaces: 2 });
+    } else {
+      console.log(
+        boxen(
+          chalk.cyan.bold("⏸️  Setup Saved\n\n") +
+            chalk.white("Docker containers not started.\n") +
+            chalk.dim("You can start them later from the main menu:\n") +
+            chalk.white("Docker Management → Start Container"),
+          {
+            padding: 1,
+            margin: 1,
+            borderStyle: "round",
+            borderColor: "cyan",
+          },
+        ),
+      );
     }
   }
 
