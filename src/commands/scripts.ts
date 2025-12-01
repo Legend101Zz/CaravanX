@@ -271,7 +271,7 @@ export class ScriptCommands {
   /**
    * Execute a script with validation and confirmation
    */
-  private async executeScript(script: any, name: string): Promise<void> {
+  public async executeScript(script: any, name: string): Promise<void> {
     try {
       // Validate the script
       const validationSpinner = ora("Validating script...").start();
@@ -854,6 +854,141 @@ runScript()
       }
     } catch (error) {
       console.error(formatError("Error managing scripts:"), error);
+    }
+  }
+
+  /**
+   * Run health privacy test
+   */
+  async runHealthPrivacyTest(): Promise<void> {
+    displayCommandTitle("Caravan Health Privacy Test");
+
+    try {
+      console.log(
+        boxText(
+          "This test creates three multisig wallets with different privacy characteristics:\n\n" +
+            "🔒 GOOD Privacy: No UTXO mixing, no address reuse, varied amounts\n" +
+            "⚠️  MODERATE Privacy: Some UTXO mixing, no address reuse\n" +
+            "❌ BAD Privacy: Heavy address reuse, UTXO mixing, round amounts\n\n" +
+            "The resulting wallets can be imported into Caravan to test the Health package.",
+          { title: "Health Privacy Test", titleColor: colors.info },
+        ),
+      );
+
+      const confirmRun = await confirm({
+        message: "Run the health privacy test?",
+        default: true,
+      });
+
+      if (!confirmRun) {
+        return;
+      }
+
+      const templatePath = path.join(
+        this.scriptEngine.getTemplatesDir(),
+        "health_privacy_test.js",
+      );
+
+      if (await fs.pathExists(templatePath)) {
+        const scriptContent = await this.scriptEngine.loadScript(templatePath);
+        await this.executeScript(scriptContent, "Health Privacy Test");
+      } else {
+        console.log(formatError("Health privacy test script not found."));
+        console.log(
+          formatWarning(
+            "Make sure health_privacy_test.js is in the templates directory.",
+          ),
+        );
+      }
+    } catch (error) {
+      console.error(formatError("Error in health privacy test:"), error);
+    }
+  }
+
+  /**
+   * Run multisig RBF test
+   */
+  async runMultisigRBFTest(): Promise<void> {
+    displayCommandTitle("Multisig RBF Test");
+
+    try {
+      console.log(
+        boxText(
+          "This test demonstrates Replace-By-Fee (RBF) with multisig wallets:\n\n" +
+            "1. Creates a 2-of-3 multisig wallet\n" +
+            "2. Sends a transaction with LOW fee (1 sat/vB)\n" +
+            "3. Replaces it with HIGH fee transaction (10 sat/vB)\n" +
+            "4. Verifies the replacement was successful",
+          { title: "Multisig RBF Test", titleColor: colors.info },
+        ),
+      );
+
+      const confirmRun = await confirm({
+        message: "Run the multisig RBF test?",
+        default: true,
+      });
+
+      if (!confirmRun) {
+        return;
+      }
+
+      const templatePath = path.join(
+        this.scriptEngine.getTemplatesDir(),
+        "multisig_rbf_test.js",
+      );
+
+      if (await fs.pathExists(templatePath)) {
+        const scriptContent = await this.scriptEngine.loadScript(templatePath);
+        await this.executeScript(scriptContent, "Multisig RBF Test");
+      } else {
+        console.log(formatError("Multisig RBF test script not found."));
+      }
+    } catch (error) {
+      console.error(formatError("Error in multisig RBF test:"), error);
+    }
+  }
+
+  /**
+   * Run multisig CPFP test
+   */
+  async runMultisigCPFPTest(): Promise<void> {
+    displayCommandTitle("Multisig CPFP Test");
+
+    try {
+      console.log(
+        boxText(
+          "This test demonstrates Child-Pays-For-Parent (CPFP) with multisig:\n\n" +
+            "1. Creates a 2-of-3 multisig wallet\n" +
+            "2. Sends a PARENT transaction with LOW fee (1 sat/vB)\n" +
+            "3. Creates a CHILD transaction spending parent output\n" +
+            "4. Child has HIGH fee (50 sat/vB) to pull parent into block\n" +
+            "5. Both transactions confirm together",
+          { title: "Multisig CPFP Test", titleColor: colors.info },
+        ),
+      );
+
+      const confirmRun = await confirm({
+        message: "Run the multisig CPFP test?",
+        default: true,
+      });
+
+      if (!confirmRun) {
+        return;
+      }
+
+      const templatePath = path.join(
+        this.scriptEngine.getTemplatesDir(),
+        "multisig_cpfp_test.js",
+      );
+
+      if (await fs.pathExists(templatePath)) {
+        const scriptContent = await this.scriptEngine.loadScript(templatePath);
+        await this.executeScript(scriptContent, "Multisig CPFP Test");
+      } else {
+        console.log(formatError("Multisig CPFP test script not found."));
+      }
+    } catch (error) {
+      console.error(formatError("Error in multisig CPFP test:"), error);
     }
   }
 }

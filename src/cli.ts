@@ -15,6 +15,7 @@ import {
   boxText,
 } from "./utils/terminal";
 import { addScriptCommandsToCLI } from "./scripting/cli-integration";
+import { AddressType } from "./types/caravan";
 
 // Display the Caravan logo
 console.log(caravanLogo);
@@ -616,6 +617,123 @@ program
       await app.start();
     } catch (error) {
       console.error(formatError("Error starting application:"), error);
+    }
+  });
+
+// Health Privacy Test command
+program
+  .command("health-privacy-test")
+  .description(
+    "Create multisig wallets with different privacy levels for Caravan Health testing",
+  )
+  .option("-n, --name <name>", "Base name for test wallets", "health_test")
+  .option("-t, --transactions <count>", "Transactions per wallet", "15")
+  .option("-m, --required <m>", "Required signatures", "2")
+  .option("-s, --total <n>", "Total signers", "3")
+  .option(
+    "-a, --address-type <type>",
+    "Address type: p2wsh, p2sh-p2wsh, p2sh",
+    "p2wsh",
+  )
+  .action(async (options) => {
+    const spinner = ora("Initializing...").start();
+    const app = new CaravanRegtestManager();
+    spinner.succeed("Initialized");
+
+    try {
+      // Run the health privacy test script
+      const scriptEngine = app.scriptCommands.getScriptEngine();
+      const templatePath = path.join(
+        scriptEngine.getTemplatesDir(),
+        "health_privacy_test.js",
+      );
+
+      if (await fs.pathExists(templatePath)) {
+        const scriptContent = await scriptEngine.loadScript(templatePath);
+        await app.scriptCommands.executeScript(
+          scriptContent,
+          "Health Privacy Test",
+        );
+      } else {
+        console.log(
+          formatWarning(
+            "Health Privacy Test script not found. Using interactive mode...",
+          ),
+        );
+        await app.multisigCommands.createTestMultisigWallets();
+      }
+    } catch (error) {
+      console.error(formatError("Error running health privacy test:"), error);
+    }
+  });
+
+// Multisig RBF Test command
+program
+  .command("multisig-rbf-test")
+  .description("Test Replace-By-Fee with multisig wallet transactions")
+  .option("-n, --name <name>", "Wallet name prefix", "rbf_multisig_test")
+  .option("-m, --required <m>", "Required signatures", "2")
+  .option("-s, --total <n>", "Total signers", "3")
+  .option("--initial-fee <rate>", "Initial fee rate (sat/vB)", "1")
+  .option("--replacement-fee <rate>", "Replacement fee rate (sat/vB)", "10")
+  .action(async (options) => {
+    const spinner = ora("Initializing...").start();
+    const app = new CaravanRegtestManager();
+    spinner.succeed("Initialized");
+
+    try {
+      const scriptEngine = app.scriptCommands.getScriptEngine();
+      const templatePath = path.join(
+        scriptEngine.getTemplatesDir(),
+        "multisig_rbf_test.js",
+      );
+
+      if (await fs.pathExists(templatePath)) {
+        const scriptContent = await scriptEngine.loadScript(templatePath);
+        await app.scriptCommands.executeScript(
+          scriptContent,
+          "Multisig RBF Test",
+        );
+      } else {
+        console.error(formatError("Multisig RBF test script not found."));
+      }
+    } catch (error) {
+      console.error(formatError("Error running multisig RBF test:"), error);
+    }
+  });
+
+// Multisig CPFP Test command
+program
+  .command("multisig-cpfp-test")
+  .description("Test Child-Pays-For-Parent with multisig wallet transactions")
+  .option("-n, --name <name>", "Wallet name prefix", "cpfp_multisig_test")
+  .option("-m, --required <m>", "Required signatures", "2")
+  .option("-s, --total <n>", "Total signers", "3")
+  .option("--parent-fee <rate>", "Parent fee rate (sat/vB)", "1")
+  .option("--child-fee <rate>", "Child fee rate (sat/vB)", "50")
+  .action(async (options) => {
+    const spinner = ora("Initializing...").start();
+    const app = new CaravanRegtestManager();
+    spinner.succeed("Initialized");
+
+    try {
+      const scriptEngine = app.scriptCommands.getScriptEngine();
+      const templatePath = path.join(
+        scriptEngine.getTemplatesDir(),
+        "multisig_cpfp_test.js",
+      );
+
+      if (await fs.pathExists(templatePath)) {
+        const scriptContent = await scriptEngine.loadScript(templatePath);
+        await app.scriptCommands.executeScript(
+          scriptContent,
+          "Multisig CPFP Test",
+        );
+      } else {
+        console.error(formatError("Multisig CPFP test script not found."));
+      }
+    } catch (error) {
+      console.error(formatError("Error running multisig CPFP test:"), error);
     }
   });
 

@@ -56,10 +56,8 @@ export class ScriptEngine extends EventEmitter {
     this.multisigCommands = multisigCommands;
 
     // Set up templates directory
-    this.templatesDir = path.join(
-      configManager.getConfig().appDir,
-      "script_templates",
-    );
+    this.templatesDir = path.join(__dirname, "templates");
+
     fs.ensureDirSync(this.templatesDir);
   }
 

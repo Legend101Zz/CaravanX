@@ -74,9 +74,7 @@ export class MainMenu {
     ];
 
     const bottomCategories = [
-      { name: colors.header("🎬 Test Scenarios"), value: "scenarios" },
       { name: colors.header("⚙️ System"), value: "system" },
-      { name: "⚙️  Settings", value: "settings" },
       { name: colors.header("❓ Help"), value: "help" },
       { name: colors.header("🚪 Exit"), value: "exit" },
     ];
@@ -194,6 +192,18 @@ export class MainMenu {
       {
         name: colors.commandName("Manage saved scripts"),
         value: "manage-scripts",
+      },
+      {
+        name: colors.success("🔬 Run Health Privacy Test"),
+        value: "health-privacy-test",
+      },
+      {
+        name: colors.success("⚡ Run Multisig RBF Test"),
+        value: "multisig-rbf-test",
+      },
+      {
+        name: colors.success("🔗 Run Multisig CPFP Test"),
+        value: "multisig-cpfp-test",
       },
       { name: colors.muted("Back to main menu"), value: "back" },
     ],
@@ -606,6 +616,15 @@ export class MainMenu {
           break;
         case "manage-scripts":
           await this.app.scriptCommands.manageScripts();
+          break;
+        case "health-privacy-test":
+          await this.app.scriptCommands.runHealthPrivacyTest();
+          break;
+        case "multisig-rbf-test":
+          await this.app.scriptCommands.runMultisigRBFTest();
+          break;
+        case "multisig-cpfp-test":
+          await this.app.scriptCommands.runMultisigCPFPTest();
           break;
 
         // Visualization
