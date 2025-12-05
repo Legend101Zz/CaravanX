@@ -6,6 +6,12 @@ A terminal-based utility for Bitcoin developers who are tired of the "it works o
 
 ---
 
+### Video tutorial on how to use caravan-x along with caravan-coordinator :
+
+### [demo](https://drive.google.com/file/d/1AMB_MrrsPz8UXJzlDaIeZdcf38sbBRFW/view?usp=sharing)
+
+---
+
 ## Table of Contents
 
 - [What is Caravan-X](#what-is-caravan-x)
