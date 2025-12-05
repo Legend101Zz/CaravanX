@@ -1,6 +1,6 @@
 {
   "name": "caravan-x",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A terminal-based utility for managing Caravan multisig wallets in regtest mode. This tool simplifies development and testing with Caravan by providing an easy-to-use interface",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
