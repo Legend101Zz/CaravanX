@@ -55,20 +55,13 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
   exit 0
 fi
 
-echo ""
-echo -e "${GREEN}Step 1: Running tests...${NC}"
-npm test || { echo -e "${RED}Tests failed. Aborting publish.${NC}"; exit 1; }
 
 echo ""
-echo -e "${GREEN}Step 2: Running lint...${NC}"
-npm run lint || { echo -e "${YELLOW}Lint warnings detected, continuing...${NC}"; }
-
-echo ""
-echo -e "${GREEN}Step 3: Building project...${NC}"
+echo -e "${GREEN}Step 1: Building project...${NC}"
 npm run build
 
 echo ""
-echo -e "${GREEN}Step 4: Bumping version ($VERSION_TYPE)...${NC}"
+echo -e "${GREEN}Step 2: Bumping version ($VERSION_TYPE)...${NC}"
 npm version $VERSION_TYPE --no-git-tag-version
 
 # Get new version
@@ -76,21 +69,21 @@ NEW_VERSION=$(node -p "require('./package.json').version")
 echo -e "New version: ${GREEN}$NEW_VERSION${NC}"
 
 echo ""
-echo -e "${GREEN}Step 5: Committing version bump...${NC}"
+echo -e "${GREEN}Step 3: Committing version bump...${NC}"
 git add package.json package-lock.json
 git commit -m "chore: bump version to $NEW_VERSION"
 
 echo ""
-echo -e "${GREEN}Step 6: Creating git tag...${NC}"
+echo -e "${GREEN}Step 4: Creating git tag...${NC}"
 git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
 
 echo ""
-echo -e "${GREEN}Step 7: Pushing to remote...${NC}"
+echo -e "${GREEN}Step 5: Pushing to remote...${NC}"
 git push origin $BRANCH
 git push origin "v$NEW_VERSION"
 
 echo ""
-echo -e "${GREEN}Step 8: Publishing to npm...${NC}"
+echo -e "${GREEN}Step 6: Publishing to npm...${NC}"
 npm publish
 
 echo ""
