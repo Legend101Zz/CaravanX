@@ -231,6 +231,43 @@ export interface EnhancedAppConfig {
 }
 
 /**
+ * Configuration profile that can be saved and loaded
+ */
+export interface ConfigProfile {
+  id: string;
+  name: string;
+  mode: SetupMode;
+  createdAt: string;
+  lastUsedAt: string;
+  config: EnhancedAppConfig;
+}
+
+/**
+ * Profiles index file structure
+ */
+export interface ProfilesIndex {
+  activeProfileId: string | null;
+  profiles: {
+    id: string;
+    name: string;
+    mode: SetupMode;
+    createdAt: string;
+    lastUsedAt: string;
+    configPath: string;
+  }[];
+}
+
+/**
+ * Startup user choices
+ */
+export interface StartupChoices {
+  baseDirectory: string;
+  mode: SetupMode;
+  useExistingConfig: boolean;
+  selectedProfileId?: string;
+}
+
+/**
  * Default Docker configuration
  */
 export const DEFAULT_DOCKER_CONFIG: DockerConfig = {

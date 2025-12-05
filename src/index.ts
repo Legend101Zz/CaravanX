@@ -6,7 +6,13 @@ import { TransactionService } from "./core/transaction";
 import { DockerService } from "./core/docker";
 import { SnapshotService } from "./core/snapshot";
 import { ScenarioService } from "./core/scenario";
-import { EnhancedAppConfig, SetupMode } from "./types/config";
+import {
+  EnhancedAppConfig,
+  SetupMode,
+  StartupChoices,
+  ConfigProfile,
+  ProfilesIndex,
+} from "./types/config";
 import { WalletCommands } from "./commands/wallet";
 import { MultisigCommands } from "./commands/multisig";
 import { TransactionCommands } from "./commands/transaction";
@@ -14,6 +20,7 @@ import { VisualizationCommands } from "./commands/visualizations";
 import { ScriptCommands } from "./commands/scripts";
 import { MainMenu } from "./ui/mainMenu";
 import { SetupWizard } from "./ui/setupWizard";
+import { ProfileManager } from "./core/profiles";
 
 import { confirm, input, number, select } from "@inquirer/prompts";
 import chalk from "chalk";
@@ -23,6 +30,7 @@ import path from "path";
 import fs from "fs-extra";
 import ora from "ora";
 import gradient from "gradient-string";
+
 // Define a consistent color scheme
 const colors = {
   primary: chalk.hex("#F7931A"), // Bitcoin orange
@@ -57,7 +65,8 @@ export class CaravanRegtestManager {
   public dockerService?: DockerService;
   public snapshotService: SnapshotService;
   public scenarioService: ScenarioService;
-  private enhancedConfig?: EnhancedAppConfig;
+  public enhancedConfig?: EnhancedAppConfig;
+  private profileManager!: ProfileManager;
 
   constructor() {
     // Initialize configuration
@@ -144,66 +153,115 @@ export class CaravanRegtestManager {
    */
   async start(): Promise<void> {
     console.clear();
-
-    // Display welcome banner
     this.displayWelcomeBanner();
 
-    // Load or create configuration
-    this.enhancedConfig = await this.loadEnhancedConfig();
+    // STEP 1: Ask for base directory
+    const baseDirectory = await this.askForBaseDirectory();
 
-    let needsSetup = !this.enhancedConfig;
-    let justCompletedSetup = false; // Track if we just did setup
+    // Initialize profile manager with the base directory
+    this.profileManager = new ProfileManager(baseDirectory);
+    await this.profileManager.initialize();
 
-    // If config exists, ask if user wants to reconfigure
-    if (this.enhancedConfig) {
+    // STEP 2: Ask for mode (Docker or Manual)
+    const mode = await this.askForMode();
+
+    // STEP 3: Check for existing configurations for this mode
+    let enhancedConfig: EnhancedAppConfig;
+    let justCompletedSetup = false;
+
+    const existingProfiles = await this.profileManager.getProfilesByMode(mode);
+
+    if (existingProfiles.length > 0) {
+      // Show existing configurations and ask user what to do
+      const choice = await this.askExistingConfigChoice(existingProfiles, mode);
+
+      if (choice.action === "use_existing") {
+        // Load the selected profile
+        const profile = await this.profileManager.getProfile(choice.profileId!);
+        if (profile) {
+          enhancedConfig = profile.config;
+          await this.profileManager.setActiveProfile(profile.id);
+          console.log(
+            chalk.green(`\n✅ Loaded configuration: ${profile.name}\n`),
+          );
+        } else {
+          throw new Error("Failed to load selected profile");
+        }
+      } else if (choice.action === "new") {
+        // Create new configuration
+        enhancedConfig = await this.runSetupWizardForMode(mode, baseDirectory);
+        justCompletedSetup = true;
+
+        // Ask if they want to save as a new profile or replace
+        const profileName = await input({
+          message: "Name for this configuration:",
+          default: `${mode === SetupMode.DOCKER ? "Docker" : "Manual"} Config ${existingProfiles.length + 1}`,
+        });
+
+        const newProfile = await this.profileManager.createProfile(
+          profileName,
+          mode,
+          enhancedConfig,
+        );
+        await this.profileManager.setActiveProfile(newProfile.id);
+      } else {
+        // Delete and recreate
+        for (const profile of existingProfiles) {
+          await this.profileManager.deleteProfile(profile.id);
+        }
+
+        enhancedConfig = await this.runSetupWizardForMode(mode, baseDirectory);
+        justCompletedSetup = true;
+
+        const profileName = await input({
+          message: "Name for this configuration:",
+          default: `${mode === SetupMode.DOCKER ? "Docker" : "Manual"} Config`,
+        });
+
+        const newProfile = await this.profileManager.createProfile(
+          profileName,
+          mode,
+          enhancedConfig,
+        );
+        await this.profileManager.setActiveProfile(newProfile.id);
+      }
+    } else {
+      // No existing profiles, run setup
       console.log(
-        boxen(
-          chalk.white.bold("Existing Configuration Found\n\n") +
-            chalk.gray("Mode: ") +
-            this.getModeBadge(this.enhancedConfig.mode) +
-            "\n" +
-            chalk.gray("Bitcoin RPC: ") +
-            chalk.white(
-              `${this.enhancedConfig.bitcoin.host}:${this.enhancedConfig.bitcoin.port}`,
-            ),
-          {
-            padding: 1,
-            margin: 1,
-            borderStyle: "round",
-            borderColor: "cyan",
-          },
+        chalk.cyan(
+          `\n📋 No existing ${mode} configuration found. Let's set one up!\n`,
         ),
       );
 
-      const reconfigure = await confirm({
-        message: "Would you like to reconfigure?",
-        default: false,
+      enhancedConfig = await this.runSetupWizardForMode(mode, baseDirectory);
+      justCompletedSetup = true;
+
+      const profileName = await input({
+        message: "Name for this configuration:",
+        default: `${mode === SetupMode.DOCKER ? "Docker" : "Manual"} Config`,
       });
 
-      needsSetup = reconfigure;
+      const newProfile = await this.profileManager.createProfile(
+        profileName,
+        mode,
+        enhancedConfig,
+      );
+      await this.profileManager.setActiveProfile(newProfile.id);
     }
 
-    // Run setup if needed
-    if (needsSetup) {
-      try {
-        this.enhancedConfig = await this.runSetupWizard();
-        await this.reinitializeWithConfig(this.enhancedConfig);
-        justCompletedSetup = true;
-      } catch (error: any) {
-        console.log(chalk.red("\n❌ Setup failed:", error.message));
-        process.exit(1);
-      }
-    } else {
-      // Initialize with existing config
-      await this.reinitializeWithConfig(this.enhancedConfig!);
-    }
+    this.enhancedConfig = enhancedConfig;
 
-    // Check Bitcoin Core connection ONLY if we didn't just complete setup
-    // (setup already tested the connection)
+    // Also save to the legacy config.json location for compatibility
+    const legacyConfigPath = path.join(enhancedConfig.appDir, "config.json");
+    await fs.writeJson(legacyConfigPath, enhancedConfig, { spaces: 2 });
+
+    // Initialize services with the configuration
+    await this.reinitializeWithConfig(enhancedConfig);
+
+    // Verify connection if not just completed setup
     if (!justCompletedSetup) {
       await this.verifyBitcoinConnection();
     } else {
-      // Just cleared the screen and show we're ready
       console.clear();
       console.log(chalk.green("\n✅ Setup complete! Starting Caravan-X...\n"));
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -212,6 +270,235 @@ export class CaravanRegtestManager {
     // Start main menu
     const mainMenu = new MainMenu(this);
     await mainMenu.start();
+  }
+
+  /**
+   * Ask user for base directory
+   */
+  private async askForBaseDirectory(): Promise<string> {
+    const homeDir = process.env.HOME || "~";
+    const defaultDir = path.join(homeDir, ".caravan-x");
+
+    console.log(
+      boxen(
+        chalk.white.bold("📁 Choose Your Caravan-X Directory\n\n") +
+          chalk.gray(
+            "This is where all your configurations, wallets, and data will be stored.\n\n",
+          ) +
+          chalk.cyan("Default: ") +
+          chalk.white(defaultDir),
+        {
+          padding: 1,
+          margin: 1,
+          borderStyle: "round",
+          borderColor: "cyan",
+        },
+      ),
+    );
+
+    const useDefault = await confirm({
+      message: `Use default directory (${defaultDir})?`,
+      default: true,
+    });
+
+    let chosenDir: string;
+
+    if (useDefault) {
+      chosenDir = defaultDir;
+    } else {
+      chosenDir = await input({
+        message: "Enter your preferred directory path:",
+        default: defaultDir,
+        validate: (inputPath) => {
+          if (!inputPath.trim()) {
+            return "Directory path cannot be empty";
+          }
+          // Expand ~ to home directory
+          const expandedPath = inputPath.startsWith("~")
+            ? path.join(homeDir, inputPath.slice(1))
+            : inputPath;
+
+          // Check if it's an absolute path or can be resolved
+          if (!path.isAbsolute(expandedPath)) {
+            return "Please enter an absolute path";
+          }
+          return true;
+        },
+      });
+
+      // Expand ~ if present
+      if (chosenDir.startsWith("~")) {
+        chosenDir = path.join(homeDir, chosenDir.slice(1));
+      }
+    }
+
+    // Ensure directory exists
+    await fs.ensureDir(chosenDir);
+    console.log(chalk.green(`\n✅ Using directory: ${chosenDir}\n`));
+
+    return chosenDir;
+  }
+
+  /**
+   * Ask user for mode selection
+   */
+  private async askForMode(): Promise<SetupMode> {
+    console.log(
+      boxen(
+        chalk.white.bold("🔧 Select Operation Mode\n\n") +
+          chalk.cyan("🐳 Docker Mode") +
+          chalk.gray(" (Recommended)\n") +
+          chalk.dim("   • Automatic Bitcoin Core setup in Docker\n") +
+          chalk.dim("   • No manual configuration needed\n") +
+          chalk.dim("   • Isolated environment\n\n") +
+          chalk.yellow("⚙️  Manual Mode\n") +
+          chalk.dim("   • Use your own Bitcoin Core installation\n") +
+          chalk.dim("   • Full control over configuration\n") +
+          chalk.dim("   • Requires running bitcoind separately"),
+        {
+          padding: 1,
+          margin: 1,
+          borderStyle: "round",
+          borderColor: "cyan",
+        },
+      ),
+    );
+
+    const mode = await select({
+      message: "Choose your mode:",
+      choices: [
+        {
+          name: chalk.cyan("🐳 Docker Mode") + chalk.gray(" (Recommended)"),
+          value: SetupMode.DOCKER,
+        },
+        {
+          name: chalk.yellow("⚙️  Manual Mode"),
+          value: SetupMode.MANUAL,
+        },
+      ],
+    });
+
+    return mode;
+  }
+
+  /**
+   * Ask user what to do with existing configurations
+   */
+  private async askExistingConfigChoice(
+    profiles: ProfilesIndex["profiles"],
+    mode: SetupMode,
+  ): Promise<{
+    action: "use_existing" | "new" | "delete_and_new";
+    profileId?: string;
+  }> {
+    const modeLabel = mode === SetupMode.DOCKER ? "Docker" : "Manual";
+
+    console.log(
+      boxen(
+        chalk.white.bold(
+          `📋 Existing ${modeLabel} Configuration(s) Found\n\n`,
+        ) +
+          profiles
+            .map(
+              (p, i) =>
+                chalk.cyan(`${i + 1}. ${p.name}\n`) +
+                chalk.dim(
+                  `   Created: ${new Date(p.createdAt).toLocaleDateString()}\n`,
+                ) +
+                chalk.dim(
+                  `   Last used: ${new Date(p.lastUsedAt).toLocaleDateString()}`,
+                ),
+            )
+            .join("\n\n"),
+        {
+          padding: 1,
+          margin: 1,
+          borderStyle: "round",
+          borderColor: "cyan",
+        },
+      ),
+    );
+
+    const action = await select({
+      message: "What would you like to do?",
+      choices: [
+        {
+          name:
+            chalk.green("📂 Use existing configuration") +
+            (profiles.length > 1 ? chalk.gray(" (choose which one)") : ""),
+          value: "use_existing",
+        },
+        {
+          name:
+            chalk.cyan("➕ Create new configuration") +
+            chalk.gray(" (keep existing)"),
+          value: "new",
+        },
+        {
+          name:
+            chalk.red("🗑️  Start fresh") +
+            chalk.gray(" (delete existing and create new)"),
+          value: "delete_and_new",
+        },
+      ],
+    });
+
+    if (action === "use_existing") {
+      if (profiles.length === 1) {
+        return { action: "use_existing", profileId: profiles[0].id };
+      }
+
+      // Let user select which profile
+      const selectedId = await select({
+        message: "Select configuration to use:",
+        choices: profiles.map((p) => ({
+          name: `${p.name} (Last used: ${new Date(p.lastUsedAt).toLocaleDateString()})`,
+          value: p.id,
+        })),
+      });
+      //@ts-ignore
+      return { action: "use_existing", profileId: selectedId };
+    }
+    //@ts-ignore
+    return { action };
+  }
+
+  /**
+   * Run setup wizard for a specific mode
+   */
+  private async runSetupWizardForMode(
+    mode: SetupMode,
+    baseDirectory: string,
+  ): Promise<EnhancedAppConfig> {
+    // Update appDir to use the chosen base directory
+    const appDir = baseDirectory;
+
+    if (mode === SetupMode.DOCKER) {
+      return await this.setupDockerModeWithDir(mode, appDir);
+    } else {
+      return await this.setupManualModeWithDir(appDir);
+    }
+  }
+
+  /**
+   * Docker mode setup using specified directory
+   */
+  private async setupDockerModeWithDir(
+    mode: SetupMode,
+    appDir: string,
+  ): Promise<EnhancedAppConfig> {
+    const wizard = new SetupWizard(appDir);
+    return await wizard.setupDockerMode();
+  }
+
+  /**
+   * Manual mode setup using specified directory
+   */
+  private async setupManualModeWithDir(
+    appDir: string,
+  ): Promise<EnhancedAppConfig> {
+    const wizard = new SetupWizard(appDir);
+    return await wizard.setupManualMode();
   }
 
   /**
@@ -256,251 +543,6 @@ export class CaravanRegtestManager {
       );
       console.log(chalk.gray("Bitcoin Multisig Development Testing Tool\n"));
     }
-  }
-
-  /**
-   * Run the setup wizard
-   */
-  private async runSetupWizard(): Promise<EnhancedAppConfig> {
-    // Ask for mode
-    const mode = await this.selectMode();
-
-    if (mode === SetupMode.DOCKER) {
-      return await this.setupDockerMode(mode);
-    } else {
-      return await this.setupManualMode();
-    }
-  }
-
-  /**
-   * Select operation mode
-   */
-  private async selectMode(): Promise<SetupMode> {
-    const mode = await select({
-      message: "Select operation mode:",
-      choices: [
-        {
-          name: chalk.cyan("🐳 Docker Mode") + chalk.gray(" (Recommended)"),
-          value: SetupMode.DOCKER,
-          description:
-            "Automated regtest environment with Docker. Easy setup, no manual configuration needed.",
-        },
-        {
-          name: chalk.yellow("⚙️  Manual Mode"),
-          value: SetupMode.MANUAL,
-          description:
-            "Use your own Bitcoin Core node. You manage the node yourself.",
-        },
-      ],
-    });
-
-    return mode;
-  }
-
-  /**
-   * Setup Docker mode configuration and optionally start containers
-   */
-  private async setupDockerMode(mode: SetupMode): Promise<EnhancedAppConfig> {
-    console.log(
-      boxen(
-        chalk.white.bold("🐳 Docker Mode Configuration\n\n") +
-          chalk.gray("Caravan-X will:\n") +
-          chalk.white("  • Create a Bitcoin Core regtest container\n") +
-          chalk.white("  • Configure RPC authentication\n") +
-          chalk.white("  • Set up nginx proxy for easy access\n") +
-          chalk.white("  • Generate initial blockchain\n") +
-          chalk.white("  • Create watch-only wallet\n\n") +
-          chalk.cyan("Access via: ") +
-          chalk.green.bold("http://localhost:8080"),
-        {
-          padding: 1,
-          margin: 1,
-          borderStyle: "round",
-          borderColor: "cyan",
-        },
-      ),
-    );
-
-    const proceed = await confirm({
-      message: "Proceed with Docker setup?",
-      default: true,
-    });
-
-    if (!proceed) {
-      console.log(chalk.gray("\nSetup cancelled"));
-      process.exit(0);
-    }
-
-    // Run the full setup wizard to get configuration
-    const config = await this.setupWizard.run(mode);
-
-    return config;
-  }
-
-  /**
-   * Setup Manual mode
-   */
-  private async setupManualMode(): Promise<EnhancedAppConfig> {
-    console.log(
-      boxen(
-        chalk.yellow.bold("⚠️  Manual Mode\n\n") +
-          chalk.white("You are responsible for:\n") +
-          chalk.gray("  • Running Bitcoin Core yourself\n") +
-          chalk.gray("  • Managing the blockchain\n") +
-          chalk.gray("  • RPC configuration\n\n") +
-          chalk.cyan("Caravan-X will NOT manage your node"),
-        {
-          padding: 1,
-          margin: 1,
-          borderStyle: "round",
-          borderColor: "yellow",
-        },
-      ),
-    );
-
-    // Check for existing Bitcoin config
-    const config = this.configManager.getConfig();
-    let bitcoinConfig = config.bitcoin;
-
-    const hasExisting = await this.testBitcoinConnection(
-      bitcoinConfig.host,
-      bitcoinConfig.port,
-      bitcoinConfig.user,
-      bitcoinConfig.pass,
-    );
-
-    if (hasExisting) {
-      console.log(
-        boxen(
-          chalk.white.bold("Existing Bitcoin Configuration:\n\n") +
-            chalk.gray("Host: ") +
-            chalk.white(bitcoinConfig.host) +
-            "\n" +
-            chalk.gray("Port: ") +
-            chalk.white(bitcoinConfig.port) +
-            "\n" +
-            chalk.gray("User: ") +
-            chalk.white(bitcoinConfig.user),
-          {
-            padding: 1,
-            margin: 1,
-            borderStyle: "round",
-            borderColor: "green",
-          },
-        ),
-      );
-
-      const useExisting = await confirm({
-        message: "Use existing configuration?",
-        default: true,
-      });
-
-      if (!useExisting) {
-        bitcoinConfig = await this.getBitcoinConfig();
-      }
-    } else {
-      console.log(chalk.yellow("\n⚠️  No existing connection found\n"));
-      bitcoinConfig = await this.getBitcoinConfig();
-    }
-
-    // Test the connection
-    const spinner = ora("Testing connection to Bitcoin Core...").start();
-    const connected = await this.testBitcoinConnection(
-      bitcoinConfig.host,
-      bitcoinConfig.port,
-      bitcoinConfig.user,
-      bitcoinConfig.pass,
-    );
-
-    if (!connected) {
-      spinner.fail(chalk.red("Connection failed"));
-      console.log(
-        boxen(
-          chalk.red.bold("⚠️  Cannot Connect to Bitcoin Core\n\n") +
-            chalk.white("Please ensure:\n") +
-            chalk.gray("  • Bitcoin Core is running\n") +
-            chalk.gray("  • RPC credentials are correct\n") +
-            chalk.gray("  • Using regtest network\n\n") +
-            chalk.yellow("Start your node with:\n") +
-            chalk.cyan("  bitcoind -regtest -daemon\n") +
-            chalk.cyan(
-              "  bitcoind -regtest -server -rpcuser=user -rpcpassword=pass",
-            ),
-          {
-            padding: 1,
-            margin: 1,
-            borderStyle: "round",
-            borderColor: "red",
-          },
-        ),
-      );
-      process.exit(1);
-    }
-
-    spinner.succeed(chalk.green("Connected to Bitcoin Core"));
-
-    // Create enhanced config
-    const enhancedConfig: EnhancedAppConfig = {
-      mode: SetupMode.MANUAL,
-      bitcoin: bitcoinConfig,
-      appDir: config.appDir,
-      caravanDir: config.caravanDir,
-      keysDir: config.keysDir,
-      snapshots: {
-        enabled: false, // Disable snapshots in manual mode
-        directory: path.join(config.appDir, "snapshots"),
-        autoSnapshot: false,
-      },
-      scenariosDir: path.join(config.appDir, "scenarios"),
-    };
-
-    // Save config
-    const configPath = path.join(config.appDir, "config.json");
-    await fs.ensureDir(config.appDir);
-    await fs.writeJson(configPath, enhancedConfig, { spaces: 2 });
-
-    return enhancedConfig;
-  }
-
-  /**
-   * Get Bitcoin RPC configuration from user
-   */
-  private async getBitcoinConfig() {
-    console.log(chalk.white("\n🔧 Bitcoin Core Configuration\n"));
-
-    const host = await input({
-      message: "Bitcoin RPC host:",
-      default: "127.0.0.1",
-    });
-
-    const port = await number({
-      message: "Bitcoin RPC port:",
-      default: 18443,
-    });
-
-    const user = await input({
-      message: "RPC username:",
-      default: "user",
-    });
-
-    const pass = await input({
-      message: "RPC password:",
-      default: "pass",
-    });
-
-    const dataDir = await input({
-      message: "Bitcoin data directory:",
-      default: path.join(process.env.HOME || "~", ".bitcoin"),
-    });
-
-    return {
-      protocol: "http",
-      host,
-      port: port!,
-      user,
-      pass,
-      dataDir,
-    };
   }
 
   /**

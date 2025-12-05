@@ -91,6 +91,7 @@
     "terminal-link": "^4.0.0",
     "three.js": "^0.77.1",
     "tiny-secp256k1": "^2.2.3",
+    "uuid": "^13.0.0",
     "vis-network": "^9.1.9",
     "vm2": "^3.9.19",
     "yaml": "^2.8.1"

@@ -236,6 +236,9 @@ export class MainMenu {
 
   constructor(app: CaravanRegtestManager) {
     this.app = app;
+    const appDir =
+      this.app.enhancedConfig?.appDir ||
+      this.app.configManager.getConfig().appDir;
 
     // Initialize new command classes
     if (app.dockerService) {
@@ -243,9 +246,7 @@ export class MainMenu {
     }
     this.snapshotCommands = new SnapshotCommands(app.snapshotService);
     this.scenarioCommands = new ScenarioCommands(app.scenarioService);
-    this.settingsCommands = new SettingsCommands(
-      app.configManager.getConfig().appDir,
-    );
+    this.settingsCommands = new SettingsCommands(appDir);
   }
 
   /**
@@ -649,7 +650,7 @@ export class MainMenu {
           await this.importMenu();
           break;
         case "settings":
-          await this.settingsMenu();
+          await this.settingsCommands.showSettingsMenu();
           break;
         default:
           console.log(
@@ -954,6 +955,7 @@ export class MainMenu {
 
   /**
    * Settings menu
+   * @deprecated use this.settingsCommands.showSettingsMenu() instead
    */
   private async settingsMenu(): Promise<void> {
     try {
