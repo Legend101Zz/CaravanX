@@ -14,7 +14,10 @@
     "lint": "eslint src/**/*.ts",
     "test": "jest",
     "prepublishOnly": "npm run build",
-    "postinstall": "echo 'Thank you for installing Caravan-X! Run caravan-x to get started.'"
+    "postinstall": "echo 'Thank you for installing Caravan-X! Run caravan-x to get started.'",
+    "release:patch": "./scripts/publish.sh patch",
+    "release:minor": "./scripts/publish.sh minor",
+    "release:major": "./scripts/publish.sh major"
   },
   "engines": {
     "node": ">=v22.14.0",
