@@ -3,7 +3,7 @@ import chalk from "chalk";
 import boxen from "boxen";
 import * as fs from "fs-extra";
 import * as path from "path";
-
+import { log, LogLevel, parseLogLevel } from "../utils/logger";
 import { ProfileManager } from "../core/profiles";
 import { SetupWizard } from "../ui/setupWizard";
 import { SetupMode, EnhancedAppConfig, ConfigProfile } from "../types/config";
@@ -34,6 +34,7 @@ export class SettingsCommands {
           { name: chalk.yellow("🔄 Switch Mode"), value: "switch_mode" },
           { name: chalk.green("📝 Edit Current Config"), value: "edit" },
           { name: chalk.magenta("📂 Manage Profiles"), value: "profiles" },
+          { name: chalk.blue("📊 Logging & Debug"), value: "logging" },
           { name: chalk.gray("🔙 Back"), value: "back" },
         ],
       });
@@ -50,6 +51,9 @@ export class SettingsCommands {
           break;
         case "profiles":
           await this.manageProfiles();
+          break;
+        case "logging":
+          await this.loggingSettings();
           break;
         case "back":
           continueMenu = false;
@@ -536,6 +540,190 @@ export class SettingsCommands {
     }
 
     await this.pressEnter();
+  }
+
+  /**
+   * Logging & Debug settings
+   */
+  private async loggingSettings(): Promise<void> {
+    console.clear();
+    console.log(chalk.cyan.bold("\n📊 Logging & Debug Settings\n"));
+
+    // load current config
+    let config: EnhancedAppConfig;
+    try {
+      config = await fs.readJson(this.configPath);
+    } catch {
+      console.log(chalk.red("No configuration found. Run setup first."));
+      await this.pressEnter();
+      return;
+    }
+
+    // defaults
+    const currentLogging = config.logging || {
+      level: "normal",
+      fileLogging: true,
+      logDir: path.join(this.appDir, "logs"),
+    };
+
+    // show current state
+    console.log(
+      boxen(
+        chalk.white.bold("Current Logging Configuration\n\n") +
+          chalk.dim("Log level:    ") +
+          this.getLogLevelBadge(currentLogging.level) +
+          "\n" +
+          chalk.dim("File logging: ") +
+          (currentLogging.fileLogging
+            ? chalk.green("enabled")
+            : chalk.red("disabled")) +
+          "\n" +
+          chalk.dim("Log dir:      ") +
+          chalk.white(currentLogging.logDir) +
+          "\n" +
+          chalk.dim("Log file:     ") +
+          chalk.white(log.getLogFilePath()),
+        {
+          padding: 1,
+          margin: { top: 0, bottom: 1, left: 0, right: 0 },
+          borderStyle: "round",
+          borderColor: "blue",
+        },
+      ),
+    );
+
+    const action = await select({
+      message: "What would you like to change?",
+      choices: [
+        { name: "📶 Change log level", value: "level" },
+        {
+          name: `💾 ${currentLogging.fileLogging ? "Disable" : "Enable"} file logging`,
+          value: "toggle_file",
+        },
+        { name: "📂 Open log directory", value: "open_dir" },
+        { name: "🗑️  Clear log files", value: "clear" },
+        { name: chalk.gray("🔙 Back"), value: "back" },
+      ],
+    });
+
+    switch (action) {
+      case "level": {
+        const newLevel = await select({
+          message: "Select log level:",
+          choices: [
+            {
+              name: `🔇 Silent  ${chalk.dim("— errors only, clean output")}`,
+              value: "silent",
+            },
+            {
+              name: `📋 Normal  ${chalk.dim("— errors, warnings, info (default)")}`,
+              value: "normal",
+            },
+            {
+              name: `📝 Verbose ${chalk.dim("— step-by-step operation details")}`,
+              value: "verbose",
+            },
+            {
+              name: `🔍 Debug   ${chalk.dim("— everything: commands, RPC, stacks")}`,
+              value: "debug",
+            },
+          ],
+        });
+
+        currentLogging.level = newLevel as any;
+        config.logging = currentLogging;
+        await fs.writeJson(this.configPath, config, { spaces: 2 });
+
+        // apply immediately to running logger
+        log.setLevel(parseLogLevel(newLevel));
+        console.log(chalk.green(`\n✅ Log level set to ${newLevel}`));
+        console.log(
+          chalk.dim(
+            "This takes effect immediately and persists across restarts.",
+          ),
+        );
+        break;
+      }
+
+      case "toggle_file": {
+        currentLogging.fileLogging = !currentLogging.fileLogging;
+        config.logging = currentLogging;
+        await fs.writeJson(this.configPath, config, { spaces: 2 });
+        console.log(
+          chalk.green(
+            `\n✅ File logging ${currentLogging.fileLogging ? "enabled" : "disabled"}`,
+          ),
+        );
+        console.log(chalk.yellow("Restart Caravan-X for this to take effect."));
+        break;
+      }
+
+      case "open_dir": {
+        const logDir = currentLogging.logDir;
+        await fs.ensureDir(logDir);
+        console.log(chalk.cyan(`\nLog directory: ${logDir}`));
+
+        // list existing log files
+        try {
+          const files = await fs.readdir(logDir);
+          const logFiles = files.filter((f) => f.endsWith(".log"));
+          if (logFiles.length > 0) {
+            console.log(chalk.dim("\nLog files:"));
+            for (const f of logFiles) {
+              const stats = await fs.stat(path.join(logDir, f));
+              const sizeKb = (stats.size / 1024).toFixed(1);
+              console.log(chalk.dim(`  ${f} (${sizeKb} KB)`));
+            }
+          } else {
+            console.log(chalk.dim("\nNo log files yet."));
+          }
+        } catch {
+          console.log(chalk.dim("\nCould not list log files."));
+        }
+        break;
+      }
+
+      case "clear": {
+        const confirmed = await confirm({
+          message: "Delete all log files? This cannot be undone.",
+          default: false,
+        });
+        if (confirmed) {
+          try {
+            const logDir = currentLogging.logDir;
+            const files = await fs.readdir(logDir);
+            for (const f of files.filter((f) => f.endsWith(".log"))) {
+              await fs.remove(path.join(logDir, f));
+            }
+            console.log(chalk.green("\n✅ Log files cleared."));
+          } catch {
+            console.log(chalk.red("\nFailed to clear log files."));
+          }
+        }
+        break;
+      }
+
+      case "back":
+        return;
+    }
+
+    await this.pressEnter();
+  }
+
+  /** Color-coded badge for log level display */
+  private getLogLevelBadge(level: string): string {
+    switch (level) {
+      case "silent":
+        return chalk.bgGray.white(" SILENT ");
+      case "normal":
+        return chalk.bgCyan.white(" NORMAL ");
+      case "verbose":
+        return chalk.bgYellow.black(" VERBOSE ");
+      case "debug":
+        return chalk.bgMagenta.white(" DEBUG ");
+      default:
+        return chalk.bgGray.white(` ${level.toUpperCase()} `);
+    }
   }
 
   private async pressEnter(): Promise<void> {

@@ -15,13 +15,37 @@ import {
   boxText,
 } from "./utils/terminal";
 import { addScriptCommandsToCLI } from "./scripting/cli-integration";
-import { AddressType } from "./types/caravan";
+import { log, parseLogLevel, LogLevel } from "./utils/logger";
+import { CaravanXError } from "./utils/errors";
+
+/**
+ * Resolve the effective log level from CLI flags.
+ * Priority: --debug > --quiet > --log-level > config file > "normal"
+ */
+function resolveLogLevel(opts: any): LogLevel {
+  if (opts.debug) return LogLevel.DEBUG;
+  if (opts.quiet) return LogLevel.SILENT;
+  return parseLogLevel(opts.logLevel);
+}
 
 // Display the Caravan logo
 console.log(caravanLogo);
 
 // Set up the command line interface
 const program = new Command();
+
+// Hook into commander's pre-action to initialize the logger
+// This runs before any command handler executes
+program.hook("preAction", async (thisCommand) => {
+  const opts = thisCommand.opts();
+  const level = resolveLogLevel(opts);
+
+  await log.init({
+    level,
+    // fileLogging + logDir will also read from config.json if available,
+    // but CLI flags take priority — handled inside CaravanRegtestManager
+  });
+});
 
 program
   .name("caravan-regtest")
@@ -32,6 +56,15 @@ program
     colors.info("A terminal-based utility for Bitcoin multisig wallet testing"),
   )
   .option("--json", "Output results in JSON format", false);
+
+program
+  .option(
+    "--log-level <level>",
+    "Set log verbosity: silent, normal, verbose, debug",
+    "normal",
+  )
+  .option("--debug", "Shorthand for --log-level debug")
+  .option("--quiet", "Shorthand for --log-level silent");
 
 // List wallets command
 program
@@ -45,7 +78,7 @@ program
     try {
       await app.walletCommands.listWallets();
     } catch (error) {
-      console.error(formatError("Error listing wallets:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -72,7 +105,7 @@ program
         await app.walletCommands.createWallet();
       }
     } catch (error) {
-      console.error(formatError("Error creating wallet:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -106,7 +139,7 @@ program
     try {
       await app.multisigCommands.listCaravanWallets();
     } catch (error) {
-      console.error(formatError("Error listing Caravan wallets:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -122,7 +155,7 @@ program
     try {
       await app.multisigCommands.createCaravanWallet();
     } catch (error) {
-      console.error(formatError("Error creating Caravan wallet:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -138,7 +171,7 @@ program
     try {
       await app.multisigCommands.spendFromCaravanWallet();
     } catch (error) {
-      console.error(formatError("Error spending from Caravan wallet:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -156,7 +189,7 @@ program
     try {
       await app.walletCommands.fundWallet(options.wallet);
     } catch (error) {
-      console.error(formatError("Error funding wallet:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -183,7 +216,7 @@ program
     try {
       await app.transactionCommands.createPSBT();
     } catch (error) {
-      console.error(formatError("Error creating PSBT:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -210,7 +243,7 @@ program
         options.wallet,
       );
     } catch (error) {
-      console.error(formatError("Error signing PSBT:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -228,7 +261,7 @@ program
     try {
       await app.transactionCommands.signPSBTWithPrivateKey();
     } catch (error) {
-      console.error(formatError("Error signing PSBT with private key:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -249,7 +282,7 @@ program
       await app.configManager.changeConfigLocation(options.path);
       changeSpinner.succeed(`Configuration path changed to: ${options.path}`);
     } catch (error) {
-      console.error(formatError("Error changing config path:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -306,7 +339,7 @@ program
         await app.multisigCommands.createWatchWallet(config);
       }
     } catch (error) {
-      console.error(formatError("Error importing Caravan wallet:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -375,7 +408,8 @@ program
         );
       }
     } catch (error) {
-      console.error(formatError("Error mining blocks:"), error);
+      log.displayError(CaravanXError.from(error));
+      (formatError("Error mining blocks:"), error);
     }
   });
 
@@ -392,7 +426,8 @@ program
     try {
       await app.transactionCommands.analyzePSBT();
     } catch (error) {
-      console.error(formatError("Error analyzing PSBT:"), error);
+      log.displayError(CaravanXError.from(error));
+      (formatError("Error analyzing PSBT:"), error);
     }
   });
 
@@ -415,7 +450,8 @@ program
       }
       await app.transactionCommands.finalizeAndBroadcastPSBT(psbtBase64);
     } catch (error) {
-      console.error(formatError("Error finalizing PSBT:"), error);
+      log.displayError(CaravanXError.from(error));
+      (formatError("Error finalizing PSBT:"), error);
     }
   });
 
@@ -479,7 +515,7 @@ program
         transactionCount: parseInt(options.txCount),
       });
     } catch (error) {
-      console.error(formatError("Error creating test wallets:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -511,7 +547,7 @@ program
         ),
       );
     } catch (error) {
-      console.error(formatError("Error getting blockchain info:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -537,7 +573,7 @@ program
       // Start visualization with browser option
       await app.visualizationCommands.startVisualization();
     } catch (error) {
-      console.error(formatError("Error starting visualization:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -552,7 +588,7 @@ program
     try {
       await app.visualizationCommands.stopVisualization();
     } catch (error) {
-      console.error(formatError("Error stopping visualization:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -574,7 +610,7 @@ program
     try {
       await app.visualizationCommands.simulateBlockchain();
     } catch (error) {
-      console.error(formatError("Error simulating blockchain:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -593,7 +629,7 @@ program
     try {
       await app.multisigCommands.signCaravanPSBT();
     } catch (error) {
-      console.error(formatError("Error signing Caravan PSBT:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -616,7 +652,7 @@ program
     try {
       await app.start();
     } catch (error) {
-      console.error(formatError("Error starting application:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -663,7 +699,7 @@ program
         await app.multisigCommands.createTestMultisigWallets();
       }
     } catch (error) {
-      console.error(formatError("Error running health privacy test:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -698,7 +734,7 @@ program
         console.error(formatError("Multisig RBF test script not found."));
       }
     } catch (error) {
-      console.error(formatError("Error running multisig RBF test:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 
@@ -733,7 +769,7 @@ program
         console.error(formatError("Multisig CPFP test script not found."));
       }
     } catch (error) {
-      console.error(formatError("Error running multisig CPFP test:"), error);
+      log.displayError(CaravanXError.from(error));
     }
   });
 

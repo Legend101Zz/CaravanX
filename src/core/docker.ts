@@ -7,6 +7,8 @@ import chalk from "chalk";
 import cliProgress from "cli-progress";
 import { DockerConfig, SharedConfig } from "../types/config";
 import { execAsync } from "../utils/exec";
+import { log } from "../utils/logger";
+import { CaravanXError } from "../utils/errors";
 
 interface ContainerStatus {
   running: boolean;
@@ -153,20 +155,20 @@ export class DockerService {
     const portStatus = await this.checkPortsAvailable();
 
     if (portStatus.conflicts.length > 0) {
-      console.log(chalk.yellow("\n⚠️  Default ports are in use:"));
+      log.warn("Default ports are in use:");
       portStatus.conflicts.forEach((conflict) => {
-        console.log(chalk.dim(`  • ${conflict}`));
+        log.verbose(`  • ${conflict}`);
       });
 
-      console.log(chalk.cyan("\n🔍 Finding available ports...\n"));
+      log.info("Finding available ports...");
 
       // Auto-find alternative ports
       const availablePorts = await this.findAvailablePorts();
 
-      console.log(chalk.green("✅ Found available ports:"));
-      console.log(chalk.white(`  • RPC Port: ${availablePorts.rpc}`));
-      console.log(chalk.white(`  • P2P Port: ${availablePorts.p2p}\n`));
-
+      log.info(" Found available ports:");
+      log.success(
+        `Found available ports — RPC: ${availablePorts.rpc}, P2P: ${availablePorts.p2p}`,
+      );
       // Update config with new ports
       this.config.ports.rpc = availablePorts.rpc;
       this.config.ports.p2p = availablePorts.p2p;
@@ -273,7 +275,7 @@ port=${this.config.ports.p2p}`.trim();
    * This handles the Bitcoin Core container only - nginx is separate
    */
   async startContainer(sharedConfig?: SharedConfig): Promise<void> {
-    console.log(chalk.bold.cyan("\n🚀 Starting Bitcoin Core Container\n"));
+    log.info(" Starting Bitcoin Core Container\n");
 
     const multibar = new cliProgress.MultiBar(
       {
@@ -291,6 +293,7 @@ port=${this.config.ports.p2p}`.trim();
     try {
       // Step 1: Check Docker
       mainProgress.update(5, { status: "Checking Docker..." });
+      log.step(1, 11, "Checking Docker availability...");
       const dockerAvailable = await this.checkDockerAvailable();
       if (!dockerAvailable) {
         multibar.stop();
@@ -300,10 +303,12 @@ port=${this.config.ports.p2p}`.trim();
 
       // Step 2: Detect Architecture
       mainProgress.update(15, { status: "Detecting architecture..." });
+      log.step(2, 11, "Detecting architecture...");
       const arch = await this.detectArchitecture();
       mainProgress.update(20, { status: `Architecture: ${arch} ✓` });
 
       // Step 3: Set credentials from sharedConfig
+      log.step(3, 11, "Setting credentials...");
       if (sharedConfig?.bitcoin.rpcUser && sharedConfig?.bitcoin.rpcPassword) {
         this.rpcUser = sharedConfig.bitcoin.rpcUser;
         this.rpcPassword = sharedConfig.bitcoin.rpcPassword;
@@ -311,6 +316,7 @@ port=${this.config.ports.p2p}`.trim();
 
       // Step 4: Ensure ports are available (auto-adjust if needed)
       mainProgress.update(25, { status: "Checking ports..." });
+      log.step(4, 11, "Checking ports...");
       const ports = await this.ensurePortsAvailable();
       mainProgress.update(30, { status: "Ports available ✓" });
 
@@ -322,11 +328,13 @@ port=${this.config.ports.p2p}`.trim();
 
       // Step 5: Setup Network
       mainProgress.update(35, { status: "Setting up network..." });
+      log.step(5, 11, "Setting up network...");
       await this.ensureNetwork();
       mainProgress.update(40, { status: "Network ready ✓" });
 
       // Step 6: Prepare Data Directory
       mainProgress.update(45, { status: "Preparing data directory..." });
+      log.step(6, 11, "Preparing data directory...");
       const bitcoinDataDir = this.config.volumes.bitcoinData;
 
       await fs.ensureDir(bitcoinDataDir);
@@ -350,15 +358,14 @@ port=${this.config.ports.p2p}`.trim();
         try {
           await execAsync(`chmod -R 777 "${bitcoinDataDir}"`);
         } catch (error) {
-          console.warn(
-            chalk.yellow("Warning: Could not set directory permissions"),
-          );
+          log.warn("Could not set directory permissions");
         }
       }
       mainProgress.update(50, { status: "Directories ready ✓" });
 
       // Step 7: Check Container Status & Clean Up
       mainProgress.update(55, { status: "Checking container status..." });
+      log.step(7, 11, "Checking container status...");
       const status = await this.getContainerStatus();
 
       if (status.containerId) {
@@ -376,9 +383,9 @@ port=${this.config.ports.p2p}`.trim();
 
       // Step 8: Create Container
       mainProgress.update(65, { status: "Creating container..." });
-
+      log.step(8, 11, "Creating container...");
       let dockerCommand = `docker run -d --name ${this.config.containerName}`;
-
+      log.command(`docker run -d --name ${this.config.containerName} ...`);
       // Add platform flag for ARM64 systems
       if (arch.includes("arm64") || arch.includes("aarch64")) {
         dockerCommand += ` --platform linux/amd64`;
@@ -407,6 +414,7 @@ port=${this.config.ports.p2p}`.trim();
 
       // Step 9: Wait for Container to Start
       mainProgress.update(72, { status: "Waiting for container..." });
+      log.step(9, 11, "Waiting for container startup...");
       await new Promise((resolve) => setTimeout(resolve, 3000));
 
       const newStatus = await this.getContainerStatus();
@@ -421,22 +429,25 @@ port=${this.config.ports.p2p}`.trim();
 
       // Step 10: Wait for RPC to be ready
       mainProgress.update(78, { status: "Waiting for RPC..." });
+      log.step(10, 11, "Waiting for RPC...");
       await this.waitForRpcReady(multibar, mainProgress);
       mainProgress.update(90, { status: "RPC ready ✓" });
 
       // Step 11: Generate Initial Blocks (if requested)
       if (sharedConfig?.initialState.preGenerateBlocks) {
         mainProgress.update(92, { status: "Generating blocks..." });
+        log.step(11, 11, "Generating initial blocks...");
         await this.generateInitialBlocks(
           sharedConfig.initialState.blockHeight,
           multibar,
           mainProgress,
         );
       }
+
       mainProgress.update(100, { status: "Complete ✓" });
 
       multibar.stop();
-      console.log(chalk.bold.green("\n✅ Bitcoin Core container started!\n"));
+      log.info("\nBitcoin Core container started!\n");
     } catch (error: any) {
       multibar.stop();
       throw error;
@@ -471,10 +482,10 @@ port=${this.config.ports.p2p}`.trim();
 
         if (i === maxAttempts - 1) {
           multibar.stop();
-          console.error(chalk.red("\n❌ RPC Connection Failed\n"));
-          console.error(chalk.white("Credentials being used:"));
-          console.error(chalk.cyan(`  User: ${this.rpcUser}`));
-          console.error(chalk.cyan(`  Pass: ${this.rpcPassword}`));
+          log.debug(`RPC connection failed after ${maxAttempts} attempts`);
+          log.debug(
+            `Credentials used — user: ${this.rpcUser}, pass: ${this.rpcPassword}`,
+          );
           throw new Error(
             `RPC did not become ready after ${maxAttempts} attempts`,
           );
@@ -509,8 +520,8 @@ port=${this.config.ports.p2p}`.trim();
         `-rpcwallet=mining_wallet generatetoaddress ${targetHeight} ${address.trim()}`,
       );
     } catch (error: any) {
-      console.error(chalk.yellow("\n⚠️  Could not generate initial blocks"));
-      console.error(chalk.dim(error.message));
+      log.warn("Could not generate initial blocks");
+      log.debug("Block generation error:", error.message);
     }
   }
 
@@ -635,11 +646,7 @@ http {
       const nginxPort = await this.findAvailablePort(8080);
 
       if (nginxPort !== 8080) {
-        console.log(
-          chalk.yellow(
-            `\n  ℹ️  Port 8080 in use, using ${nginxPort} instead\n`,
-          ),
-        );
+        log.info(`Port 8080 in use, using ${nginxPort} instead\n`);
       }
 
       // Create nginx config
@@ -724,11 +731,11 @@ http {
    *  @returns The actual nginx port used
    */
   async completeSetup(sharedConfig?: SharedConfig): Promise<number> {
-    console.log(chalk.bold.cyan("\n🚀 Complete Docker Setup\n"));
+    log.info("\n Complete Docker Setup\n");
 
     try {
       // Step 1: Ensure ports are available (auto-adjust if needed)
-      console.log(chalk.cyan("🔍 Checking port availability...\n"));
+      log.info("Checking port availability...\n");
       const ports = await this.ensurePortsAvailable();
 
       // Update shared config with actual ports
@@ -741,7 +748,7 @@ http {
       await this.startContainer(sharedConfig);
 
       // Step 3: Setup nginx proxy
-      console.log(chalk.cyan("\n🔧 Setting up nginx proxy...\n"));
+      log.info("\n Setting up nginx proxy...\n");
 
       // Clean up any existing nginx first
       try {
@@ -760,11 +767,11 @@ http {
 
       // Step 4: Create watch-only wallet
       const walletName = sharedConfig?.walletName || "caravan_watcher";
-      console.log(chalk.cyan(`\n📁 Creating watch-only wallet...\n`));
+      log.info(`\n Creating watch-only wallet...\n`);
       await this.createWatchOnlyWallet(walletName);
 
       // Step 5: Test connection through nginx
-      console.log(chalk.cyan("\n🧪 Testing connection...\n"));
+      log.info("\n Testing connection...\n");
       const connected = await this.testConnection("localhost", nginxPort);
 
       if (!connected) {
@@ -790,7 +797,7 @@ http {
       // RETURN the actual nginx port so it can be saved to config
       return nginxPort;
     } catch (error: any) {
-      console.error(chalk.red("\n❌ Setup failed:"), error.message);
+      throw CaravanXError.from(error);
       throw error;
     }
   }

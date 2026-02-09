@@ -2,8 +2,9 @@ import axios, { AxiosRequestConfig } from "axios";
 import * as fs from "fs-extra";
 import { execSync } from "child_process";
 import { BitcoinRpcConfig } from "../types/config";
-import chalk from "chalk";
 import path from "path";
+import { log } from "../utils/logger";
+
 /**
  * Client for communicating with the Bitcoin Core via RPC
  */
@@ -29,6 +30,8 @@ export class BitcoinRpcClient {
     params: any[] = [],
     wallet?: string,
   ): Promise<T> {
+    log.rpc(method, params, wallet);
+
     try {
       const url = wallet ? `${this.baseUrl}/wallet/${wallet}` : this.baseUrl;
       const requestConfig: AxiosRequestConfig = {
@@ -52,41 +55,64 @@ export class BitcoinRpcClient {
 
       return response.data.result;
     } catch (error: any) {
+      // ---------------------------------------------------------------
+      // Throw descriptive errors — DON'T displayError() here.
+      // The command layer (commands/*.ts, mainMenu.ts) catches these
+      // and runs: log.displayError(CaravanXError.from(error))
+      //
+      // We just make sure the error message is descriptive enough
+      // for CaravanXError.from() to pattern-match correctly.
+      // ---------------------------------------------------------------
+
       // More descriptive error message
       if (error.code === "ECONNREFUSED") {
+        // log.debug writes to file + terminal at --debug level
+        log.debug(`RPC ECONNREFUSED for ${method} at ${this.baseUrl}`);
         throw new Error(
           `Connection refused - Bitcoin Core not running at ${this.baseUrl}\n` +
             `Check your configuration and ensure Bitcoin Core is accessible.`,
         );
       } else if (error.response && error.response.status === 401) {
+        log.debug(
+          `RPC 401 auth failure for ${method}, user=${this.auth.username}`,
+        );
         throw new Error(
           `Authentication failed - Check RPC username (${this.auth.username}) and password`,
         );
       } else if (error.response && error.response.status === 502) {
+        log.debug(`RPC 502 bad gateway for ${method}`);
         throw new Error(
           `Bad Gateway (502) - Proxy cannot reach Bitcoin Core\n` +
             `If using Docker mode, ensure containers are running:\n` +
             `  docker ps | grep caravan-x`,
         );
       } else if (error.message.includes("timeout")) {
+        log.debug(`RPC timeout for ${method} at ${this.baseUrl}`);
         throw new Error(
           `Connection timed out - Bitcoin Core not responding at ${this.baseUrl}`,
         );
       }
 
-      // Log the error for debugging
-      console.error(
-        chalk.red(`RPC call failed for method: ${method}`),
-        error.message,
-      );
+      // Generic RPC failure — log at debug, don't console.error directly
+      log.debug(`RPC call failed: ${method}`, error.message);
 
       // Try fallback method ONLY if dataDir exists and is accessible
       if (this.config.dataDir && fs.existsSync(this.config.dataDir)) {
+        log.verbose(
+          `RPC failed for ${method}, attempting bitcoin-cli fallback...`,
+        );
         try {
           const cliCommand = `${method} ${params.map((p) => JSON.stringify(p)).join(" ")}`;
+
+          log.command(`bitcoin-cli -regtest ${cliCommand}`);
+
           const result = this.executeCliCommand(cliCommand, wallet);
+
+          log.verbose(`CLI fallback succeeded for ${method}`);
+
           return JSON.parse(result) as T;
         } catch (cliError: any) {
+          log.debug(`CLI fallback also failed for ${method}`, cliError.message);
           // Fallback also failed
           throw new Error(
             `RPC Error: ${error.message}\n` +
@@ -126,6 +152,9 @@ export class BitcoinRpcClient {
       }
 
       cliCmd += ` ${command}`;
+
+      // log the full command (credentials get redacted by log.command)
+      log.command(cliCmd);
 
       // Execute the command
       const result = execSync(cliCmd, {
@@ -338,10 +367,8 @@ export class BitcoinRpcClient {
       return await this.callRpc("importdescriptors", [descriptors], wallet);
     } catch (error: any) {
       if (error.message.includes("Method not found")) {
-        console.error(
-          chalk.yellow(
-            "importdescriptors method not supported. Your Bitcoin Core may be outdated.",
-          ),
+        log.warn(
+          "importdescriptors not supported — Bitcoin Core may be outdated",
         );
         throw new Error(
           "importdescriptors method not supported. Please upgrade your Bitcoin Core to use multisig wallets.",

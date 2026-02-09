@@ -6,6 +6,8 @@ import { TransactionService } from "./core/transaction";
 import { DockerService } from "./core/docker";
 import { SnapshotService } from "./core/snapshot";
 import { ScenarioService } from "./core/scenario";
+import { EnvironmentService } from "./core/environment";
+
 import {
   EnhancedAppConfig,
   SetupMode,
@@ -13,14 +15,19 @@ import {
   ConfigProfile,
   ProfilesIndex,
 } from "./types/config";
+
 import { WalletCommands } from "./commands/wallet";
 import { MultisigCommands } from "./commands/multisig";
 import { TransactionCommands } from "./commands/transaction";
 import { VisualizationCommands } from "./commands/visualizations";
 import { ScriptCommands } from "./commands/scripts";
+import { EnvironmentCommands } from "./commands/environment";
+
 import { MainMenu } from "./ui/mainMenu";
 import { SetupWizard } from "./ui/setupWizard";
 import { ProfileManager } from "./core/profiles";
+import { CaravanXError } from "./utils/errors";
+import { log, parseLogLevel } from "./utils/logger";
 
 import { confirm, input, number, select } from "@inquirer/prompts";
 import chalk from "chalk";
@@ -60,6 +67,7 @@ export class CaravanRegtestManager {
   public transactionCommands: TransactionCommands;
   public visualizationCommands: VisualizationCommands;
   public scriptCommands: ScriptCommands;
+  public environmentCommands!: EnvironmentCommands;
 
   public setupWizard: SetupWizard;
   public dockerService?: DockerService;
@@ -67,6 +75,8 @@ export class CaravanRegtestManager {
   public scenarioService: ScenarioService;
   public enhancedConfig?: EnhancedAppConfig;
   private profileManager!: ProfileManager;
+
+  public environmentService!: EnvironmentService;
 
   constructor() {
     // Initialize configuration
@@ -161,6 +171,24 @@ export class CaravanRegtestManager {
     // Initialize profile manager with the base directory
     this.profileManager = new ProfileManager(baseDirectory);
     await this.profileManager.initialize();
+
+    // Initialize logger from saved config (CLI flags may override later)
+    const savedConfigPath = path.join(baseDirectory, "config.json");
+    if (await fs.pathExists(savedConfigPath)) {
+      try {
+        const savedConfig = await fs.readJson(savedConfigPath);
+        if (savedConfig.logging) {
+          await log.init({
+            level: parseLogLevel(savedConfig.logging.level),
+            fileLogging: savedConfig.logging.fileLogging ?? true,
+            logDir:
+              savedConfig.logging.logDir || path.join(baseDirectory, "logs"),
+          });
+        }
+      } catch {
+        // config doesn't exist yet, logger stays at defaults
+      }
+    }
 
     // STEP 2: Ask for mode (Docker or Manual)
     const mode = await this.askForMode();
@@ -741,6 +769,19 @@ export class CaravanRegtestManager {
       this.caravanService,
       this.bitcoinService,
     );
+
+    this.environmentService = new EnvironmentService(
+      this.bitcoinRpcClient,
+      this.caravanService,
+      this.bitcoinService,
+      config,
+      this.dockerService || undefined,
+    );
+
+    this.environmentCommands = new EnvironmentCommands(
+      this.environmentService,
+      this.bitcoinRpcClient,
+    );
   }
 
   /**
@@ -823,7 +864,7 @@ if (require.main === module) {
   const app = new CaravanRegtestManager();
 
   app.start().catch((error) => {
-    console.error(chalk.red("\nError starting application:"), error);
+    log.displayError(CaravanXError.from(error));
     process.exit(1);
   });
 }

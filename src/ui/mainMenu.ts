@@ -5,6 +5,8 @@ import figlet from "figlet";
 import * as fs from "fs-extra";
 import gradient from "gradient-string";
 import ora from "ora";
+import { log } from "../utils/logger";
+import { CaravanXError } from "../utils/errors";
 
 import { DockerCommands } from "../commands/docker";
 import { SnapshotCommands } from "../commands/snapshot";
@@ -230,6 +232,11 @@ export class MainMenu {
       { name: colors.commandName("Export data"), value: "export" },
       { name: colors.commandName("Import data"), value: "import" },
       { name: colors.commandName("Settings"), value: "settings" },
+      {
+        name: chalk.magenta("📦 Environment Sharing"),
+        value: "environment",
+        description: "Export/import complete regtest environments",
+      },
       { name: colors.muted("Back to main menu"), value: "back" },
     ],
   };
@@ -255,45 +262,11 @@ export class MainMenu {
    */
   private async handleError(error: any, context: string): Promise<void> {
     console.clear();
-    console.log(this.getErrorBox(error, context));
+
+    const classified = CaravanXError.from(error);
+    log.displayError(classified);
+
     await input({ message: "Press Enter to return to main menu..." });
-  }
-
-  /**
-   * Create a formatted error box
-   */
-  private getErrorBox(error: any, context: string): string {
-    const errorMessage = error.message || String(error);
-    const lines = [
-      colors.error(`⚠️ Error in ${context}`),
-      "",
-      colors.error(errorMessage),
-      "",
-      colors.muted("Check your inputs and Bitcoin Core connection"),
-      colors.muted("Press Enter to return to the main menu"),
-    ];
-
-    // Calculate box width based on the longest line
-    const width = Math.max(...lines.map((line) => line.length)) + 4;
-
-    // Create the box
-    let box = "\n" + "╔" + "═".repeat(width) + "╗\n";
-
-    // Add each line to the box
-    lines.forEach((line) => {
-      const padding = " ".repeat(Math.floor((width - line.length) / 2));
-      box +=
-        "║" +
-        padding +
-        line +
-        " ".repeat(width - line.length - padding.length) +
-        "║\n";
-    });
-
-    // Close the box
-    box += "╚" + "═".repeat(width) + "╝\n";
-
-    return box;
   }
 
   /**
@@ -652,6 +625,12 @@ export class MainMenu {
         case "settings":
           await this.settingsCommands.showSettingsMenu();
           break;
+
+        // Add the handler in the switch statement:
+        case "environment":
+          await this.app.environmentCommands.showEnvironmentMenu();
+          break;
+
         default:
           console.log(
             colors.warning(`Action '${action}' not implemented yet.`),

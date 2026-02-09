@@ -228,6 +228,13 @@ export interface EnhancedAppConfig {
 
   // Active scenario (if any)
   activeScenario?: string;
+
+  // Logging configuration
+  logging?: {
+    level: "silent" | "normal" | "verbose" | "debug";
+    fileLogging: boolean;
+    logDir: string;
+  };
 }
 
 /**
