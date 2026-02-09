@@ -240,6 +240,14 @@ export class EnvironmentService {
             }
           }
 
+          const settingsFile = path.join(regtestDir, "settings.json");
+          if (await fs.pathExists(settingsFile)) {
+            await fs.copy(
+              settingsFile,
+              path.join(blockchainDir, "settings.json"),
+            );
+          }
+
           // Compute checksum of the blockchain data
           spinner.text = "Computing blockchain data checksum...";
           const blockchainTarPath = path.join(
@@ -516,6 +524,100 @@ export class EnvironmentService {
         await this.importBinary(extractDir, manifest, spinner, result, options);
       } else {
         await this.importReplay(extractDir, manifest, spinner, result, options);
+      }
+
+      // ── Step 6b: Start Docker container with imported data ──
+      // DEV: Binary import only copies files into the volume directory.
+      // The container doesn't exist yet for freshly created profiles.
+      // We need to start it so it mounts the imported data and becomes
+      // reachable on restart.
+      if (this.config.mode === SetupMode.DOCKER && this.dockerService) {
+        spinner.text = "Starting Docker container with imported data...";
+        spinner.info("Starting Docker container with imported data...");
+
+        try {
+          // Build a SharedConfig from the manifest so Docker uses
+          // the correct credentials and ports.
+          // preGenerateBlocks = false because we already have the data.
+          const sharedConfig: SharedConfig = {
+            version: "1.0.0",
+            name: manifest.name,
+            description: manifest.description || "",
+            mode: SetupMode.DOCKER,
+            bitcoin: {
+              network: manifest.network as "regtest" | "signet" | "testnet",
+              rpcPort: manifest.rpcConfig.rpcPort,
+              p2pPort: manifest.rpcConfig.p2pPort,
+              rpcUser: manifest.rpcConfig.rpcUser,
+              rpcPassword: manifest.rpcConfig.rpcPassword,
+            },
+            docker: this.config.docker!,
+            initialState: {
+              blockHeight: 0,
+              preGenerateBlocks: false, // Already have imported blocks
+              wallets: [],
+              transactions: [],
+            },
+            walletName: "caravan_watcher",
+            snapshots: {
+              enabled: true,
+              autoSnapshot: false,
+            },
+          };
+
+          // Start Bitcoin Core container — it will mount the volume
+          // where importBinary just wrote blocks/chainstate/wallets
+          // DEV: skipDataPrep=true prevents startContainer from deleting
+          // imported wallet files (like mining_wallet) that contain the
+          // coinbase rewards funding the entire environment.
+          // reindex=true forces Bitcoin Core to rebuild the block
+          // index from raw blk*.dat files. This is necessary because
+          // LevelDB files (blocks/index, chainstate) copied from
+          // a running instance may have inconsistent internal state.
+          // During reindex, Bitcoin Core also re-processes all blocks
+          // through loaded wallets, so balances are automatically correct.
+          await this.dockerService.startContainer(sharedConfig, {
+            skipDataPrep: true,
+            reindex: true,
+          });
+
+          // Set up nginx proxy for CORS-enabled RPC access
+          spinner.text = "Setting up nginx proxy...";
+          const nginxPort = await this.dockerService.setupNginxProxy(
+            sharedConfig,
+            true,
+          );
+
+          // Update the config with the actual nginx port so the
+          // profile config is correct on next restart
+          this.config.bitcoin.port = nginxPort;
+
+          // Load any wallets that were imported but not auto-loaded
+          spinner.text = "Loading imported wallets...";
+          for (const walletName of manifest.contents.bitcoinWallets) {
+            try {
+              await this.rpc.callRpc("loadwallet", [walletName]);
+            } catch {
+              // Wallet may already be loaded or auto-loaded — ignore
+            }
+          }
+
+          spinner.succeed(
+            chalk.green(
+              `Docker container running → nginx on port ${nginxPort}`,
+            ),
+          );
+        } catch (dockerError: any) {
+          // Don't fail the entire import — data is already in place.
+          // User can start the container manually.
+          result.warnings.push(
+            `Could not auto-start Docker container: ${dockerError.message}. ` +
+              `Use Docker Management → Start Container to start manually.`,
+          );
+          spinner.warn(
+            "Imported data is in place but container could not be started automatically.",
+          );
+        }
       }
 
       // ── Step 7: Import Caravan wallet configs ──
@@ -926,7 +1028,10 @@ export class EnvironmentService {
     result: EnvironmentImportResult,
     options: EnvironmentImportOptions,
   ): Promise<void> {
-    const regtestDir = await this.getRegtestDataDir();
+    // DEV: Pass createIfMissing=true because on a fresh imported profile
+    // the regtest directory doesn't exist yet (Docker hasn't started).
+    // We just need the target path to copy binary data into.
+    const regtestDir = await this.getRegtestDataDir(true);
 
     if (!regtestDir) {
       throw new Error(
@@ -952,6 +1057,16 @@ export class EnvironmentService {
       this.config.appDir,
       `regtest_backup_${Date.now()}`,
     );
+    // DEV: Only backup if regtest dir has actual data.
+    // For fresh profiles (created during import), the dir exists
+    // but is empty — no point backing up nothing.
+    const regtestContents = await fs.readdir(regtestDir).catch(() => []);
+    const hasExistingData = regtestContents.length > 0;
+
+    if (hasExistingData) {
+      await fs.copy(regtestDir, backupDir);
+      result.warnings.push(`Previous regtest data backed up to: ${backupDir}`);
+    }
 
     // After copying files to regtestDir, if in Docker mode and using docker cp:
     if (
@@ -976,10 +1091,6 @@ export class EnvironmentService {
             `If using a bind mount, the files are already in place.`,
         );
       }
-    }
-
-    if (await fs.pathExists(regtestDir)) {
-      await fs.copy(regtestDir, backupDir);
     }
 
     try {
@@ -1017,9 +1128,25 @@ export class EnvironmentService {
         result.walletsImported = manifest.contents.bitcoinWallets;
       }
 
-      // Clean up backup on success
-      // (Keep it for now — user can delete manually)
-      result.warnings.push(`Previous regtest data backed up to: ${backupDir}`);
+      // Copy settings.json — tells Bitcoin Core which wallets to
+      // auto-load on startup. Without this, wallet files exist on
+      // disk but Bitcoin Core won't load them.
+      spinner.text = "Importing wallet settings...";
+      const srcSettings = path.join(blockchainDir, "settings.json");
+      const destSettings = path.join(regtestDir, "settings.json");
+      if (await fs.pathExists(srcSettings)) {
+        await fs.copy(srcSettings, destSettings, { overwrite: true });
+      } else {
+        // Fallback: generate settings.json from the manifest's wallet list
+        // so Bitcoin Core knows to load them
+        const walletSettings = {
+          $schema: "/wallet-settings.json",
+          wallet: manifest.contents.bitcoinWallets.map((name) => ({
+            name,
+          })),
+        };
+        await fs.writeJson(destSettings, walletSettings, { spaces: 2 });
+      }
     } catch (error: any) {
       // Restore backup on failure
       spinner.text = "Import failed — restoring backup...";
@@ -1281,8 +1408,15 @@ export class EnvironmentService {
   /**
    * Get the regtest data directory path.
    * Handles both Docker mode (data inside container) and manual mode.
+   *  Handles both Docker mode and manual mode.
+   *
+   * @param createIfMissing — If true, create the directory if it doesn't
+   *   exist. Used during import where we need a target path before
+   *   Bitcoin Core has ever started.
    */
-  private async getRegtestDataDir(): Promise<string | null> {
+  private async getRegtestDataDir(
+    createIfMissing = false,
+  ): Promise<string | null> {
     if (this.config.mode === SetupMode.DOCKER && this.config.docker) {
       // In Docker mode, we ALWAYS use docker cp to get/put data
       // The volume path in config.docker.volumes.bitcoinData is the host-side mount
@@ -1293,15 +1427,31 @@ export class EnvironmentService {
         return regtestViaVolume;
       }
 
+      // DEV: For fresh profiles (e.g. import), the regtest dir doesn't
+      // exist yet because Docker hasn't started. Create it so the
+      // binary import has somewhere to write data.
+      if (createIfMissing && volumePath) {
+        await fs.ensureDir(regtestViaVolume);
+        return regtestViaVolume;
+      }
+
       // Fallback: check the docker-data directory caravan-x creates
       const dockerDataDir = path.join(this.config.appDir, "docker-data");
       const candidates = [
         path.join(dockerDataDir, "bitcoin", "regtest"),
         path.join(dockerDataDir, "regtest"),
+        path.join(dockerDataDir, "bitcoin-data", "regtest"),
       ];
 
       for (const c of candidates) {
         if (await fs.pathExists(c)) return c;
+      }
+
+      // DEV: If still nothing found and we're allowed to create,
+      // use the canonical Docker volume path
+      if (createIfMissing) {
+        await fs.ensureDir(regtestViaVolume);
+        return regtestViaVolume;
       }
 
       // Last resort: docker cp from container to temp dir

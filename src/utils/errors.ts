@@ -116,7 +116,6 @@ export class CaravanXError extends Error {
         category: ErrorCategory.PORT,
         userMessage: `Port ${port} is already in use by another process.`,
         suggestions: [
-          `Run: caravan-x docker cleanup`,
           `Change the port in Settings → Docker Settings`,
           `Check what's using it: lsof -i :${port}`,
           `Kill the process: kill $(lsof -ti :${port})`,
@@ -177,7 +176,6 @@ export class CaravanXError extends Error {
         userMessage: `Container "${name}" already exists.`,
         suggestions: [
           `Remove it: docker rm -f ${name}`,
-          `Or run: caravan-x docker cleanup`,
           `Use a different container name in Settings`,
         ],
         rawError: error,

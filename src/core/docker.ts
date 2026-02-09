@@ -26,6 +26,14 @@ interface PortCheckResult {
 }
 
 /**
+ * Fixed internal ports used by bitcoind INSIDE the container.
+ * These never change — only the HOST-side ports get bumped
+ * when there are conflicts.
+ */
+const INTERNAL_RPC_PORT = 18443;
+const INTERNAL_P2P_PORT = 18444;
+
+/**
  * Docker service for managing Bitcoin Core containers
  *
  * This service handles:
@@ -95,16 +103,26 @@ export class DockerService {
   /**
    * Find an available port starting from a base port
    * Tries up to 50 ports sequentially
+   * @param basePort The starting port number
+   * @param excludePorts Array of ports to skip (even if they are free)
    */
-  async findAvailablePort(basePort: number): Promise<number> {
+  async findAvailablePort(
+    basePort: number,
+    excludePorts: number[] = [],
+  ): Promise<number> {
     let port = basePort;
     let attempts = 0;
     const maxAttempts = 50;
 
     while (attempts < maxAttempts) {
-      if (!(await this.isPortInUse(port))) {
+      // Check if port is in use by OS OR if it's in our exclusion list
+      const inUseByOs = await this.isPortInUse(port);
+      const isExcluded = excludePorts.includes(port);
+
+      if (!inUseByOs && !isExcluded) {
         return port;
       }
+
       port++;
       attempts++;
     }
@@ -119,8 +137,12 @@ export class DockerService {
    * This is the helper that finds alternative ports
    */
   private async findAvailablePorts(): Promise<{ rpc: number; p2p: number }> {
+    // 1. Find a free RPC port
     const rpcPort = await this.findAvailablePort(18443);
-    const p2pPort = await this.findAvailablePort(18444);
+
+    // 2. Find a free P2P port, EXPLICITLY excluding the RPC port we just found
+    const p2pPort = await this.findAvailablePort(18444, [rpcPort]);
+
     return { rpc: rpcPort, p2p: p2pPort };
   }
 
@@ -232,49 +254,50 @@ export class DockerService {
    * Generate bitcoin.conf file with proper credentials
    */
   private generateBitcoinConf(sharedConfig?: SharedConfig): string {
-    // Use sharedConfig credentials if available, otherwise use instance defaults
     const rpcUser = sharedConfig?.bitcoin.rpcUser || this.rpcUser || "user";
     const rpcPassword =
       sharedConfig?.bitcoin.rpcPassword || this.rpcPassword || "pass";
-    const rpcPort = sharedConfig?.bitcoin.rpcPort || 18443;
 
-    // Store credentials for later use (for bitcoin-cli commands)
     this.rpcUser = rpcUser;
     this.rpcPassword = rpcPassword;
 
+    // DEV: Always use fixed internal ports in bitcoin.conf.
+    // Host-side port mapping is handled by Docker, not bitcoind.
     return `# Bitcoin Core Configuration for Caravan-X Regtest
-# Global Settings
-server=1
-# NOTE: Do NOT use daemon=1 in Docker - it must run in foreground!
+   # Global Settings
+   server=1
 
-# RPC Authentication (global)
-rpcuser=${rpcUser}
-rpcpassword=${rpcPassword}
+   # RPC Authentication (global)
+   rpcuser=${rpcUser}
+   rpcpassword=${rpcPassword}
 
-# Wallet Settings
-fallbackfee=0.00001
+   # Wallet Settings
+   fallbackfee=0.00001
 
-# Performance
-dbcache=512
+   # Performance
+   dbcache=512
 
-# Logging (verbose for development)
-debug=1
-printtoconsole=1
+   # Logging
+   debug=1
+   printtoconsole=1
 
-# Regtest-specific settings
-[regtest]
-rpcport=${rpcPort}
-rpcallowip=0.0.0.0/0
-rpcbind=0.0.0.0
-listen=1
-port=${this.config.ports.p2p}`.trim();
+   # Regtest-specific settings
+   [regtest]
+   rpcport=${INTERNAL_RPC_PORT}
+   rpcallowip=0.0.0.0/0
+   rpcbind=0.0.0.0
+   listen=1
+   port=${INTERNAL_P2P_PORT}`.trim();
   }
 
   /**
    * Start Bitcoin Core container with progress UI
    * This handles the Bitcoin Core container only - nginx is separate
    */
-  async startContainer(sharedConfig?: SharedConfig): Promise<void> {
+  async startContainer(
+    sharedConfig?: SharedConfig,
+    options?: { skipDataPrep?: boolean; reindex?: boolean },
+  ): Promise<void> {
     log.info(" Starting Bitcoin Core Container\n");
 
     const multibar = new cliProgress.MultiBar(
@@ -341,16 +364,20 @@ port=${this.config.ports.p2p}`.trim();
       await fs.ensureDir(path.join(bitcoinDataDir, "regtest"));
       await fs.ensureDir(path.join(bitcoinDataDir, "regtest", "wallets"));
 
-      // Clean up any existing mining_wallet to prevent conflicts
-      const miningWalletPath = path.join(
-        bitcoinDataDir,
-        "regtest",
-        "wallets",
-        "mining_wallet",
-      );
-      if (await fs.pathExists(miningWalletPath)) {
-        mainProgress.update(47, { status: "Cleaning old mining wallet..." });
-        await fs.remove(miningWalletPath);
+      // DEV: Only clean mining_wallet on fresh setups, NOT on imports.
+      // Imported environments need mining_wallet intact because it holds
+      // the coinbase rewards that funded other wallets.
+      if (!options?.skipDataPrep) {
+        const miningWalletPath = path.join(
+          bitcoinDataDir,
+          "regtest",
+          "wallets",
+          "mining_wallet",
+        );
+        if (await fs.pathExists(miningWalletPath)) {
+          mainProgress.update(47, { status: "Cleaning old mining wallet..." });
+          await fs.remove(miningWalletPath);
+        }
       }
 
       // Set permissions (777 for Docker compatibility)
@@ -386,14 +413,22 @@ port=${this.config.ports.p2p}`.trim();
       log.step(8, 11, "Creating container...");
       let dockerCommand = `docker run -d --name ${this.config.containerName}`;
       log.command(`docker run -d --name ${this.config.containerName} ...`);
+
       // Add platform flag for ARM64 systems
       if (arch.includes("arm64") || arch.includes("aarch64")) {
         dockerCommand += ` --platform linux/amd64`;
       }
 
       dockerCommand += ` --network ${this.config.network}`;
-      dockerCommand += ` -p ${this.config.ports.rpc}:${this.config.ports.rpc}`;
-      dockerCommand += ` -p ${this.config.ports.p2p}:${this.config.ports.p2p}`;
+
+      // DEV: Map host ports → fixed internal ports.
+      // Host side (left) is what got bumped by ensurePortsAvailable().
+      // Container side (right) is ALWAYS the fixed internal port.
+      // This way bitcoind inside the container always listens on 18443/18444
+      // regardless of what's free on the host.
+      dockerCommand += ` -p ${this.config.ports.rpc}:${INTERNAL_RPC_PORT}`;
+      dockerCommand += ` -p ${this.config.ports.p2p}:${INTERNAL_P2P_PORT}`;
+
       dockerCommand += ` -v "${bitcoinDataDir}":/home/bitcoin/.bitcoin`;
       dockerCommand += ` ${this.config.image}`;
       dockerCommand += ` -regtest=1`;
@@ -403,11 +438,25 @@ port=${this.config.ports.p2p}`.trim();
       dockerCommand += ` -printtoconsole=1`;
       dockerCommand += ` -rpcallowip=0.0.0.0/0`;
       dockerCommand += ` -rpcbind=0.0.0.0`;
-      dockerCommand += ` -rpcport=${this.config.ports.rpc}`;
-      dockerCommand += ` -port=${this.config.ports.p2p}`;
+
+      // DEV: bitcoind inside the container always uses fixed ports.
+      // The host-side mapping handles the translation.
+      dockerCommand += ` -rpcport=${INTERNAL_RPC_PORT}`;
+      dockerCommand += ` -port=${INTERNAL_P2P_PORT}`;
+
       dockerCommand += ` -rpcuser=${this.rpcUser}`;
       dockerCommand += ` -rpcpassword=${this.rpcPassword}`;
       dockerCommand += ` -fallbackfee=0.00001`;
+
+      // DEV: When starting from imported binary data, Bitcoin Core's
+      // block index and chainstate LevelDB files may be inconsistent
+      // (copied from a running instance). -reindex rebuilds the index
+      // from raw blk*.dat files, guaranteeing correct chain state.
+      // This also re-processes all blocks through loaded wallets,
+      // so balances are correct without needing a separate rescan.
+      if (options?.reindex) {
+        dockerCommand += ` -reindex`;
+      }
 
       await execAsync(dockerCommand);
       mainProgress.update(70, { status: "Container created ✓" });
@@ -530,67 +579,64 @@ port=${this.config.ports.p2p}`.trim();
   // ============================================================================
 
   /**
-   * Generate nginx configuration that proxies to Bitcoin Core
+   * Generate nginx configuration that proxies to Bitcoin Core.
+   * Nginx and bitcoind are on the same Docker network, so nginx
+   * connects to bitcoind's INTERNAL port, not the host-mapped port.
    */
   private generateNginxConfig(rpcPort: number): string {
+    // DEV: rpcPort here was being passed as the host-side port,
+    // but nginx talks to the bitcoin container over the Docker network
+    // where bitcoind always listens on INTERNAL_RPC_PORT.
+    // We ignore the rpcPort parameter and use the constant.
     return `
-events {
-    worker_connections 1024;
-}
+  events {
+      worker_connections 1024;
+  }
 
-http {
-    upstream bitcoin_regtest {
-        server ${this.config.containerName}:${rpcPort};
-    }
+  http {
+      upstream bitcoin_regtest {
+          server ${this.config.containerName}:${INTERNAL_RPC_PORT};
+      }
 
-    server {
-        listen 8080;
-        server_name localhost;
+      server {
+          listen 8080;
+          server_name localhost;
 
-        # Disable request size limits for large transactions
-        client_max_body_size 100m;
+          client_max_body_size 100m;
 
-        location / {
-            # Proxy to Bitcoin Core
-            proxy_pass http://bitcoin_regtest;
+          location / {
+              proxy_pass http://bitcoin_regtest;
 
-            # Essential headers
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
 
-            # HTTP version
-            proxy_http_version 1.1;
+              proxy_http_version 1.1;
+              proxy_buffering off;
 
-            # Don't buffer - important for RPC
-            proxy_buffering off;
+              proxy_connect_timeout 300s;
+              proxy_send_timeout 300s;
+              proxy_read_timeout 300s;
 
-            # Timeouts
-            proxy_connect_timeout 300s;
-            proxy_send_timeout 300s;
-            proxy_read_timeout 300s;
+              add_header 'Access-Control-Allow-Origin' '*' always;
+              add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+              add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since' always;
+              add_header 'Access-Control-Expose-Headers' 'Content-Length, Content-Range' always;
+              add_header 'Access-Control-Allow-Credentials' 'true' always;
 
-            # CORS headers for Caravan (allow all methods including POST)
-            add_header 'Access-Control-Allow-Origin' '*' always;
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since' always;
-            add_header 'Access-Control-Expose-Headers' 'Content-Length, Content-Range' always;
-            add_header 'Access-Control-Allow-Credentials' 'true' always;
-
-            # Handle preflight OPTIONS requests
-            if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' '*' always;
-                add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
-                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since' always;
-                add_header 'Access-Control-Max-Age' 1728000;
-                add_header 'Content-Type' 'text/plain; charset=utf-8';
-                add_header 'Content-Length' 0;
-                return 204;
-            }
-        }
-    }
-}`.trim();
+              if ($request_method = 'OPTIONS') {
+                  add_header 'Access-Control-Allow-Origin' '*' always;
+                  add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+                  add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since' always;
+                  add_header 'Access-Control-Max-Age' 1728000;
+                  add_header 'Content-Type' 'text/plain; charset=utf-8';
+                  add_header 'Content-Length' 0;
+                  return 204;
+              }
+          }
+      }
+  }`.trim();
   }
 
   /**
@@ -639,11 +685,13 @@ http {
       }
 
       // Get the Bitcoin Core RPC port (might have been auto-adjusted)
+
       const rpcPort = sharedConfig?.bitcoin.rpcPort || this.config.ports.rpc;
+      const p2pPort = sharedConfig?.bitcoin.p2pPort || this.config.ports.p2p;
 
       // Find an available nginx port (starting from 8080)
       spinner.text = "Finding available nginx port...";
-      const nginxPort = await this.findAvailablePort(8080);
+      const nginxPort = await this.findAvailablePort(8080, [rpcPort, p2pPort]);
 
       if (nginxPort !== 8080) {
         log.info(`Port 8080 in use, using ${nginxPort} instead\n`);
@@ -1070,11 +1118,14 @@ http {
   // ============================================================================
 
   /**
-   * Execute bitcoin-cli command inside container
+   * Execute bitcoin-cli command inside container.
+   * Uses INTERNAL_RPC_PORT because we're running inside the container.
    */
   async execBitcoinCli(command: string): Promise<string> {
     try {
-      const cliCommand = `docker exec ${this.config.containerName} bitcoin-cli -regtest -rpcuser="${this.rpcUser}" -rpcpassword="${this.rpcPassword}" ${command}`;
+      // DEV: bitcoin-cli runs INSIDE the container, so it talks to
+      // bitcoind on the fixed internal port, not the host-mapped port.
+      const cliCommand = `docker exec ${this.config.containerName} bitcoin-cli -regtest -rpcport=${INTERNAL_RPC_PORT} -rpcuser="${this.rpcUser}" -rpcpassword="${this.rpcPassword}" ${command}`;
       const { stdout } = await execAsync(cliCommand);
       return stdout.trim();
     } catch (error: any) {

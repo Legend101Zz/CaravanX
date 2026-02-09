@@ -277,6 +277,23 @@ export class SettingsCommands {
     const targetProfiles =
       await this.profileManager.getProfilesByMode(targetMode);
 
+    if (targetMode === SetupMode.MANUAL && targetProfiles.length > 0) {
+      // Only one manual profile allowed — just offer to switch to it
+      const profile = await this.profileManager.getProfile(
+        targetProfiles[0].id,
+      );
+      if (profile) {
+        await fs.writeJson(this.configPath, profile.config, { spaces: 2 });
+        await this.profileManager.setActiveProfile(profile.id);
+        console.log(chalk.green(`\n✅ Switched to: ${profile.name}`));
+        console.log(
+          chalk.yellow("\nRestart Caravan-X for changes to take effect."),
+        );
+        await this.pressEnter();
+      }
+      return;
+    }
+
     if (targetProfiles.length > 0) {
       console.log(
         chalk.green(
@@ -328,14 +345,34 @@ export class SettingsCommands {
   }
 
   /**
-   * Create new config and switch to it
+   * Create new config and switch to it.
+   * Uses ProfileManager.createProfile() which scopes all paths
+   * into the new profile's isolated directory.
    */
   private async createAndSwitchToNew(mode: SetupMode): Promise<void> {
+    // Enforce single-profile limit for Manual mode
+    if (mode === SetupMode.MANUAL) {
+      const existing = await this.profileManager.getProfilesByMode(
+        SetupMode.MANUAL,
+      );
+      if (existing.length > 0) {
+        console.log(
+          chalk.yellow(
+            "\n⚠️  Manual mode only supports one profile.\n" +
+              "   Delete the existing manual profile first, or use Docker mode.\n",
+          ),
+        );
+        await this.pressEnter();
+        return;
+      }
+    }
+
     const wizard = new SetupWizard(this.appDir);
 
+    // DEV: Wizard only collects preferences — no Docker start
     let config: EnhancedAppConfig;
     if (mode === SetupMode.DOCKER) {
-      config = await wizard.setupDockerMode(true); // Skip docker start
+      config = await wizard.setupDockerMode();
     } else {
       config = await wizard.setupManualMode();
     }
@@ -345,12 +382,36 @@ export class SettingsCommands {
       default: `${mode === SetupMode.DOCKER ? "Docker" : "Manual"} Config`,
     });
 
+    // DEV: createProfile scopes paths into profiles/<id>/
     const profile = await this.profileManager.createProfile(
       profileName,
       mode,
       config,
     );
-    await fs.writeJson(this.configPath, config, { spaces: 2 });
+
+    // DEV: For Docker mode, start containers with scoped paths
+    let finalConfig = profile.config;
+    if (mode === SetupMode.DOCKER && finalConfig.docker) {
+      const startNow = await confirm({
+        message: "Start Docker containers now?",
+        default: true,
+      });
+
+      if (startNow) {
+        const { DockerService } = await import("../core/docker");
+        const dockerService = new DockerService(
+          finalConfig.docker,
+          path.join(finalConfig.appDir, "docker-data"),
+        );
+        const nginxPort = await dockerService.completeSetup(
+          finalConfig.sharedConfig,
+        );
+        finalConfig.bitcoin.port = nginxPort;
+        await this.profileManager.updateProfile(profile.id, finalConfig);
+      }
+    }
+
+    await fs.writeJson(this.configPath, finalConfig, { spaces: 2 });
     await this.profileManager.setActiveProfile(profile.id);
 
     console.log(chalk.green(`\n✅ Created and switched to: ${profileName}`));

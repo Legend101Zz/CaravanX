@@ -1,7 +1,5 @@
 /**
  * Environment Commands for Caravan-X
- * Provides both interactive menu and CLI interface for
- * exporting, importing, and inspecting .caravan-env archives.
  */
 
 import { select, input, confirm, checkbox } from "@inquirer/prompts";
@@ -13,24 +11,43 @@ import boxen from "boxen";
 
 import { EnvironmentService } from "../core/environment";
 import { BitcoinRpcClient } from "../core/rpc";
+import { BitcoinService } from "../core/bitcoin";
+import { CaravanService } from "../core/caravan";
+import { DockerService } from "../core/docker";
+import { ProfileManager } from "../core/profiles";
 import {
   EnvironmentExportOptions,
   EnvironmentImportOptions,
   EnvironmentManifest,
 } from "../types/environment";
+import {
+  EnhancedAppConfig,
+  SetupMode,
+  SharedConfig,
+  DEFAULT_DOCKER_CONFIG,
+} from "../types/config";
 import { colors, displayCommandTitle } from "../utils/terminal";
 
 export class EnvironmentCommands {
   private envService: EnvironmentService;
   private rpc: BitcoinRpcClient;
+  private profileManager: ProfileManager;
+  private baseDir: string;
 
-  constructor(envService: EnvironmentService, rpc: BitcoinRpcClient) {
+  constructor(
+    envService: EnvironmentService,
+    rpc: BitcoinRpcClient,
+    profileManager: ProfileManager,
+    baseDir: string,
+  ) {
     this.envService = envService;
     this.rpc = rpc;
+    this.profileManager = profileManager;
+    this.baseDir = baseDir;
   }
 
   /**
-   * Main interactive menu for environment sharing
+   * Main interactive menu
    */
   async showEnvironmentMenu(): Promise<void> {
     displayCommandTitle("Environment Sharing");
@@ -46,7 +63,8 @@ export class EnvironmentCommands {
         {
           name: chalk.cyan("📥 Import Environment"),
           value: "import",
-          description: "Import a .caravan-env archive from another developer",
+          description:
+            "Import a .caravan-env archive into a new Docker profile",
         },
         {
           name: chalk.yellow("🔍 Inspect Environment"),
@@ -79,9 +97,10 @@ export class EnvironmentCommands {
     }
   }
 
-  /**
-   * Interactive export flow
-   */
+  // =========================================================================
+  // EXPORT (unchanged — just keeping it here for completeness)
+  // =========================================================================
+
   private async exportEnvironment(): Promise<void> {
     console.log(
       boxen(
@@ -100,7 +119,6 @@ export class EnvironmentCommands {
       ),
     );
 
-    // Gather export options
     const name = await input({
       message: "Environment name:",
       default: `caravan-env-${Date.now()}`,
@@ -117,23 +135,20 @@ export class EnvironmentCommands {
 
     const includeBlockchainData = await confirm({
       message:
-        "Include binary blockchain data? (Recommended for exact replication, larger file)",
+        "Include binary blockchain data? (Recommended for exact replication)",
       default: true,
     });
 
     const includePrivateKeys = await confirm({
-      message:
-        "Include private keys in wallet exports? (Needed for signing on the other end)",
+      message: "Include private keys in wallet exports?",
       default: true,
     });
 
     const generateReplayScript = await confirm({
-      message:
-        "Generate a replay script? (Portable alternative to binary data)",
+      message: "Generate a replay script?",
       default: true,
     });
 
-    // Ask about wallet filtering
     let walletFilter: string[] | undefined;
     try {
       const loadedWallets = await this.rpc.listWallets();
@@ -142,7 +157,6 @@ export class EnvironmentCommands {
           message: `Found ${loadedWallets.length} wallets. Export all?`,
           default: true,
         });
-
         if (!filterWallets) {
           walletFilter = await checkbox({
             message: "Select wallets to include:",
@@ -158,7 +172,6 @@ export class EnvironmentCommands {
       // Can't list wallets — skip filtering
     }
 
-    // Output path
     const defaultOutputPath = path.join(
       process.cwd(),
       `${name.replace(/\s+/g, "-").toLowerCase()}.caravan-env`,
@@ -169,7 +182,6 @@ export class EnvironmentCommands {
       default: defaultOutputPath,
     });
 
-    // Confirm and export
     console.log(chalk.dim("\n─".repeat(50)));
     console.log(chalk.cyan("Export configuration:"));
     console.log(`  Name:              ${name}`);
@@ -219,18 +231,24 @@ export class EnvironmentCommands {
     }
   }
 
-  /**
-   * Interactive import flow
-   */
+  // =========================================================================
+  // IMPORT — Creates a new Docker profile and imports into it
+  // =========================================================================
+
   private async importEnvironment(): Promise<void> {
     console.log(
       boxen(
         chalk.cyan.bold("📥 Import Environment\n\n") +
           chalk.white(
-            "Import a .caravan-env archive to replicate another\n" +
-              "developer's exact regtest environment.\n\n",
+            "Import a .caravan-env archive into a new isolated Docker\n" +
+              "profile. The imported environment gets its own container,\n" +
+              "wallets, keys, and blockchain data — completely separate\n" +
+              "from your existing profiles.\n\n",
           ) +
-          chalk.yellow("⚠ This will replace your current regtest state!"),
+          chalk.gray(
+            "A new Docker profile will be created automatically.\n" +
+              "You can switch between profiles at any time.",
+          ),
         {
           padding: 1,
           margin: { top: 1, bottom: 1, left: 0, right: 0 },
@@ -240,16 +258,19 @@ export class EnvironmentCommands {
       ),
     );
 
+    // --- Step 1: Get archive path ---
     const archivePath = await input({
       message: "Path to .caravan-env file:",
       validate: (v) => {
         if (!v.trim()) return "Path is required";
         if (!fs.existsSync(v)) return "File does not exist";
+        if (!v.endsWith(".caravan-env"))
+          return "File must be a .caravan-env archive";
         return true;
       },
     });
 
-    // Inspect first
+    // --- Step 2: Inspect the archive ---
     console.log(chalk.dim("\nInspecting archive..."));
     const manifest = await this.envService.inspectEnvironment(archivePath);
     if (!manifest) {
@@ -261,6 +282,7 @@ export class EnvironmentCommands {
 
     this.displayManifestDetails(manifest);
 
+    // --- Step 3: Choose import method ---
     const method = await select({
       message: "Import method:",
       choices: [
@@ -279,7 +301,7 @@ export class EnvironmentCommands {
         ...(manifest.contents.hasReplayScript
           ? [
               {
-                name: "Replay (recreate from scratch, block hashes will differ)",
+                name: "Replay (recreate from scratch)",
                 value: "replay" as const,
               },
             ]
@@ -292,10 +314,41 @@ export class EnvironmentCommands {
       default: false,
     });
 
+    // --- Step 4: Let user name the imported profile ---
+    const defaultProfileName = `📥 Imported: ${manifest.name}`;
+    const profileName = await input({
+      message: "Name for the imported profile:",
+      default: defaultProfileName,
+    });
+
+    // --- Step 5: Confirm ---
+    console.log(
+      boxen(
+        chalk.white.bold("Import Summary\n\n") +
+          chalk.cyan(`Profile Name:   `) +
+          chalk.white(`${profileName}\n`) +
+          chalk.cyan(`Source:         `) +
+          chalk.white(`${manifest.name}\n`) +
+          chalk.cyan(`Block Height:   `) +
+          chalk.white(`${manifest.blockchainState.blockHeight}\n`) +
+          chalk.cyan(`Wallets:        `) +
+          chalk.white(`${manifest.contents.bitcoinWallets.length}\n`) +
+          chalk.cyan(`Method:         `) +
+          chalk.white(`${method}\n`) +
+          chalk.cyan(`Mode:           `) +
+          chalk.white(`Docker (isolated container)`),
+        {
+          padding: 1,
+          margin: { top: 1, bottom: 1, left: 0, right: 0 },
+          borderStyle: "round",
+          borderColor: "green",
+        },
+      ),
+    );
+
     const proceed = await confirm({
-      message:
-        "This will replace your current regtest environment. Are you sure?",
-      default: false,
+      message: "Create profile and import?",
+      default: true,
     });
 
     if (!proceed) {
@@ -303,25 +356,110 @@ export class EnvironmentCommands {
       return;
     }
 
-    const importOptions: EnvironmentImportOptions = {
-      archivePath,
-      method,
-      skipVerification,
-      force: true,
-    };
-
     try {
-      const result = await this.envService.importEnvironment(importOptions);
+      // --- Step 6: Build a Docker config from the manifest ---
+      const importedConfig = this.buildConfigFromManifest(manifest);
+
+      // --- Step 7: Create a new profile (scopes all paths) ---
+      console.log(chalk.dim("\nCreating isolated Docker profile..."));
+      const profile = await this.profileManager.createProfile(
+        profileName,
+        SetupMode.DOCKER,
+        importedConfig,
+      );
+
+      // profile.config now has all paths scoped to profiles/<id>/
+      const scopedConfig = profile.config;
+
+      // --- Step 8: Build services scoped to the new profile ---
+      const rpc = new BitcoinRpcClient(scopedConfig.bitcoin);
+      const bitcoinService = new BitcoinService(rpc, true);
+      const caravanService = new CaravanService(
+        rpc,
+        scopedConfig.caravanDir,
+        scopedConfig.keysDir,
+      );
+
+      let dockerService: DockerService | undefined;
+      if (scopedConfig.docker) {
+        dockerService = new DockerService(
+          scopedConfig.docker,
+          path.join(scopedConfig.appDir, "docker-data"),
+        );
+      }
+
+      // Create an EnvironmentService that targets the new profile's directories
+      const scopedEnvService = new EnvironmentService(
+        rpc,
+        caravanService,
+        bitcoinService,
+        scopedConfig,
+        dockerService,
+      );
+
+      // --- Step 9: Run the actual import into the new profile ---
+      const importOptions: EnvironmentImportOptions = {
+        archivePath,
+        method,
+        skipVerification,
+        force: true,
+        rpcOverrides: {
+          rpcUser: manifest.rpcConfig.rpcUser,
+          rpcPassword: manifest.rpcConfig.rpcPassword,
+          rpcPort: manifest.rpcConfig.rpcPort,
+        },
+      };
+
+      const result = await scopedEnvService.importEnvironment(importOptions);
 
       if (result.success) {
-        console.log(chalk.green("\n✅ Environment imported successfully!"));
+        // --- Step 10: Set as active profile ---
+        await this.profileManager.setActiveProfile(profile.id);
+
+        // Save the updated config (nginx port may have changed)
+        const profileConfigPath = path.join(scopedConfig.appDir, "config.json");
+        await fs.writeJson(profileConfigPath, scopedConfig, { spaces: 2 });
+
+        // Update the legacy config.json at the base directory
+        const legacyConfigPath = path.join(this.baseDir, "config.json");
+        await fs.writeJson(legacyConfigPath, scopedConfig, { spaces: 2 });
+
         console.log(
-          chalk.yellow(
-            "\nPlease restart Caravan-X for changes to take full effect.",
+          boxen(
+            chalk.green.bold("✅ Environment Imported Successfully!\n\n") +
+              chalk.white(`Profile:        ${profileName}\n`) +
+              chalk.white(`Block Height:   ${result.blockHeight}\n`) +
+              chalk.white(
+                `Wallets:        ${result.walletsImported.join(", ") || "none"}\n`,
+              ) +
+              chalk.white(
+                `Caravan:        ${result.caravanWalletsImported.join(", ") || "none"}\n`,
+              ) +
+              "\n" +
+              chalk.yellow(
+                "Restart Caravan-X to use the imported environment.\n" +
+                  "The new profile is now active.",
+              ),
+            {
+              padding: 1,
+              margin: { top: 1, bottom: 1, left: 0, right: 0 },
+              borderStyle: "double",
+              borderColor: "green",
+            },
           ),
         );
+
+        if (result.warnings.length > 0) {
+          console.log(chalk.yellow("\n⚠️  Warnings:"));
+          for (const warn of result.warnings) {
+            console.log(chalk.yellow(`  • ${warn}`));
+          }
+        }
       } else {
-        console.log(chalk.red("\n❌ Import completed with errors:"));
+        // Import failed — clean up the profile we just created
+        console.log(chalk.red("\n❌ Import failed. Cleaning up..."));
+        await this.profileManager.deleteProfile(profile.id);
+
         for (const err of result.errors) {
           console.log(chalk.red(`  • ${err}`));
         }
@@ -331,9 +469,106 @@ export class EnvironmentCommands {
     }
   }
 
+  // =========================================================================
+  // HELPERS
+  // =========================================================================
+
   /**
-   * Interactive inspect flow
+   * Build an EnhancedAppConfig from a manifest's metadata.
+   * This creates the config that ProfileManager.createProfile() will
+   * then scope into the profile's isolated directory.
+   *
+   * We use Docker mode so the imported env gets its own container.
    */
+  private buildConfigFromManifest(
+    manifest: EnvironmentManifest,
+  ): EnhancedAppConfig {
+    const rpcUser = manifest.rpcConfig.rpcUser;
+    const rpcPassword = manifest.rpcConfig.rpcPassword;
+    const rpcPort = manifest.rpcConfig.rpcPort;
+    const p2pPort = manifest.rpcConfig.p2pPort;
+
+    // Container name derived from the env name to avoid collisions
+    const safeName = manifest.name
+      .replace(/[^a-zA-Z0-9]/g, "-")
+      .toLowerCase()
+      .slice(0, 30);
+    const containerName = `caravan-x-imported-${safeName}`;
+
+    const dockerConfig = {
+      enabled: true,
+      image: manifest.docker?.image || DEFAULT_DOCKER_CONFIG.image,
+      containerName,
+      ports: {
+        rpc: rpcPort,
+        p2p: p2pPort,
+        nginx: 8080,
+      },
+      volumes: {
+        bitcoinData: "", // Will be scoped by ProfileManager
+        coordinator: "",
+      },
+      network: DEFAULT_DOCKER_CONFIG.network,
+      autoStart: true,
+    };
+
+    const sharedConfig: SharedConfig = {
+      version: "1.0.0",
+      name: `Imported: ${manifest.name}`,
+      description: manifest.description || `Imported from ${manifest.name}`,
+      mode: SetupMode.DOCKER,
+      bitcoin: {
+        network: manifest.network as "regtest" | "signet" | "testnet",
+        rpcPort,
+        p2pPort,
+        rpcUser,
+        rpcPassword,
+      },
+      docker: dockerConfig,
+      initialState: {
+        // DEV: Don't pre-generate blocks — we're importing existing data
+        blockHeight: 0,
+        preGenerateBlocks: false,
+        wallets: [],
+        transactions: [],
+      },
+      walletName: "caravan_watcher",
+      snapshots: {
+        enabled: true,
+        autoSnapshot: false,
+      },
+    };
+
+    // DEV: Placeholder paths — ProfileManager.scopeConfigToProfile()
+    // will rewrite all of these into profiles/<id>/
+    return {
+      mode: SetupMode.DOCKER,
+      sharedConfig,
+      docker: dockerConfig,
+      bitcoin: {
+        protocol: "http",
+        host: "localhost",
+        port: 8080, // Updated after nginx starts
+        user: rpcUser,
+        pass: rpcPassword,
+        dataDir: "", // Scoped by ProfileManager
+      },
+      appDir: this.baseDir,
+      caravanDir: "",
+      keysDir: "",
+      snapshots: {
+        enabled: true,
+        directory: "",
+        autoSnapshot: false,
+      },
+      scenariosDir: "",
+    };
+  }
+
+  // =========================================================================
+  // INSPECT (unchanged)
+  // =========================================================================
+
   private async inspectEnvironment(): Promise<void> {
     const archivePath = await input({
       message: "Path to .caravan-env file:",
@@ -351,13 +586,9 @@ export class EnvironmentCommands {
     }
 
     this.displayManifestDetails(manifest);
-
     await input({ message: "Press Enter to continue..." });
   }
 
-  /**
-   * Display manifest details in a nice format
-   */
   private displayManifestDetails(manifest: EnvironmentManifest): void {
     console.log(
       boxen(
@@ -418,14 +649,10 @@ export class EnvironmentCommands {
     );
   }
 
-  // ==========================================================================
-  // CLI Commands (non-interactive, for scripting)
-  // ==========================================================================
+  // =========================================================================
+  // CLI Commands
+  // =========================================================================
 
-  /**
-   * CLI: Export environment
-   * Usage: caravan-x env export --name "my-env" --output ./my-env.caravan-env
-   */
   async cliExport(args: {
     name: string;
     output: string;
@@ -442,14 +669,9 @@ export class EnvironmentCommands {
       generateReplayScript: !args.noReplay,
       outputPath: args.output,
     };
-
     await this.envService.exportEnvironment(options);
   }
 
-  /**
-   * CLI: Import environment
-   * Usage: caravan-x env import ./my-env.caravan-env
-   */
   async cliImport(args: {
     archivePath: string;
     method?: "binary" | "replay" | "auto";
@@ -462,14 +684,9 @@ export class EnvironmentCommands {
       skipVerification: args.skipVerification || false,
       force: args.force || false,
     };
-
     await this.envService.importEnvironment(options);
   }
 
-  /**
-   * CLI: Inspect environment
-   * Usage: caravan-x env inspect ./my-env.caravan-env
-   */
   async cliInspect(archivePath: string): Promise<void> {
     const manifest = await this.envService.inspectEnvironment(archivePath);
     if (manifest) {

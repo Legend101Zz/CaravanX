@@ -56,6 +56,8 @@ const colors = {
  * Main application class
  */
 export class CaravanRegtestManager {
+  private baseDir: string = "";
+
   private bitcoinRpcClient: BitcoinRpcClient;
   private transactionService: TransactionService;
 
@@ -167,12 +169,32 @@ export class CaravanRegtestManager {
 
     // STEP 1: Ask for base directory
     const baseDirectory = await this.askForBaseDirectory();
-
-    // Initialize profile manager with the base directory
+    this.baseDir = baseDirectory;
+    // STEP 2: Initialize profile manager (detects + wipes legacy data)
     this.profileManager = new ProfileManager(baseDirectory);
-    await this.profileManager.initialize();
+    const initialized = await this.profileManager.initialize();
 
-    // Initialize logger from saved config (CLI flags may override later)
+    if (!initialized) {
+      console.log(
+        boxen(
+          chalk.yellow.bold("👋 No changes made.\n\n") +
+            chalk.white(
+              "To continue using your existing data, install an older\n" +
+                "version of Caravan-X:\n\n",
+            ) +
+            chalk.cyan("  npm install -g caravan-x@1.x"),
+          {
+            padding: 1,
+            margin: 1,
+            borderStyle: "round",
+            borderColor: "yellow",
+          },
+        ),
+      );
+      process.exit(0);
+    }
+
+    // Initialize logger
     const savedConfigPath = path.join(baseDirectory, "config.json");
     if (await fs.pathExists(savedConfigPath)) {
       try {
@@ -186,25 +208,29 @@ export class CaravanRegtestManager {
           });
         }
       } catch {
-        // config doesn't exist yet, logger stays at defaults
+        // config doesn't exist yet
       }
     }
 
-    // STEP 2: Ask for mode (Docker or Manual)
+    // STEP 3: Ask for mode
     const mode = await this.askForMode();
 
-    // STEP 3: Check for existing configurations for this mode
+    // STEP 4: Check for existing configurations
     let enhancedConfig: EnhancedAppConfig;
     let justCompletedSetup = false;
 
     const existingProfiles = await this.profileManager.getProfilesByMode(mode);
 
     if (existingProfiles.length > 0) {
-      // Show existing configurations and ask user what to do
-      const choice = await this.askExistingConfigChoice(existingProfiles, mode);
+      let choice;
+      if (mode === SetupMode.MANUAL) {
+        // Manual mode only allows one profile. Offer use or replace, not "add new".
+        choice = await this.askExistingManualConfigChoice(existingProfiles);
+      } else {
+        choice = await this.askExistingConfigChoice(existingProfiles, mode);
+      }
 
       if (choice.action === "use_existing") {
-        // Load the selected profile
         const profile = await this.profileManager.getProfile(choice.profileId!);
         if (profile) {
           enhancedConfig = profile.config;
@@ -216,29 +242,36 @@ export class CaravanRegtestManager {
           throw new Error("Failed to load selected profile");
         }
       } else if (choice.action === "new") {
-        // Create new configuration
-        enhancedConfig = await this.runSetupWizardForMode(mode, baseDirectory);
+        // Wizard collects preferences only — no Docker start, no data dirs
+        const rawConfig = await this.runSetupWizardForMode(mode, baseDirectory);
         justCompletedSetup = true;
 
-        // Ask if they want to save as a new profile or replace
         const profileName = await input({
           message: "Name for this configuration:",
           default: `${mode === SetupMode.DOCKER ? "Docker" : "Manual"} Config ${existingProfiles.length + 1}`,
         });
 
+        // DEV: createProfile() scopes ALL paths into profiles/<id>/
         const newProfile = await this.profileManager.createProfile(
           profileName,
           mode,
-          enhancedConfig,
+          rawConfig,
         );
         await this.profileManager.setActiveProfile(newProfile.id);
+
+        // DEV: Use scoped config, then start Docker with correct paths
+        enhancedConfig = newProfile.config;
+        enhancedConfig = await this.startDockerForProfile(enhancedConfig);
+
+        // DEV: Persist updated config (nginx port may have changed)
+        await this.profileManager.updateProfile(newProfile.id, enhancedConfig);
       } else {
         // Delete and recreate
         for (const profile of existingProfiles) {
           await this.profileManager.deleteProfile(profile.id);
         }
 
-        enhancedConfig = await this.runSetupWizardForMode(mode, baseDirectory);
+        const rawConfig = await this.runSetupWizardForMode(mode, baseDirectory);
         justCompletedSetup = true;
 
         const profileName = await input({
@@ -249,19 +282,23 @@ export class CaravanRegtestManager {
         const newProfile = await this.profileManager.createProfile(
           profileName,
           mode,
-          enhancedConfig,
+          rawConfig,
         );
         await this.profileManager.setActiveProfile(newProfile.id);
+
+        enhancedConfig = newProfile.config;
+        enhancedConfig = await this.startDockerForProfile(enhancedConfig);
+        await this.profileManager.updateProfile(newProfile.id, enhancedConfig);
       }
     } else {
-      // No existing profiles, run setup
+      // No existing profiles
       console.log(
         chalk.cyan(
           `\n📋 No existing ${mode} configuration found. Let's set one up!\n`,
         ),
       );
 
-      enhancedConfig = await this.runSetupWizardForMode(mode, baseDirectory);
+      const rawConfig = await this.runSetupWizardForMode(mode, baseDirectory);
       justCompletedSetup = true;
 
       const profileName = await input({
@@ -272,32 +309,85 @@ export class CaravanRegtestManager {
       const newProfile = await this.profileManager.createProfile(
         profileName,
         mode,
-        enhancedConfig,
+        rawConfig,
       );
       await this.profileManager.setActiveProfile(newProfile.id);
+
+      enhancedConfig = newProfile.config;
+      enhancedConfig = await this.startDockerForProfile(enhancedConfig);
+      await this.profileManager.updateProfile(newProfile.id, enhancedConfig);
     }
 
     this.enhancedConfig = enhancedConfig;
 
-    // Also save to the legacy config.json location for compatibility
-    const legacyConfigPath = path.join(enhancedConfig.appDir, "config.json");
+    // Legacy config.json at the BASE directory — reflects active profile
+    const legacyConfigPath = path.join(baseDirectory, "config.json");
     await fs.writeJson(legacyConfigPath, enhancedConfig, { spaces: 2 });
 
-    // Initialize services with the configuration
+    // Initialize services with the profile-scoped config
     await this.reinitializeWithConfig(enhancedConfig);
 
-    // Verify connection if not just completed setup
     if (!justCompletedSetup) {
       await this.verifyBitcoinConnection();
     } else {
       console.clear();
-      console.log(chalk.green("\n✅ Setup complete! Starting Caravan-X...\n"));
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      console.log(chalk.green("\n✅ Setup complete! Loading main menu...\n"));
     }
-
     // Start main menu
     const mainMenu = new MainMenu(this);
     await mainMenu.start();
+  }
+
+  private async askExistingManualConfigChoice(
+    profiles: ProfilesIndex["profiles"],
+  ): Promise<{
+    action: "use_existing" | "delete_and_new";
+    profileId?: string;
+  }> {
+    console.log(
+      boxen(
+        chalk.white.bold("📋 Existing Manual Configuration Found\n\n") +
+          chalk.cyan(`${profiles[0].name}\n`) +
+          chalk.dim(
+            `Created: ${new Date(profiles[0].createdAt).toLocaleDateString()}\n`,
+          ) +
+          chalk.dim(
+            `Last used: ${new Date(profiles[0].lastUsedAt).toLocaleDateString()}`,
+          ) +
+          "\n\n" +
+          chalk.gray(
+            "Manual mode is limited to one profile since all profiles\n" +
+              "share the same Bitcoin Core node. Use Docker mode for\n" +
+              "multiple isolated configurations.",
+          ),
+        {
+          padding: 1,
+          margin: 1,
+          borderStyle: "round",
+          borderColor: "yellow",
+        },
+      ),
+    );
+
+    const action = await select({
+      message: "What would you like to do?",
+      choices: [
+        {
+          name: chalk.green("📂 Use existing configuration"),
+          value: "use_existing",
+        },
+        {
+          name: chalk.red("🗑️  Delete and start fresh"),
+          value: "delete_and_new",
+        },
+      ],
+    });
+
+    if (action === "use_existing") {
+      return { action: "use_existing", profileId: profiles[0].id };
+    }
+
+    return { action: "delete_and_new" };
   }
 
   /**
@@ -492,41 +582,65 @@ export class CaravanRegtestManager {
   }
 
   /**
-   * Run setup wizard for a specific mode
+   * Run setup wizard for a specific mode.
+   *
+   * DEV: The wizard only collects preferences. It does NOT create data dirs
+   * or start Docker. After this returns, the caller must:
+   *   1. createProfile() → scopes all paths
+   *   2. Start Docker if needed (using the scoped config)
    */
   private async runSetupWizardForMode(
     mode: SetupMode,
     baseDirectory: string,
   ): Promise<EnhancedAppConfig> {
-    // Update appDir to use the chosen base directory
     const appDir = baseDirectory;
 
     if (mode === SetupMode.DOCKER) {
-      return await this.setupDockerModeWithDir(mode, appDir);
+      const wizard = new SetupWizard(appDir);
+      return await wizard.setupDockerMode();
     } else {
-      return await this.setupManualModeWithDir(appDir);
+      const wizard = new SetupWizard(appDir);
+      return await wizard.setupManualMode();
     }
   }
 
   /**
-   * Docker mode setup using specified directory
+   * Start Docker containers using a profile-scoped config.
+   * Called AFTER createProfile() has rewritten all paths.
    */
-  private async setupDockerModeWithDir(
-    mode: SetupMode,
-    appDir: string,
+  private async startDockerForProfile(
+    config: EnhancedAppConfig,
   ): Promise<EnhancedAppConfig> {
-    const wizard = new SetupWizard(appDir);
-    return await wizard.setupDockerMode();
-  }
+    if (config.mode !== SetupMode.DOCKER || !config.docker) {
+      return config;
+    }
 
-  /**
-   * Manual mode setup using specified directory
-   */
-  private async setupManualModeWithDir(
-    appDir: string,
-  ): Promise<EnhancedAppConfig> {
-    const wizard = new SetupWizard(appDir);
-    return await wizard.setupManualMode();
+    const startNow = await confirm({
+      message: "Start Docker containers now?",
+      default: true,
+    });
+
+    if (startNow) {
+      // DEV: config.appDir is now the profile dir (e.g. profiles/profile_xxx/)
+      // so docker-data lands inside the profile, not the shared base dir
+      const dockerService = new DockerService(
+        config.docker,
+        path.join(config.appDir, "docker-data"),
+      );
+
+      const nginxPort = await dockerService.completeSetup(config.sharedConfig);
+
+      // Update the nginx port in config
+      config.bitcoin.port = nginxPort;
+    }
+
+    // Ensure profile data directories exist
+    await fs.ensureDir(config.caravanDir);
+    await fs.ensureDir(config.keysDir);
+    await fs.ensureDir(config.snapshots.directory);
+    await fs.ensureDir(config.scenariosDir);
+
+    return config;
   }
 
   /**
@@ -781,6 +895,8 @@ export class CaravanRegtestManager {
     this.environmentCommands = new EnvironmentCommands(
       this.environmentService,
       this.bitcoinRpcClient,
+      this.profileManager,
+      this.baseDir,
     );
   }
 

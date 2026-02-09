@@ -26,11 +26,15 @@ export class SetupWizard {
 
   /**
    * Setup Docker mode - called from index.ts
-   * @param skipDockerStart - if true, don't start containers (just return config)
+   *
+   * DEV: This wizard ONLY collects user preferences (ports, container name,
+   * RPC creds, etc.). It does NOT start Docker or create data directories.
+   * The caller is responsible for:
+   *   1. Calling ProfileManager.createProfile() to scope all paths
+   *   2. Starting Docker with the scoped config
+   * This prevents data from landing in the shared base directory.
    */
-  async setupDockerMode(
-    skipDockerStart: boolean = false,
-  ): Promise<EnhancedAppConfig> {
+  async setupDockerMode(): Promise<EnhancedAppConfig> {
     console.log(
       boxen(
         chalk.white.bold("🐳 Docker Mode Configuration\n\n") +
@@ -48,125 +52,84 @@ export class SetupWizard {
       ),
     );
 
-    // Bitcoin data directory - default to under appDir
-    const defaultBitcoinDataDir = path.join(
-      this.appDir,
-      "docker-data",
-      "bitcoin-data",
+    // DEV: We no longer ask about bitcoin data directory here.
+    // The data dir is automatically placed inside the profile directory
+    // by ProfileManager.scopeConfigToProfile(). Show a note instead.
+    console.log(
+      boxen(
+        chalk.cyan.bold("📁 Data Storage\n\n") +
+          chalk.white(
+            "All blockchain data, wallets, keys, and snapshots will be\n" +
+              "stored inside this profile's isolated directory.\n\n",
+          ) +
+          chalk.gray(
+            "  ~/.caravan-x/profiles/<profile_id>/\n" +
+              "    ├── docker-data/bitcoin-data/\n" +
+              "    ├── wallets/\n" +
+              "    ├── keys/\n" +
+              "    ├── snapshots/\n" +
+              "    └── scenarios/",
+          ),
+        {
+          padding: 1,
+          margin: 1,
+          borderStyle: "round",
+          borderColor: "gray",
+        },
+      ),
     );
 
-    // Check platform for recommendations
-    const isMacOS = process.platform === "darwin";
-    if (isMacOS) {
-      console.log(
-        boxen(
-          chalk.cyan.bold("🍎 macOS Note\n\n") +
-            chalk.white(
-              "For Docker compatibility, data will be stored under:\n",
-            ) +
-            chalk.cyan(defaultBitcoinDataDir),
-          {
-            padding: 1,
-            margin: 1,
-            borderStyle: "round",
-            borderColor: "cyan",
-          },
-        ),
-      );
-    }
+    // --- Collect Docker container preferences ---
 
-    const useCustomBitcoinDir = await confirm({
-      message: `Use default Bitcoin data location? (${defaultBitcoinDataDir})`,
-      default: true,
-    });
-
-    let bitcoinDataDir: string;
-    if (useCustomBitcoinDir) {
-      bitcoinDataDir = defaultBitcoinDataDir;
-    } else {
-      bitcoinDataDir = await input({
-        message: "Enter Bitcoin data directory path:",
-        default: defaultBitcoinDataDir,
-        validate: (inputPath) => {
-          if (!inputPath.trim()) return "Path cannot be empty";
-          return true;
-        },
-      });
-    }
-
-    // Ensure directory exists and is writable
-    try {
-      await fs.ensureDir(bitcoinDataDir);
-      const testFile = path.join(bitcoinDataDir, ".write-test");
-      await fs.writeFile(testFile, "test");
-      await fs.remove(testFile);
-    } catch (error) {
-      console.log(
-        boxen(
-          chalk.red.bold("❌ Permission Error\n\n") +
-            chalk.white(`Cannot write to: ${bitcoinDataDir}\n\n`) +
-            chalk.yellow(
-              "Please choose a different directory or fix permissions.",
-            ),
-          {
-            padding: 1,
-            margin: 1,
-            borderStyle: "round",
-            borderColor: "red",
-          },
-        ),
-      );
-      throw error;
-    }
-
-    console.log(chalk.white("\n📋 Docker Configuration:\n"));
+    console.log(chalk.white("\n🐳 Docker Container Settings:\n"));
 
     const containerName = await input({
-      message: "Docker container name:",
+      message: "Container name:",
       default: DEFAULT_DOCKER_CONFIG.containerName,
     });
 
-    const rpcPort = await number({
-      message: "Bitcoin RPC port:",
-      default: DEFAULT_DOCKER_CONFIG.ports.rpc,
+    let rpcPort = await number({
+      message: "Bitcoin Core RPC port:",
+      default: 18443,
     });
 
-    const p2pPort = await number({
-      message: "Bitcoin P2P port:",
-      default: DEFAULT_DOCKER_CONFIG.ports.p2p,
+    let p2pPort = await number({
+      message: "Bitcoin Core P2P port:",
+      default: 18444,
     });
 
     console.log(chalk.white("\n🔐 RPC Authentication:\n"));
 
     const rpcUser = await input({
       message: "RPC username:",
-      default: "caravan_user",
-      validate: (input) => input.length > 0 || "Username cannot be empty",
+      default: "caravan",
     });
 
     const rpcPassword = await input({
       message: "RPC password:",
       default: "caravan_pass",
-      validate: (input) => input.length > 0 || "Password cannot be empty",
     });
 
-    console.log(chalk.white("\n💼 Wallet Configuration:\n"));
+    console.log(chalk.white("\n⚙️  Initial Setup Options:\n"));
 
     const walletName = await input({
-      message: "Watch-only wallet name:",
+      message: "Watch-only wallet name (for Caravan):",
       default: "caravan_watcher",
-      validate: (input) => {
-        if (input.length === 0) return "Wallet name cannot be empty";
-        if (!/^[a-zA-Z0-9_]+$/.test(input))
-          return "Only alphanumeric and underscore allowed";
-        return true;
-      },
     });
 
     const preGenerateBlocks = await confirm({
-      message: "Generate 101 initial blocks? (Needed for spending)",
+      message: "Pre-generate 101 blocks? (Needed for spending)",
       default: true,
     });
+
+    // DEV: Use a placeholder for bitcoinDataDir — scopeConfigToProfile()
+    // will overwrite this with the actual profile-scoped path.
+    // We use this.appDir as a temporary value that gets replaced.
+    const placeholderBitcoinDataDir = path.join(
+      this.appDir,
+      "docker-data",
+      "bitcoin-data",
+    );
 
     // Create Docker config
     const dockerConfig: DockerConfig = {
@@ -179,7 +142,7 @@ export class SetupWizard {
         nginx: 8080,
       },
       volumes: {
-        bitcoinData: bitcoinDataDir,
+        bitcoinData: placeholderBitcoinDataDir,
         coordinator: path.join(this.appDir, "coordinator"),
       },
       network: DEFAULT_DOCKER_CONFIG.network,
@@ -212,7 +175,8 @@ export class SetupWizard {
       },
     };
 
-    // Create enhanced config (nginx port will be updated after Docker starts)
+    // DEV: Build config with placeholder paths. These ALL get rewritten
+    // by ProfileManager.scopeConfigToProfile() before anything uses them.
     const config: EnhancedAppConfig = {
       mode: SetupMode.DOCKER,
       sharedConfig,
@@ -220,10 +184,10 @@ export class SetupWizard {
       bitcoin: {
         protocol: "http",
         host: "localhost",
-        port: 8080, // Will be updated to actual nginx port
+        port: 8080, // Updated to actual nginx port after Docker starts
         user: rpcUser,
         pass: rpcPassword,
-        dataDir: bitcoinDataDir,
+        dataDir: placeholderBitcoinDataDir,
       },
       appDir: this.appDir,
       caravanDir: path.join(this.appDir, "wallets"),
@@ -236,31 +200,10 @@ export class SetupWizard {
       scenariosDir: path.join(this.appDir, "scenarios"),
     };
 
-    // Optionally start Docker
-    if (!skipDockerStart) {
-      const startNow = await confirm({
-        message: "Start Docker containers now?",
-        default: true,
-      });
-
-      if (startNow) {
-        const dockerService = new DockerService(
-          config.docker!,
-          path.join(config.appDir, "docker-data"),
-        );
-
-        const nginxPort = await dockerService.completeSetup(
-          config.sharedConfig,
-        );
-        config.bitcoin.port = nginxPort;
-      }
-    }
-
-    // Ensure directories exist
-    await fs.ensureDir(config.caravanDir);
-    await fs.ensureDir(config.keysDir);
-    await fs.ensureDir(config.snapshots.directory);
-    await fs.ensureDir(config.scenariosDir);
+    // DEV: We do NOT start Docker here. The caller will:
+    //   1. Call createProfile() to scope paths into the profile dir
+    //   2. Start Docker with the scoped config
+    // This prevents docker-data from landing in the shared base directory.
 
     return config;
   }
