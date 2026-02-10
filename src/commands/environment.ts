@@ -403,6 +403,7 @@ export class EnvironmentCommands {
         method,
         skipVerification,
         force: true,
+        freshProfile: true,
         rpcOverrides: {
           rpcUser: manifest.rpcConfig.rpcUser,
           rpcPassword: manifest.rpcConfig.rpcPassword,

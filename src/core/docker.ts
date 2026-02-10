@@ -555,7 +555,13 @@ export class DockerService {
   ): Promise<void> {
     try {
       mainProgress.update(93, { status: "Creating mining wallet..." });
-      await this.execBitcoinCli('createwallet "mining_wallet"');
+      // DEV: The 7th param (load_on_startup=true) ensures mining_wallet
+      // is added to settings.json so it auto-loads after restart/reindex.
+      // Without this, createwallet only loads the wallet for the current
+      // session — it won't persist across restarts or environment imports.
+      await this.execBitcoinCli(
+        'createwallet "mining_wallet" false false "" false true true',
+      );
 
       mainProgress.update(95, { status: "Getting mining address..." });
       const address = await this.execBitcoinCli(
@@ -649,30 +655,36 @@ export class DockerService {
   ): Promise<number> {
     const spinner = ora("Setting up nginx proxy...").start();
 
+    // DEV: Nginx container name is derived from the bitcoin container
+    // name so each profile gets its own isolated nginx proxy.
+    // Without this, all profiles share "caravan-x-nginx" and importing
+    // a new profile destroys the original profile's proxy.
+    const nginxContainerName = `${this.config.containerName}-nginx`;
+
     try {
       // Check if nginx container exists
       const { stdout: nginxContainers } = await execAsync(
-        "docker ps -a --filter name=caravan-x-nginx --format '{{.ID}}'",
+        `docker ps -a --filter name=${nginxContainerName} --format '{{.ID}}'`,
       );
 
       // If container exists and we're not forcing recreation
       if (nginxContainers.trim() && !force) {
         const { stdout: runningStatus } = await execAsync(
-          "docker ps --filter name=caravan-x-nginx --format '{{.Status}}'",
+          `docker ps --filter name=${nginxContainerName} --format '{{.Status}}'`,
         );
 
         if (runningStatus.trim()) {
           spinner.succeed("Nginx proxy already running");
           // Extract port from existing container
           const { stdout: portInfo } = await execAsync(
-            "docker port caravan-x-nginx 8080 2>/dev/null || echo '8080'",
+            `docker port ${nginxContainerName} 8080 2>/dev/null || echo '8080'`,
           );
           const nginxPort = parseInt(portInfo.split(":")[1]) || 8080;
           return nginxPort;
         } else {
           // Start existing container
           spinner.text = "Starting existing nginx container...";
-          await execAsync("docker start caravan-x-nginx");
+          await execAsync(`docker start ${nginxContainerName}`);
           spinner.succeed("Nginx proxy started");
           return 8080;
         }
@@ -681,7 +693,9 @@ export class DockerService {
       // Remove old container if forcing recreation
       if (nginxContainers.trim()) {
         spinner.text = "Removing old nginx container...";
-        await execAsync("docker rm -f caravan-x-nginx 2>/dev/null || true");
+        await execAsync(
+          `docker rm -f ${nginxContainerName} 2>/dev/null || true`,
+        );
       }
 
       // Get the Bitcoin Core RPC port (might have been auto-adjusted)
@@ -709,7 +723,7 @@ export class DockerService {
       // Start nginx container with dynamic port mapping
       // Maps host port (nginxPort) to container port 8080
       const nginxCommand = `docker run -d \
-         --name caravan-x-nginx \
+         --name ${nginxContainerName} \
          --network ${this.config.network} \
          -p ${nginxPort}:8080 \
          -v "${nginxConfigDir}/nginx.conf":/etc/nginx/nginx.conf:ro \
@@ -800,8 +814,11 @@ export class DockerService {
 
       // Clean up any existing nginx first
       try {
-        await execAsync("docker stop caravan-x-nginx 2>/dev/null || true");
-        await execAsync("docker rm caravan-x-nginx 2>/dev/null || true");
+        const nginxContainerName = `${this.config.containerName}-nginx`;
+        await execAsync(
+          `docker stop ${nginxContainerName} 2>/dev/null || true`,
+        );
+        await execAsync(`docker rm ${nginxContainerName} 2>/dev/null || true`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       } catch (e) {
         // Ignore cleanup errors

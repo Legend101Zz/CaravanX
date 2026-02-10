@@ -47,6 +47,7 @@ import {
   EnvironmentImportResult,
 } from "../types/environment";
 import { EnhancedAppConfig, SetupMode, SharedConfig } from "../types/config";
+import { log } from "../utils/logger";
 
 const execAsync = promisify(exec);
 
@@ -339,7 +340,14 @@ export class EnvironmentService {
         rpcConfig: {
           rpcUser: this.config.bitcoin.user,
           rpcPassword: this.config.bitcoin.pass,
-          rpcPort: this.config.bitcoin.port,
+          // DEV: Store the actual Bitcoin RPC port, not the nginx proxy port.
+          // config.bitcoin.port is the nginx port (8080/8081/etc) which
+          // is what Caravan connects to. The actual RPC port is in the
+          // shared config or docker config.
+          rpcPort:
+            this.config.sharedConfig?.bitcoin.rpcPort ||
+            this.config.docker?.ports.rpc ||
+            18443,
           p2pPort: this.config.sharedConfig?.bitcoin.p2pPort || 18444,
         },
         docker: this.config.docker
@@ -516,8 +524,14 @@ export class EnvironmentService {
       result.method = importMethod;
 
       // ── Step 5: Stop Bitcoin Core ──
-      spinner.text = "Stopping Bitcoin Core...";
-      await this.stopBitcoinCore();
+      // DEV: Only stop Bitcoin Core if we're importing into an EXISTING
+      // profile that has a running container. For fresh profiles created
+      // during import, there's nothing to stop — and calling stop would
+      // kill the ORIGINAL profile's container, breaking profile switching.
+      if (!options.freshProfile) {
+        spinner.text = "Stopping Bitcoin Core...";
+        await this.stopBitcoinCore();
+      }
 
       // ── Step 6: Import based on method ──
       if (importMethod === "binary") {
@@ -1135,17 +1149,46 @@ export class EnvironmentService {
       const srcSettings = path.join(blockchainDir, "settings.json");
       const destSettings = path.join(regtestDir, "settings.json");
       if (await fs.pathExists(srcSettings)) {
-        await fs.copy(srcSettings, destSettings, { overwrite: true });
-      } else {
-        // Fallback: generate settings.json from the manifest's wallet list
-        // so Bitcoin Core knows to load them
-        const walletSettings = {
-          $schema: "/wallet-settings.json",
-          wallet: manifest.contents.bitcoinWallets.map((name) => ({
-            name,
-          })),
-        };
-        await fs.writeJson(destSettings, walletSettings, { spaces: 2 });
+        // DEV: Reconcile settings.json with the manifest's wallet list.
+        // Some wallets (like mining_wallet) may have been created without
+        // load_on_startup=true, meaning they're NOT in settings.json.
+        // After a reindex/restart, Bitcoin Core only auto-loads wallets
+        // listed in settings.json, so any unlisted wallet would silently
+        // disappear despite its files being on disk.
+        spinner.text = "Reconciling wallet auto-load settings...";
+        try {
+          let settings: any = {};
+          if (await fs.pathExists(destSettings)) {
+            settings = await fs.readJson(destSettings);
+          }
+
+          // Bitcoin Core 27.0 settings.json format:
+          // { "wallet": ["wallet_name1", "wallet_name2", ...] }
+          // But it can also be empty or have other fields.
+          const currentWallets: string[] = Array.isArray(settings.wallet)
+            ? settings.wallet
+            : [];
+
+          // Add any wallets from the manifest that aren't listed
+          let added = 0;
+          for (const walletName of manifest.contents.bitcoinWallets) {
+            if (!currentWallets.includes(walletName)) {
+              currentWallets.push(walletName);
+              added++;
+            }
+          }
+
+          if (added > 0) {
+            settings.wallet = currentWallets;
+            await fs.writeJson(destSettings, settings, { spaces: 2 });
+            log.info?.(`Added ${added} missing wallet(s) to settings.json`);
+          }
+        } catch (settingsErr: any) {
+          result.warnings.push(
+            `Could not reconcile settings.json: ${settingsErr.message}. ` +
+              `Some wallets may need to be loaded manually.`,
+          );
+        }
       }
     } catch (error: any) {
       // Restore backup on failure

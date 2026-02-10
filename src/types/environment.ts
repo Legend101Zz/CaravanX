@@ -221,6 +221,8 @@ export interface EnvironmentImportOptions {
 
   /** Force import even if environment already exists */
   force?: boolean;
+  /** True when importing into a newly created profile (no existing containers) */
+  freshProfile?: boolean;
 }
 
 /**
