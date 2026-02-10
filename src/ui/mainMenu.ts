@@ -64,15 +64,12 @@ export class MainMenu {
       { name: colors.header("🔐 Caravan Multisig"), value: "caravan-multisig" },
       { name: colors.header("💸 Transactions"), value: "transactions" },
       { name: colors.header("📜 Blockchain Scripts"), value: "scripts" },
+      { name: colors.header("₿ Visualization"), value: "visualization" },
     ];
 
     const dockerOnlyCategories = [
       { name: colors.header("🐳 Docker Management"), value: "docker" },
       { name: colors.header("📸 Snapshots"), value: "snapshots" },
-    ];
-
-    const manualOnlyCategories = [
-      { name: colors.header("₿ Visualization"), value: "visualization" },
     ];
 
     const bottomCategories = [
@@ -88,11 +85,7 @@ export class MainMenu {
         ...bottomCategories,
       ];
     } else {
-      return [
-        ...commonCategories,
-        ...manualOnlyCategories,
-        ...bottomCategories,
-      ];
+      return [...commonCategories, ...bottomCategories];
     }
   }
 

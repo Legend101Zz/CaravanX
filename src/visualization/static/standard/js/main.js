@@ -1,15 +1,22 @@
+// ============================================
+// main.js - Caravan-X Blockchain Visualization
+// ============================================
+
 // Global variables
 let socket;
 let blockchainData = {
   blocks: [],
-  mempool: { txids: [] },
+  mempool: { txids: [], txCount: 0 },
   transactions: {},
+  chainInfo: {},
+  stats: {},
 };
 let blockchainChart;
 let mempoolChart;
 let transactionNetwork;
 let mempoolSizeHistory = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 let isFirstLoad = true;
+let walletsCache = []; // Cache wallet data for tx creation modal
 
 // Initialize the application
 document.addEventListener("DOMContentLoaded", () => {
@@ -19,8 +26,17 @@ document.addEventListener("DOMContentLoaded", () => {
   loadThemePreference();
 });
 
-// Initialize Socket.io connection
+// ============================================
+// Socket.io Connection
+// ============================================
 function initSocket() {
+  // Gracefully handle missing socket.io
+  if (typeof io === "undefined") {
+    console.warn("Socket.io not available, falling back to polling");
+    setInterval(fetchInitialData, 5000);
+    return;
+  }
+
   socket = io();
 
   socket.on("connect", () => {
@@ -34,7 +50,7 @@ function initSocket() {
   });
 
   socket.on("blockchain_update", (data) => {
-    console.log("Received blockchain update", data);
+    console.log("Received blockchain update");
     updateBlockchainData(data);
   });
 
@@ -43,85 +59,103 @@ function initSocket() {
     addNewBlock(block);
     addMiningLog(
       `New block mined: ${block.hash.substring(0, 8)}... at height ${block.height}`,
+      "success",
     );
-
-    // Play sound effect
     playSound("block-mined");
   });
 
   socket.on("new_transaction", (tx) => {
     console.log("New transaction", tx);
     addNewTransaction(tx);
-    addMiningLog(`New transaction: ${tx.txid.substring(0, 8)}...`);
-
-    // Play sound effect
+    addMiningLog(
+      `New transaction: ${tx.txid.substring(0, 8)}...${tx.amount ? ` (${tx.amount} BTC)` : ""}`,
+      "info",
+    );
     playSound("transaction");
   });
 
   socket.on("mining_started", (data) => {
     console.log("Mining started", data);
     showMiningActivity(true);
-    addMiningLog(
-      `Mining started: ${data.blocks} blocks to ${data.address.substring(0, 8)}...`,
-    );
+    addMiningLog(`⛏️ Mining ${data.blocks} block(s)...`, "info");
   });
 
   socket.on("mining_complete", (data) => {
     console.log("Mining complete", data);
-    addMiningLog(`Mining complete: ${data.blockHashes.length} blocks mined`);
+    addMiningLog(
+      `✅ Mining complete: ${data.blockHashes.length} block(s) mined`,
+      "success",
+    );
+    // Refresh wallet data after mining (balances change)
+    fetchWalletDetails();
+  });
+
+  socket.on("error", (data) => {
+    console.error("Server error:", data);
+    addMiningLog(`❌ Error: ${data.message}`, "error");
   });
 }
 
-// Sound effects
+// ============================================
+// Sound Effects (graceful fallback)
+// ============================================
 function playSound(type) {
-  // Create an audio element for the sound effect
-  const audio = new Audio();
+  try {
+    const audio = new Audio();
+    switch (type) {
+      case "block-mined":
+        audio.src = "sounds/block-mined.mp3";
+        break;
+      case "transaction":
+        audio.src = "sounds/transaction.mp3";
+        break;
+      case "error":
+        audio.src = "sounds/error.mp3";
+        break;
+      case "click":
+        audio.src = "sounds/click.mp3";
+        break;
+      default:
+        return;
+    }
+    audio.volume = 0.3;
+    audio.play().catch(() => {
+      /* sounds are optional */
+    });
+  } catch (e) {
+    /* sounds are optional, silently ignore */
+  }
+}
 
-  switch (type) {
-    case "block-mined":
-      audio.src = "sounds/block-mined.mp3";
-      break;
-    case "transaction":
-      audio.src = "sounds/transaction.mp3";
-      break;
-    case "error":
-      audio.src = "sounds/error.mp3";
-      break;
-    case "click":
-      audio.src = "sounds/click.mp3";
-      break;
-    default:
-      return; // No sound to play
+// ============================================
+// Event Listeners
+// ============================================
+function setupEventListeners() {
+  // View switching buttons (pixel/minecraft views)
+  const pixelViewBtn = document.getElementById("pixelViewBtn");
+  if (pixelViewBtn) {
+    pixelViewBtn.addEventListener("click", () => {
+      window.location.href = "index-pixel.html";
+    });
   }
 
-  // Load and play the sound
-  audio.load();
-  audio.volume = 0.5;
-  audio
-    .play()
-    .catch((e) => console.log("Sound play prevented by browser policy", e));
-}
-
-// Setup event listeners
-function setupEventListeners() {
-  // View switching buttons
-  document.getElementById("pixelViewBtn").addEventListener("click", () => {
-    playSound("click");
-    window.location.href = "index-pixel.html";
-  });
-
-  document.getElementById("minecraftViewBtn").addEventListener("click", () => {
-    playSound("click");
-    window.location.href = "index-minecraft.html";
-  });
+  const minecraftViewBtn = document.getElementById("minecraftViewBtn");
+  if (minecraftViewBtn) {
+    minecraftViewBtn.addEventListener("click", () => {
+      window.location.href = "index-minecraft.html";
+    });
+  }
 
   // Refresh button
-  document.getElementById("refreshBtn").addEventListener("click", () => {
-    playSound("click");
-    fetchInitialData();
-  });
+  const refreshBtn = document.getElementById("refreshBtn");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      fetchInitialData();
+      fetchWalletDetails();
+    });
+  }
 
-  // Mining buttons
+  // Mining button
   const mineBlockBtn = document.getElementById("mineBlockBtn");
   if (mineBlockBtn) {
     mineBlockBtn.addEventListener("click", triggerMineBlock);
@@ -137,13 +171,9 @@ function setupEventListeners() {
   const miningInfoBtn = document.getElementById("miningInfoBtn");
   if (miningInfoBtn) {
     miningInfoBtn.addEventListener("click", () => {
-      playSound("click");
-      fetch("/api/chain-info")
-        .then((response) => response.json())
-        .then((info) => {
-          showMiningInfo(info);
-        })
-        .catch((error) => console.error("Error fetching mining info:", error));
+      fetchSafe("/api/chain-info").then((info) => {
+        if (info) showMiningInfo(info);
+      });
     });
   }
 
@@ -157,7 +187,8 @@ function setupEventListeners() {
   const closeMiningBtn = document.getElementById("closeMiningBtn");
   if (closeMiningBtn) {
     closeMiningBtn.addEventListener("click", () => {
-      document.getElementById("miningActivity").style.display = "none";
+      const el = document.getElementById("miningActivity");
+      if (el) el.style.display = "none";
     });
   }
 
@@ -175,31 +206,25 @@ function setupEventListeners() {
     });
   }
 
-  // Network control buttons
+  // Network zoom/reset buttons
   const zoomInBtn = document.getElementById("zoomInBtn");
   if (zoomInBtn) {
     zoomInBtn.addEventListener("click", () => {
-      if (transactionNetwork) {
-        transactionNetwork.zoom(0.2);
-      }
+      if (transactionNetwork) transactionNetwork.zoom(0.2);
     });
   }
 
   const zoomOutBtn = document.getElementById("zoomOutBtn");
   if (zoomOutBtn) {
     zoomOutBtn.addEventListener("click", () => {
-      if (transactionNetwork) {
-        transactionNetwork.zoom(-0.2);
-      }
+      if (transactionNetwork) transactionNetwork.zoom(-0.2);
     });
   }
 
   const resetViewBtn = document.getElementById("resetViewBtn");
   if (resetViewBtn) {
     resetViewBtn.addEventListener("click", () => {
-      if (transactionNetwork) {
-        transactionNetwork.fit();
-      }
+      if (transactionNetwork) transactionNetwork.fit();
     });
   }
 
@@ -213,22 +238,45 @@ function setupEventListeners() {
 
   // Handle window resize for charts
   window.addEventListener("resize", () => {
-    if (blockchainChart) {
-      blockchainChart.resize();
-    }
-    if (mempoolChart) {
-      mempoolChart.resize();
-    }
+    if (blockchainChart) blockchainChart.resize();
+    if (mempoolChart) mempoolChart.resize();
   });
 }
 
-// Fetch initial blockchain data
+// ============================================
+// Safe Fetch Wrapper
+// ============================================
+async function fetchSafe(url, options = {}) {
+  try {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      console.error(`HTTP ${response.status} from ${url}: ${errorBody}`);
+      return null;
+    }
+    return await response.json();
+  } catch (error) {
+    console.error(`Fetch error for ${url}:`, error);
+    return null;
+  }
+}
+
+async function postSafe(url, body) {
+  return fetchSafe(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// ============================================
+// Data Fetching
+// ============================================
 function fetchInitialData() {
   showLoadingStates();
 
-  fetch("/api/blockchain")
-    .then((response) => response.json())
-    .then((data) => {
+  fetchSafe("/api/blockchain").then((data) => {
+    if (data) {
       blockchainData = data;
       updateDashboard();
       initVisualizations();
@@ -238,88 +286,148 @@ function fetchInitialData() {
         playIntroAnimation();
         isFirstLoad = false;
       }
-    })
-    .catch((error) => {
-      console.error("Error fetching blockchain data:", error);
-      showErrorMessage("Failed to load blockchain data. Please try again.");
+    } else {
+      showErrorMessage(
+        "Failed to load blockchain data. Is Bitcoin Core running?",
+      );
       hideLoadingStates();
-    });
+    }
+  });
+
+  // Also fetch wallet details
+  fetchWalletDetails();
 }
 
-// Show loading states for all containers
-function showLoadingStates() {
-  const loadingHTML = `<div class="loading">
-        <div class="spinner"></div>
-        <span>Loading data...</span>
-    </div>`;
-
-  // For blocks container
-  const blocksContainer = document.getElementById("blocksContainer");
-  if (blocksContainer) {
-    blocksContainer.innerHTML = loadingHTML;
+async function fetchWalletDetails() {
+  // Try detailed endpoint first (has multisig info)
+  let data = await fetchSafe("/api/wallets/details");
+  if (data && data.wallets) {
+    walletsCache = data.wallets;
+    displayWalletPanel(data.wallets);
+    return;
   }
 
-  // For mempool container
-  const mempoolContainer = document.getElementById("mempoolContainer");
-  if (mempoolContainer) {
-    mempoolContainer.innerHTML = loadingHTML;
-  }
-
-  // For network container
-  const networkContainer = document.getElementById("transactionNetwork");
-  if (networkContainer) {
-    networkContainer.innerHTML = loadingHTML;
+  // Fallback: simple wallet list
+  data = await fetchSafe("/api/wallets");
+  if (data && data.wallets) {
+    walletsCache = data.wallets.map((name) => ({
+      name,
+      balance: 0,
+      txCount: 0,
+      isMultisig: false,
+      isDescriptor: false,
+    }));
+    displayWalletPanel(walletsCache);
   }
 }
 
-// Hide loading states
-function hideLoadingStates() {
-  // The content will be replaced by actual data in respective display functions
-}
+function fetchBlockDetails(hash) {
+  const detailsElement = document.getElementById("transactionDetails");
+  if (!detailsElement) return;
 
-// Show error message
-function showErrorMessage(message) {
-  const errorHTML = `<div class="error-message">
-        <i class="fas fa-exclamation-triangle"></i>
-        <p>${message}</p>
-    </div>`;
+  showDetailLoading(detailsElement, "block");
 
-  // Add to different containers as needed
-  const containers = [
-    document.getElementById("blocksContainer"),
-    document.getElementById("mempoolContainer"),
-    document.getElementById("transactionNetwork"),
-  ];
-
-  containers.forEach((container) => {
-    if (container) {
-      container.innerHTML = errorHTML;
+  fetchSafe(`/api/block/${hash}`).then((block) => {
+    if (block) {
+      displayBlockDetails(block);
+    } else {
+      showDetailError(detailsElement, "block");
     }
   });
 }
 
-// Update connection status indicator
+function fetchTransactionDetails(txid) {
+  const detailsElement = document.getElementById("transactionDetails");
+  if (!detailsElement) return;
+
+  showDetailLoading(detailsElement, "transaction");
+
+  fetchSafe(`/api/tx/${txid}`).then((tx) => {
+    if (tx) {
+      displayTransactionDetails(tx);
+    } else {
+      showDetailError(detailsElement, "transaction");
+    }
+  });
+}
+
+// ============================================
+// Loading / Error UI Helpers
+// ============================================
+function showLoadingStates() {
+  const loadingHTML = `<div class="loading">
+    <div class="spinner"></div>
+    <span>Loading data...</span>
+  </div>`;
+
+  ["blocksContainer", "mempoolContainer", "transactionNetwork"].forEach(
+    (id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = loadingHTML;
+    },
+  );
+}
+
+function hideLoadingStates() {
+  // Content is replaced by display functions
+}
+
+function showErrorMessage(message) {
+  const errorHTML = `<div class="error-message">
+    <i class="fas fa-exclamation-triangle"></i>
+    <p>${message}</p>
+  </div>`;
+
+  ["blocksContainer", "mempoolContainer", "transactionNetwork"].forEach(
+    (id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = errorHTML;
+    },
+  );
+}
+
+function showDetailLoading(el, type) {
+  el.innerHTML = `<div class="loading">
+    <div class="spinner"></div>
+    <span>Loading ${type} details...</span>
+  </div>`;
+  const closeBtn = document.getElementById("closeDetailsBtn");
+  if (closeBtn) closeBtn.style.display = "block";
+}
+
+function showDetailError(el, type) {
+  el.innerHTML = `<div class="error-message">
+    <i class="fas fa-exclamation-triangle" style="color: var(--error-color); font-size: 2rem; margin-bottom: 1rem;"></i>
+    <p>Error loading ${type} details. Please try again.</p>
+  </div>`;
+  playSound("error");
+}
+
+// ============================================
+// Connection Status
+// ============================================
 function updateConnectionStatus(connected) {
   const statusElement = document.getElementById("connectionStatus");
   if (!statusElement) return;
 
-  const statusIndicator = statusElement.querySelector(".status-indicator");
-  const statusText = statusElement.querySelector(".status-text");
+  const indicator = statusElement.querySelector(".status-indicator");
+  const text = statusElement.querySelector(".status-text");
 
-  if (connected) {
-    statusIndicator.classList.remove("disconnected");
-    statusIndicator.classList.add("connected");
-    statusText.textContent = "Connected";
-  } else {
-    statusIndicator.classList.remove("connected");
-    statusIndicator.classList.add("disconnected");
-    statusText.textContent = "Disconnected";
+  if (indicator) {
+    indicator.classList.toggle("connected", connected);
+    indicator.classList.toggle("disconnected", !connected);
+  }
+  if (text) {
+    text.textContent = connected ? "Connected" : "Disconnected";
   }
 }
 
-// Play intro animation
+// ============================================
+// Intro Animation
+// ============================================
 function playIntroAnimation() {
-  // Animate stats cards to fade in one by one
+  if (typeof gsap === "undefined") return; // gsap is optional
+
   const statCards = document.querySelectorAll(".stat-card");
   statCards.forEach((card, index) => {
     card.style.opacity = "0";
@@ -334,11 +442,9 @@ function playIntroAnimation() {
     }, 100);
   });
 
-  // Animate cards to fade in after stats
   const cards = document.querySelectorAll(".card");
   cards.forEach((card, index) => {
-    if (card.closest(".stats-section")) return; // Skip stats cards
-
+    if (card.closest(".stats-section")) return;
     card.style.opacity = "0";
     card.style.transform = "translateY(20px)";
     setTimeout(() => {
@@ -353,20 +459,24 @@ function playIntroAnimation() {
   });
 }
 
-// Update blockchain data with new information
+// ============================================
+// Data Update
+// ============================================
 function updateBlockchainData(data) {
-  // Merge new data with existing data
   if (data.blocks) blockchainData.blocks = data.blocks;
   if (data.mempool) blockchainData.mempool = data.mempool;
   if (data.chainInfo) blockchainData.chainInfo = data.chainInfo;
   if (data.stats) blockchainData.stats = data.stats;
+  if (data.networkInfo) blockchainData.networkInfo = data.networkInfo;
+  if (data.mempoolInfo) blockchainData.mempoolInfo = data.mempoolInfo;
 
-  // Update the UI
   updateDashboard();
   updateVisualizations();
 }
 
-// Initialize visualizations
+// ============================================
+// Visualizations Init & Update
+// ============================================
 function initVisualizations() {
   initBlockchainVisualization();
   initMempoolVisualization();
@@ -375,7 +485,6 @@ function initVisualizations() {
   displayMempool();
 }
 
-// Update all visualizations
 function updateVisualizations() {
   updateBlockchainVisualization();
   updateMempoolVisualization();
@@ -384,38 +493,28 @@ function updateVisualizations() {
   displayMempool();
 }
 
-// Initialize blockchain visualization
+// ============================================
+// Blockchain Chart (Block Sizes)
+// ============================================
 function initBlockchainVisualization() {
   const container = document.getElementById("blockchainVisualization");
-  if (!container) return;
+  if (!container || typeof Chart === "undefined") return;
 
-  // Clear previous chart
   container.innerHTML = "";
-
   const canvas = document.createElement("canvas");
   container.appendChild(canvas);
-
   const ctx = canvas.getContext("2d");
 
-  // Get block data
-  const blockHeights = blockchainData.blocks.map((block) => block.height);
-  const blockSizes = blockchainData.blocks.map((block) => block.size / 1024); // KB
-  const blockColors = blockchainData.blocks.map(() => {
-    return `rgba(0, 116, 217, 0.7)`; // Caravan blue with transparency
-  });
+  const blocks = blockchainData.blocks || [];
+  const blockHeights = blocks.map((b) => b.height);
+  const blockSizes = blocks.map((b) => b.size / 1024);
 
-  // Create gradient for bars
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height || 300);
   gradient.addColorStop(0, "rgba(0, 116, 217, 0.8)");
   gradient.addColorStop(1, "rgba(0, 116, 217, 0.3)");
 
-  // Configure Chart.js
-  Chart.defaults.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-secondary");
-  Chart.defaults.borderColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--border-color");
+  const cssVar = (name) =>
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
   blockchainChart = new Chart(ctx, {
     type: "bar",
@@ -437,62 +536,32 @@ function initBlockchainVisualization() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: {
-        duration: 1000,
-        easing: "easeOutQuart",
-      },
+      animation: { duration: 1000, easing: "easeOutQuart" },
       plugins: {
         legend: {
           display: true,
           position: "top",
           labels: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-color",
-            ),
-            font: {
-              family: "'Inter', sans-serif",
-              size: 12,
-            },
+            color: cssVar("--text-color"),
+            font: { family: "'Inter', sans-serif", size: 12 },
           },
         },
         tooltip: {
-          backgroundColor: getComputedStyle(
-            document.documentElement,
-          ).getPropertyValue("--card-bg"),
-          titleColor: getComputedStyle(
-            document.documentElement,
-          ).getPropertyValue("--caravan-yellow"),
-          bodyColor: getComputedStyle(
-            document.documentElement,
-          ).getPropertyValue("--text-color"),
-          borderColor: getComputedStyle(
-            document.documentElement,
-          ).getPropertyValue("--border-color"),
+          backgroundColor: cssVar("--card-bg"),
+          titleColor: cssVar("--caravan-yellow"),
+          bodyColor: cssVar("--text-color"),
+          borderColor: cssVar("--border-color"),
           borderWidth: 1,
           cornerRadius: 6,
           padding: 10,
-          titleFont: {
-            family: "'Roboto Mono', monospace",
-            size: 13,
-            weight: "bold",
-          },
-          bodyFont: {
-            family: "'Inter', sans-serif",
-            size: 12,
-          },
           callbacks: {
-            title: function (tooltipItems) {
-              return `Block #${tooltipItems[0].label}`;
-            },
-            label: function (context) {
-              return `Size: ${context.raw.toFixed(2)} KB`;
-            },
-            afterLabel: function (context) {
-              const blockIndex = context.dataIndex;
-              const block = blockchainData.blocks[blockIndex];
-              const time = new Date(block.time * 1000).toLocaleString();
+            title: (items) => `Block #${items[0].label}`,
+            label: (ctx) => `Size: ${ctx.raw.toFixed(2)} KB`,
+            afterLabel: (ctx) => {
+              const block = blocks[ctx.dataIndex];
+              if (!block) return [];
               return [
-                `Time: ${time}`,
+                `Time: ${new Date(block.time * 1000).toLocaleString()}`,
                 `Transactions: ${block.txCount || 0}`,
                 `Hash: ${block.hash.substring(0, 12)}...`,
               ];
@@ -505,57 +574,22 @@ function initBlockchainVisualization() {
           title: {
             display: true,
             text: "Block Height",
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-color",
-            ),
-            font: {
-              family: "'Inter', sans-serif",
-              size: 12,
-            },
+            color: cssVar("--text-color"),
           },
           reverse: true,
-          ticks: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-secondary",
-            ),
-            font: {
-              family: "'Roboto Mono', monospace",
-              size: 11,
-            },
-          },
-          grid: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--border-color",
-            ),
-            display: false,
-          },
+          ticks: { color: cssVar("--text-secondary") },
+          grid: { display: false },
         },
         y: {
           title: {
             display: true,
             text: "Size (KB)",
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-color",
-            ),
-            font: {
-              family: "'Inter', sans-serif",
-              size: 12,
-            },
+            color: cssVar("--text-color"),
           },
           beginAtZero: true,
-          ticks: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-secondary",
-            ),
-            font: {
-              family: "'Roboto Mono', monospace",
-              size: 11,
-            },
-          },
+          ticks: { color: cssVar("--text-secondary") },
           grid: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--border-color",
-            ),
+            color: cssVar("--border-color"),
             lineWidth: 0.5,
           },
         },
@@ -564,88 +598,55 @@ function initBlockchainVisualization() {
   });
 }
 
-// Update blockchain visualization
 function updateBlockchainVisualization() {
   if (!blockchainChart) return;
 
-  // Update data
-  blockchainChart.data.labels = blockchainData.blocks.map(
-    (block) => block.height,
-  );
-  blockchainChart.data.datasets[0].data = blockchainData.blocks.map(
-    (block) => block.size / 1024,
-  );
+  const blocks = blockchainData.blocks || [];
+  blockchainChart.data.labels = blocks.map((b) => b.height);
+  blockchainChart.data.datasets[0].data = blocks.map((b) => b.size / 1024);
 
-  // Update chart colors based on theme
-  blockchainChart.options.scales.x.ticks.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-secondary");
-  blockchainChart.options.scales.y.ticks.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-secondary");
-  blockchainChart.options.scales.x.grid.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--border-color");
-  blockchainChart.options.scales.y.grid.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--border-color");
-  blockchainChart.options.scales.x.title.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-color");
-  blockchainChart.options.scales.y.title.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-color");
-  blockchainChart.options.plugins.legend.labels.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-color");
+  const cssVar = (name) =>
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-  // Updating tooltip styles
-  blockchainChart.options.plugins.tooltip.backgroundColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--card-bg");
-  blockchainChart.options.plugins.tooltip.titleColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--caravan-yellow");
-  blockchainChart.options.plugins.tooltip.bodyColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-color");
-  blockchainChart.options.plugins.tooltip.borderColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--border-color");
+  // Update theme-dependent colors
+  blockchainChart.options.scales.x.ticks.color = cssVar("--text-secondary");
+  blockchainChart.options.scales.y.ticks.color = cssVar("--text-secondary");
+  blockchainChart.options.scales.x.title.color = cssVar("--text-color");
+  blockchainChart.options.scales.y.title.color = cssVar("--text-color");
+  blockchainChart.options.scales.y.grid.color = cssVar("--border-color");
+  blockchainChart.options.plugins.legend.labels.color = cssVar("--text-color");
+  blockchainChart.options.plugins.tooltip.backgroundColor = cssVar("--card-bg");
+  blockchainChart.options.plugins.tooltip.titleColor =
+    cssVar("--caravan-yellow");
+  blockchainChart.options.plugins.tooltip.bodyColor = cssVar("--text-color");
+  blockchainChart.options.plugins.tooltip.borderColor =
+    cssVar("--border-color");
 
   blockchainChart.update();
 }
 
-// Initialize mempool visualization
+// ============================================
+// Mempool Chart (Size over Time)
+// ============================================
 function initMempoolVisualization() {
   const container = document.getElementById("mempoolVisualization");
-  if (!container) return;
+  if (!container || typeof Chart === "undefined") return;
 
-  // Clear previous chart
   container.innerHTML = "";
-
   const canvas = document.createElement("canvas");
   container.appendChild(canvas);
-
   const ctx = canvas.getContext("2d");
 
-  // Update mempool size history
   const currentSize = blockchainData.mempool?.txCount || 0;
   mempoolSizeHistory.push(currentSize);
   mempoolSizeHistory.shift();
 
-  // Create gradient for area fill
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, "rgba(255, 215, 0, 0.7)"); // Caravan yellow with transparency
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height || 300);
+  gradient.addColorStop(0, "rgba(255, 215, 0, 0.7)");
   gradient.addColorStop(1, "rgba(255, 215, 0, 0.1)");
 
-  // Configure Chart.js
-  Chart.defaults.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-secondary");
-  Chart.defaults.borderColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--border-color");
+  const cssVar = (name) =>
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
   mempoolChart = new Chart(ctx, {
     type: "line",
@@ -658,12 +659,10 @@ function initMempoolVisualization() {
           label: "Mempool Size (Transactions)",
           data: mempoolSizeHistory,
           backgroundColor: gradient,
-          borderColor: "rgba(255, 215, 0, 1)", // Caravan yellow
+          borderColor: "rgba(255, 215, 0, 1)",
           borderWidth: 2,
           pointBackgroundColor: "rgba(255, 215, 0, 1)",
-          pointBorderColor: getComputedStyle(
-            document.documentElement,
-          ).getPropertyValue("--card-bg"),
+          pointBorderColor: cssVar("--card-bg"),
           pointRadius: 4,
           pointHoverRadius: 6,
           tension: 0.4,
@@ -674,49 +673,24 @@ function initMempoolVisualization() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: {
-        duration: 1000,
-        easing: "easeOutQuart",
-      },
+      animation: { duration: 1000, easing: "easeOutQuart" },
       plugins: {
         legend: {
           display: true,
           position: "top",
           labels: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-color",
-            ),
-            font: {
-              family: "'Inter', sans-serif",
-              size: 12,
-            },
+            color: cssVar("--text-color"),
+            font: { family: "'Inter', sans-serif", size: 12 },
           },
         },
         tooltip: {
-          backgroundColor: getComputedStyle(
-            document.documentElement,
-          ).getPropertyValue("--card-bg"),
-          titleColor: getComputedStyle(
-            document.documentElement,
-          ).getPropertyValue("--caravan-yellow"),
-          bodyColor: getComputedStyle(
-            document.documentElement,
-          ).getPropertyValue("--text-color"),
-          borderColor: getComputedStyle(
-            document.documentElement,
-          ).getPropertyValue("--border-color"),
+          backgroundColor: cssVar("--card-bg"),
+          titleColor: cssVar("--caravan-yellow"),
+          bodyColor: cssVar("--text-color"),
+          borderColor: cssVar("--border-color"),
           borderWidth: 1,
           cornerRadius: 6,
           padding: 10,
-          titleFont: {
-            family: "'Inter', sans-serif",
-            size: 13,
-            weight: "bold",
-          },
-          bodyFont: {
-            family: "'Inter', sans-serif",
-            size: 12,
-          },
         },
       },
       scales: {
@@ -724,127 +698,79 @@ function initMempoolVisualization() {
           title: {
             display: true,
             text: "Time",
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-color",
-            ),
-            font: {
-              family: "'Inter', sans-serif",
-              size: 12,
-            },
+            color: cssVar("--text-color"),
           },
-          ticks: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-secondary",
-            ),
-            font: {
-              family: "'Inter', sans-serif",
-              size: 11,
-            },
-          },
-          grid: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--border-color",
-            ),
-            display: false,
-          },
+          ticks: { color: cssVar("--text-secondary") },
+          grid: { display: false },
         },
         y: {
           title: {
             display: true,
             text: "Transaction Count",
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-color",
-            ),
-            font: {
-              family: "'Inter', sans-serif",
-              size: 12,
-            },
+            color: cssVar("--text-color"),
           },
           beginAtZero: true,
-          ticks: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-secondary",
-            ),
-            font: {
-              family: "'Roboto Mono', monospace",
-              size: 11,
-            },
-          },
-          grid: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--border-color",
-            ),
-            lineWidth: 0.5,
-          },
+          ticks: { color: cssVar("--text-secondary") },
+          grid: { color: cssVar("--border-color"), lineWidth: 0.5 },
         },
       },
     },
   });
 }
 
-// Update mempool visualization
 function updateMempoolVisualization() {
   if (!mempoolChart) return;
 
-  // Update mempool size history
   const currentSize = blockchainData.mempool?.txCount || 0;
   mempoolSizeHistory.push(currentSize);
   mempoolSizeHistory.shift();
 
-  // Update chart data
   mempoolChart.data.datasets[0].data = mempoolSizeHistory;
 
-  // Update chart colors based on theme
-  mempoolChart.options.scales.x.ticks.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-secondary");
-  mempoolChart.options.scales.y.ticks.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-secondary");
-  mempoolChart.options.scales.x.grid.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--border-color");
-  mempoolChart.options.scales.y.grid.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--border-color");
-  mempoolChart.options.scales.x.title.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-color");
-  mempoolChart.options.scales.y.title.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-color");
-  mempoolChart.options.plugins.legend.labels.color = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-color");
+  const cssVar = (name) =>
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-  // Updating tooltip styles
-  mempoolChart.options.plugins.tooltip.backgroundColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--card-bg");
-  mempoolChart.options.plugins.tooltip.titleColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--caravan-yellow");
-  mempoolChart.options.plugins.tooltip.bodyColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--text-color");
-  mempoolChart.options.plugins.tooltip.borderColor = getComputedStyle(
-    document.documentElement,
-  ).getPropertyValue("--border-color");
+  mempoolChart.options.scales.x.ticks.color = cssVar("--text-secondary");
+  mempoolChart.options.scales.y.ticks.color = cssVar("--text-secondary");
+  mempoolChart.options.scales.x.title.color = cssVar("--text-color");
+  mempoolChart.options.scales.y.title.color = cssVar("--text-color");
+  mempoolChart.options.scales.y.grid.color = cssVar("--border-color");
+  mempoolChart.options.plugins.legend.labels.color = cssVar("--text-color");
+  mempoolChart.options.plugins.tooltip.backgroundColor = cssVar("--card-bg");
+  mempoolChart.options.plugins.tooltip.titleColor = cssVar("--caravan-yellow");
+  mempoolChart.options.plugins.tooltip.bodyColor = cssVar("--text-color");
+  mempoolChart.options.plugins.tooltip.borderColor = cssVar("--border-color");
 
   mempoolChart.update();
 }
 
-// Initialize transaction network visualization
+// ============================================
+// Transaction Network (vis.js)
+// ============================================
 function initTransactionNetwork() {
   const container = document.getElementById("transactionNetwork");
   if (!container) return;
 
-  // Create nodes and edges from transactions
+  // Gracefully handle missing vis-network library
+  if (typeof vis === "undefined" || !vis.Network) {
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);flex-direction:column;gap:1rem;">
+        <i class="fas fa-project-diagram" style="font-size:3rem;opacity:0.3;"></i>
+        <p>Network visualization unavailable</p>
+        <p style="font-size:0.8rem;opacity:0.6;">vis-network library not loaded</p>
+      </div>`;
+    return;
+  }
+
+  const cssVar = (name) =>
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
   const nodes = [];
   const edges = [];
+  const blocks = blockchainData.blocks || [];
 
-  // Add blocks as nodes
-  blockchainData.blocks.slice(0, 5).forEach((block) => {
+  // Add block nodes
+  blocks.slice(0, 5).forEach((block) => {
     nodes.push({
       id: block.hash,
       label: `Block ${block.height}`,
@@ -852,131 +778,100 @@ function initTransactionNetwork() {
       color: {
         background: "#0074D9",
         border: "#0056b3",
-        highlight: {
-          background: "#0074D9",
-          border: "#FFD700",
-        },
+        highlight: { background: "#0074D9", border: "#FFD700" },
       },
-      font: {
-        color: getComputedStyle(document.documentElement).getPropertyValue(
-          "--text-color",
-        ),
-        face: "'Roboto Mono', monospace",
-        size: 12,
-      },
+      font: { color: cssVar("--text-color"), face: "monospace", size: 12 },
       size: 30,
     });
 
-    // Add transactions to the block and connect them
-    if (block.txCount > 0) {
-      // For demonstration, create some transaction nodes
-      for (let i = 0; i < Math.min(block.txCount, 5); i++) {
-        const txid = `tx_${block.height}_${i}`;
-        nodes.push({
-          id: txid,
-          label: `Tx-${i}`,
-          shape: "dot",
-          color: {
-            background: "#38bdf8",
-            border: "#0284c7",
-            highlight: {
-              background: "#38bdf8",
-              border: "#FFD700",
-            },
-          },
-          font: {
-            color: getComputedStyle(document.documentElement).getPropertyValue(
-              "--text-color",
-            ),
-            face: "'Roboto Mono', monospace",
-            size: 11,
-          },
-          size: 15,
-        });
-
-        edges.push({
-          from: block.hash,
-          to: txid,
-          arrows: "from",
-          color: {
-            color: "#38bdf8",
-            highlight: "#FFD700",
-          },
-          width: 2,
-        });
-      }
+    // Add tx nodes per block
+    const txCount = Math.min(block.txCount || 0, 5);
+    for (let i = 0; i < txCount; i++) {
+      const txId = `tx_${block.height}_${i}`;
+      nodes.push({
+        id: txId,
+        label: `Tx-${i}`,
+        shape: "dot",
+        color: {
+          background: "#38bdf8",
+          border: "#0284c7",
+          highlight: { background: "#38bdf8", border: "#FFD700" },
+        },
+        font: { color: cssVar("--text-color"), face: "monospace", size: 11 },
+        size: 15,
+      });
+      edges.push({
+        from: block.hash,
+        to: txId,
+        arrows: "from",
+        color: { color: "#38bdf8", highlight: "#FFD700" },
+        width: 2,
+      });
     }
   });
 
-  // Add mempool transactions if available
-  if (
-    blockchainData.mempool &&
-    blockchainData.mempool.txids &&
-    blockchainData.mempool.txids.length > 0
-  ) {
-    // Add a mempool node
+  // Add mempool node + its txs
+  const mempoolTxids = blockchainData.mempool?.txids || [];
+  if (mempoolTxids.length > 0) {
     nodes.push({
       id: "mempool",
-      label: "Mempool",
+      label: `Mempool (${mempoolTxids.length})`,
       shape: "hexagon",
       color: {
         background: "#FFD700",
         border: "#e6c100",
-        highlight: {
-          background: "#FFD700",
-          border: "#0074D9",
-        },
+        highlight: { background: "#FFD700", border: "#0074D9" },
       },
       font: {
-        color: getComputedStyle(document.documentElement).getPropertyValue(
-          "--text-color",
-        ),
-        face: "'Roboto Mono', monospace",
+        color: cssVar("--text-color"),
+        face: "monospace",
         size: 12,
         bold: true,
       },
       size: 35,
     });
 
-    // Add some mempool transactions
-    blockchainData.mempool.txids.slice(0, 10).forEach((txid, i) => {
-      const shortTxid = `mempool_tx_${i}`;
+    mempoolTxids.slice(0, 10).forEach((txid, i) => {
+      const shortId = `mempool_tx_${i}`;
       nodes.push({
-        id: shortTxid,
+        id: shortId,
         label: `Tx-${txid.substring(0, 6)}`,
         shape: "dot",
         color: {
           background: "#FFD700",
           border: "#e6c100",
-          highlight: {
-            background: "#FFD700",
-            border: "#0074D9",
-          },
+          highlight: { background: "#FFD700", border: "#0074D9" },
         },
-        font: {
-          color: getComputedStyle(document.documentElement).getPropertyValue(
-            "--text-color",
-          ),
-          face: "'Roboto Mono', monospace",
-          size: 10,
-        },
+        font: { color: cssVar("--text-color"), face: "monospace", size: 10 },
         size: 12,
       });
-
       edges.push({
         from: "mempool",
-        to: shortTxid,
+        to: shortId,
         dashes: true,
-        color: {
-          color: "#FFD700",
-          highlight: "#0074D9",
-        },
+        color: { color: "#FFD700", highlight: "#0074D9" },
         width: 1,
       });
     });
   }
 
-  // Create the network visualization
+  // Add multisig wallet nodes if we have wallet data
+  const multisigWallets = walletsCache.filter((w) => w.isMultisig);
+  multisigWallets.forEach((wallet) => {
+    nodes.push({
+      id: `wallet_${wallet.name}`,
+      label: `🔐 ${wallet.name}`,
+      shape: "diamond",
+      color: {
+        background: "#7b61ff",
+        border: "#5a3fd6",
+        highlight: { background: "#9b87ff", border: "#FFD700" },
+      },
+      font: { color: cssVar("--text-color"), face: "monospace", size: 11 },
+      size: 25,
+    });
+  });
+
   const data = {
     nodes: new vis.DataSet(nodes),
     edges: new vis.DataSet(edges),
@@ -993,185 +888,102 @@ function initTransactionNetwork() {
         damping: 0.09,
       },
     },
-    layout: {
-      improvedLayout: true,
-      hierarchical: {
-        enabled: false,
-      },
-    },
+    layout: { improvedLayout: true, hierarchical: { enabled: false } },
     edges: {
-      color: {
-        color: getComputedStyle(document.documentElement).getPropertyValue(
-          "--border-color",
-        ),
-        highlight: "#FFD700",
-      },
-      smooth: {
-        enabled: true,
-        type: "continuous",
-      },
+      color: { color: cssVar("--border-color"), highlight: "#FFD700" },
+      smooth: { enabled: true, type: "continuous" },
       width: 2,
     },
     nodes: {
       shape: "dot",
       size: 16,
-      font: {
-        face: "'Roboto Mono', monospace",
-        size: 12,
-        color: getComputedStyle(document.documentElement).getPropertyValue(
-          "--text-color",
-        ),
-      },
+      font: { face: "monospace", size: 12, color: cssVar("--text-color") },
       borderWidth: 2,
-      shadow: {
-        enabled: true,
-        color: "rgba(0,0,0,0.2)",
-        size: 5,
-      },
+      shadow: { enabled: true, color: "rgba(0,0,0,0.2)", size: 5 },
     },
     interaction: {
       hover: true,
       tooltipDelay: 300,
-      multiselect: true,
       navigationButtons: false,
-      keyboard: {
-        enabled: true,
-        speed: {
-          x: 10,
-          y: 10,
-          zoom: 0.1,
-        },
-        bindToWindow: false,
-      },
+      keyboard: { enabled: true, bindToWindow: false },
     },
   };
 
-  // Create the network with the data and options
   transactionNetwork = new vis.Network(container, data, options);
 
-  // Add click event
+  // Click handler for nodes
   transactionNetwork.on("click", function (params) {
-    if (params.nodes.length > 0) {
-      const nodeId = params.nodes[0];
+    if (params.nodes.length === 0) return;
+    const nodeId = params.nodes[0];
 
-      if (nodeId.startsWith("tx_") || nodeId.startsWith("mempool_tx_")) {
-        // This would fetch transaction details in a full implementation
-        const txParts = nodeId.split("_");
-        const txIndex = parseInt(txParts[txParts.length - 1]);
-
-        // Show some transaction details
-        const detailsElement = document.getElementById("transactionDetails");
-        if (detailsElement) {
-          detailsElement.innerHTML = `
-                        <div class="details-header">
-                            <h3 style="font-size: 1.25rem; color: var(--caravan-blue); margin-bottom: 0.5rem;">Transaction Details</h3>
-                        </div>
-                        <div class="details-content">
-                            <div class="details-section">
-                                <h4>Transaction Information</h4>
-                                <div class="detail-item">
-                                    <span class="detail-label">TxID:</span>
-                                    <span class="detail-value code">${nodeId}</span>
-                                </div>
-                                <div class="detail-item">
-                                    <span class="detail-label">Status:</span>
-                                    <span class="detail-value">
-                                        ${
-                                          nodeId.startsWith("tx_")
-                                            ? `<span style="color: var(--success-color);"><i class="fas fa-check-circle"></i> Confirmed</span>`
-                                            : `<span style="color: var(--warning-color);"><i class="fas fa-clock"></i> Pending</span>`
-                                        }
-                                    </span>
-                                </div>
-                                <div class="detail-item">
-                                    <span class="detail-label">Simulation Data:</span>
-                                    <span class="detail-value">
-                                        This is a simulated transaction in the network view.
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-
-          document.getElementById("closeDetailsBtn").style.display = "block";
-        }
-      } else if (nodeId === "mempool") {
-        // Show mempool details
-        const detailsElement = document.getElementById("transactionDetails");
-        if (detailsElement) {
-          detailsElement.innerHTML = `
-                        <div class="details-header">
-                            <h3 style="font-size: 1.25rem; color: var(--caravan-yellow); margin-bottom: 0.5rem;">Mempool Information</h3>
-                        </div>
-                        <div class="details-content">
-                            <div class="details-section">
-                                <h4>Overview</h4>
-                                <div class="detail-item">
-                                    <span class="detail-label">Transactions:</span>
-                                    <span class="detail-value">${blockchainData.mempool?.txCount || 0}</span>
-                                </div>
-                                <div class="detail-item">
-                                    <span class="detail-label">Size:</span>
-                                    <span class="detail-value">${(blockchainData.mempool?.size / 1024).toFixed(2) || 0} KB</span>
-                                </div>
-                                <div class="detail-item">
-                                    <span class="detail-label">Fees:</span>
-                                    <span class="detail-value">${blockchainData.mempool?.fees?.toFixed(8) || 0} BTC</span>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-
-          document.getElementById("closeDetailsBtn").style.display = "block";
-        }
-      } else {
-        // Must be a block node - find the block and show details
-        const block = blockchainData.blocks.find((b) => b.hash === nodeId);
-        if (block) {
-          fetchBlockDetails(block.hash);
-        }
+    if (nodeId.startsWith("mempool_tx_")) {
+      // Get actual txid from mempool
+      const idx = parseInt(nodeId.split("_")[2]);
+      const actualTxid = mempoolTxids[idx];
+      if (actualTxid) {
+        fetchTransactionDetails(actualTxid);
       }
+    } else if (nodeId.startsWith("tx_")) {
+      // Block transaction - we'd need the actual txid
+      // For now show info about it
+      showSimulatedTxDetail(nodeId);
+    } else if (nodeId === "mempool") {
+      showMempoolDetail();
+    } else if (nodeId.startsWith("wallet_")) {
+      const walletName = nodeId.replace("wallet_", "");
+      showWalletDetail(walletName);
+    } else {
+      // Block node
+      const block = blocks.find((b) => b.hash === nodeId);
+      if (block) fetchBlockDetails(block.hash);
     }
   });
 }
 
-// Update transaction network
 function updateTransactionNetwork() {
   if (!transactionNetwork) return;
-  // Re-initialize with new data
   initTransactionNetwork();
 }
 
-// Update network visualization based on selected view type
 function updateNetworkVisualization(viewType) {
   if (!transactionNetwork) return;
 
-  const options = transactionNetwork.getOptions();
+  const options = {};
 
   switch (viewType) {
     case "hierarchical":
-      options.layout.hierarchical.enabled = true;
-      options.layout.hierarchical.direction = "UD";
-      options.layout.hierarchical.sortMethod = "directed";
-      options.layout.hierarchical.nodeSpacing = 150;
-      options.layout.hierarchical.levelSeparation = 150;
+      options.layout = {
+        hierarchical: {
+          enabled: true,
+          direction: "UD",
+          sortMethod: "directed",
+          nodeSpacing: 150,
+          levelSeparation: 150,
+        },
+      };
       break;
     case "force":
-      options.layout.hierarchical.enabled = false;
-      options.physics.enabled = true;
-      options.physics.barnesHut.gravitationalConstant = -3000;
-      options.physics.barnesHut.centralGravity = 0.5;
-      options.physics.barnesHut.springLength = 120;
+      options.layout = { hierarchical: { enabled: false } };
+      options.physics = {
+        enabled: true,
+        barnesHut: {
+          gravitationalConstant: -3000,
+          centralGravity: 0.5,
+          springLength: 120,
+        },
+      };
       break;
     default:
-      options.layout.hierarchical.enabled = false;
-      options.physics.enabled = true;
-      options.physics.barnesHut = {
-        gravitationalConstant: -2000,
-        centralGravity: 0.3,
-        springLength: 95,
-        springConstant: 0.04,
-        damping: 0.09,
+      options.layout = { hierarchical: { enabled: false } };
+      options.physics = {
+        enabled: true,
+        barnesHut: {
+          gravitationalConstant: -2000,
+          centralGravity: 0.3,
+          springLength: 95,
+          springConstant: 0.04,
+          damping: 0.09,
+        },
       };
       break;
   }
@@ -1179,655 +991,727 @@ function updateNetworkVisualization(viewType) {
   transactionNetwork.setOptions(options);
 }
 
-// Display blocks
-function displayBlocks() {
-  const blocksContainer = document.getElementById("blocksContainer");
-  if (!blocksContainer) return;
+// ============================================
+// Wallet Panel Display
+// ============================================
+function displayWalletPanel(wallets) {
+  const container = document.getElementById("walletPanel");
+  if (!container) return;
 
-  if (!blockchainData.blocks || blockchainData.blocks.length === 0) {
-    blocksContainer.innerHTML =
-      '<p class="empty-message"><i class="fas fa-cube"></i> No blocks found</p>';
+  if (!wallets || wallets.length === 0) {
+    container.innerHTML =
+      '<p class="empty-message"><i class="fas fa-wallet"></i> No wallets loaded</p>';
     return;
   }
 
+  const multisigWallets = wallets.filter((w) => w.isMultisig);
+  const regularWallets = wallets.filter((w) => !w.isMultisig);
+
   let html = "";
 
-  blockchainData.blocks.slice(0, 10).forEach((block) => {
-    const time = new Date(block.time * 1000).toLocaleString();
-    html += `
-            <div class="block" data-hash="${block.hash}">
-                <div class="block-header">
-                    <div class="block-height">#${block.height}</div>
-                    <div>${time}</div>
-                </div>
-                <div class="block-details">
-                    <div><i class="fas fa-fingerprint"></i> ${block.hash.substring(0, 10)}...</div>
-                    <div><i class="fas fa-file-alt"></i> ${(block.size / 1024).toFixed(2)} KB</div>
-                    <div><i class="fas fa-exchange-alt"></i> ${block.txCount || 0}</div>
-                </div>
-            </div>
-        `;
-  });
+  // Multisig wallets section
+  if (multisigWallets.length > 0) {
+    html += `<div class="wallet-section-header">
+      <i class="fas fa-lock" style="color: var(--caravan-yellow);"></i>
+      <span>Multisig Wallets (${multisigWallets.length})</span>
+    </div>`;
 
-  blocksContainer.innerHTML = html;
+    multisigWallets.forEach((wallet) => {
+      html += createWalletCardHTML(wallet, true);
+    });
+  }
 
-  // Add click listeners to blocks
-  document.querySelectorAll(".block").forEach((block) => {
-    block.addEventListener("click", () => {
-      playSound("click");
-      const hash = block.dataset.hash;
-      fetchBlockDetails(hash);
+  // Regular wallets section
+  if (regularWallets.length > 0) {
+    html += `<div class="wallet-section-header">
+      <i class="fas fa-wallet" style="color: var(--caravan-blue);"></i>
+      <span>Wallets (${regularWallets.length})</span>
+    </div>`;
+
+    regularWallets.forEach((wallet) => {
+      html += createWalletCardHTML(wallet, false);
+    });
+  }
+
+  container.innerHTML = html;
+
+  // Add click listeners
+  container.querySelectorAll(".wallet-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      const walletName = card.dataset.wallet;
+      showWalletDetail(walletName);
     });
   });
 }
 
-// Display mempool transactions
-function displayMempool() {
-  const mempoolContainer = document.getElementById("mempoolContainer");
-  if (!mempoolContainer) return;
+function createWalletCardHTML(wallet, isMultisig) {
+  const balanceStr =
+    wallet.balance !== undefined ? wallet.balance.toFixed(8) : "0.00000000";
+  const unconfirmedStr =
+    wallet.unconfirmedBalance && wallet.unconfirmedBalance > 0
+      ? `<div class="wallet-unconfirmed">+${wallet.unconfirmedBalance.toFixed(8)} unconfirmed</div>`
+      : "";
 
-  if (
-    !blockchainData.mempool?.txids ||
-    blockchainData.mempool.txids.length === 0
-  ) {
-    mempoolContainer.innerHTML =
+  const badges = [];
+  if (wallet.isDescriptor)
+    badges.push('<span class="badge badge-descriptor">descriptor</span>');
+  if (isMultisig)
+    badges.push('<span class="badge badge-multisig">multisig</span>');
+
+  return `
+    <div class="wallet-card ${isMultisig ? "wallet-multisig" : ""}" data-wallet="${wallet.name}">
+      <div class="wallet-card-header">
+        <span class="wallet-icon">${isMultisig ? "🔐" : "💰"}</span>
+        <span class="wallet-name">${wallet.name}</span>
+        ${wallet.error ? '<span class="wallet-error" title="Error loading wallet">⚠️</span>' : ""}
+      </div>
+      <div class="wallet-balance">${balanceStr} BTC</div>
+      ${unconfirmedStr}
+      <div class="wallet-meta">
+        <span>${wallet.txCount || 0} txs</span>
+        ${badges.join("")}
+      </div>
+    </div>
+  `;
+}
+
+function showWalletDetail(walletName) {
+  const detailsElement = document.getElementById("transactionDetails");
+  if (!detailsElement) return;
+
+  const wallet = walletsCache.find((w) => w.name === walletName);
+  if (!wallet) return;
+
+  const closeBtn = document.getElementById("closeDetailsBtn");
+  if (closeBtn) closeBtn.style.display = "block";
+
+  let descriptorHTML = "";
+  if (wallet.descriptorInfo && wallet.descriptorInfo.length > 0) {
+    descriptorHTML = `
+      <div class="details-section">
+        <h4>Multisig Descriptors</h4>
+        ${wallet.descriptorInfo
+          .map(
+            (d) => `
+          <div class="detail-item">
+            <span class="detail-label">${d.internal ? "Change" : "Receive"}${d.active ? " (active)" : ""}:</span>
+            <span class="detail-value code" style="font-size:0.75rem;word-break:break-all;">${d.desc}</span>
+          </div>`,
+          )
+          .join("")}
+      </div>`;
+  }
+
+  detailsElement.innerHTML = `
+    <div class="details-header">
+      <h3 style="color: ${wallet.isMultisig ? "var(--caravan-yellow)" : "var(--caravan-blue)"};">
+        ${wallet.isMultisig ? "🔐" : "💰"} ${wallet.name}
+      </h3>
+    </div>
+    <div class="details-content">
+      <div class="details-section">
+        <h4>Wallet Information</h4>
+        <div class="detail-item">
+          <span class="detail-label">Balance:</span>
+          <span class="detail-value" style="color:var(--success-color);font-weight:600;">
+            ${wallet.balance !== undefined ? wallet.balance.toFixed(8) : "0.00000000"} BTC
+          </span>
+        </div>
+        ${
+          wallet.unconfirmedBalance
+            ? `<div class="detail-item">
+                <span class="detail-label">Unconfirmed:</span>
+                <span class="detail-value" style="color:var(--warning-color);">${wallet.unconfirmedBalance.toFixed(8)} BTC</span>
+              </div>`
+            : ""
+        }
+        ${
+          wallet.immatureBalance
+            ? `<div class="detail-item">
+                <span class="detail-label">Immature:</span>
+                <span class="detail-value">${wallet.immatureBalance.toFixed(8)} BTC</span>
+              </div>`
+            : ""
+        }
+        <div class="detail-item">
+          <span class="detail-label">Transactions:</span>
+          <span class="detail-value">${wallet.txCount || 0}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Type:</span>
+          <span class="detail-value">
+            ${wallet.isDescriptor ? "Descriptor" : "Legacy"}
+            ${wallet.isMultisig ? " / Multisig" : ""}
+          </span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Keypool:</span>
+          <span class="detail-value">${wallet.keypoolSize || 0}</span>
+        </div>
+      </div>
+      ${descriptorHTML}
+    </div>
+  `;
+}
+
+// ============================================
+// Display Blocks
+// ============================================
+function displayBlocks() {
+  const container = document.getElementById("blocksContainer");
+  if (!container) return;
+
+  const blocks = blockchainData.blocks || [];
+
+  if (blocks.length === 0) {
+    container.innerHTML =
+      '<p class="empty-message"><i class="fas fa-cube"></i> No blocks found. Mine some!</p>';
+    return;
+  }
+
+  let html = "";
+  blocks.slice(0, 10).forEach((block) => {
+    const time = new Date(block.time * 1000).toLocaleString();
+    html += `
+      <div class="block" data-hash="${block.hash}">
+        <div class="block-header">
+          <div class="block-height">#${block.height}</div>
+          <div>${time}</div>
+        </div>
+        <div class="block-details">
+          <div><i class="fas fa-fingerprint"></i> ${block.hash.substring(0, 10)}...</div>
+          <div><i class="fas fa-file-alt"></i> ${(block.size / 1024).toFixed(2)} KB</div>
+          <div><i class="fas fa-exchange-alt"></i> ${block.txCount || 0} txs</div>
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+
+  container.querySelectorAll(".block").forEach((el) => {
+    el.addEventListener("click", () => {
+      playSound("click");
+      fetchBlockDetails(el.dataset.hash);
+    });
+  });
+}
+
+// ============================================
+// Display Mempool
+// ============================================
+function displayMempool() {
+  const container = document.getElementById("mempoolContainer");
+  if (!container) return;
+
+  const txids = blockchainData.mempool?.txids || [];
+
+  if (txids.length === 0) {
+    container.innerHTML =
       '<p class="empty-message"><i class="fas fa-exchange-alt"></i> No transactions in mempool</p>';
     return;
   }
 
-  // Get sort preference
+  // Sort
   const sortSelect = document.getElementById("mempoolSortSelect");
   const sortBy = sortSelect ? sortSelect.value : "time";
 
-  // Clone and sort the array
-  let txids = [...blockchainData.mempool.txids];
-
-  // In a real app, we would have more transaction data to sort by fee rate, size, etc.
-  // For this demo, we'll just use the txid as a proxy
+  let sorted = [...txids];
   if (sortBy === "feeRate") {
-    txids.sort((a, b) => {
-      // Mock fee rate based on txid
+    sorted.sort((a, b) => {
       const feeA = parseInt(a.substring(0, 8), 16) % 100;
       const feeB = parseInt(b.substring(0, 8), 16) % 100;
-      return feeB - feeA; // Higher fee first
+      return feeB - feeA;
     });
   } else if (sortBy === "size") {
-    txids.sort((a, b) => {
-      // Mock size based on txid
+    sorted.sort((a, b) => {
       const sizeA = parseInt(a.substring(0, 8), 16) % 1000;
       const sizeB = parseInt(b.substring(0, 8), 16) % 1000;
-      return sizeB - sizeA; // Larger size first
+      return sizeB - sizeA;
     });
   }
-  // Default is already by time (order in the array)
 
   let html = "";
-
-  txids.slice(0, 10).forEach((txid) => {
-    // Mock fee rate based on txid
+  sorted.slice(0, 10).forEach((txid) => {
     const feeRate = (parseInt(txid.substring(0, 8), 16) % 100) / 10;
 
     html += `
-            <div class="transaction" data-txid="${txid}">
-                <div class="txid">${txid.substring(0, 16)}...</div>
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                    <span style="color: var(--text-secondary); font-size: 0.8rem;">${feeRate.toFixed(1)} sat/vB</span>
-                    <button class="action-button secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
-                        <i class="fas fa-info-circle"></i>
-                    </button>
-                </div>
-            </div>
-        `;
+      <div class="transaction" data-txid="${txid}">
+        <div class="txid">${txid.substring(0, 16)}...</div>
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <span style="color:var(--text-secondary);font-size:0.8rem;">${feeRate.toFixed(1)} sat/vB</span>
+          <button class="action-button secondary" style="padding:0.25rem 0.5rem;font-size:0.75rem;">
+            <i class="fas fa-info-circle"></i>
+          </button>
+        </div>
+      </div>
+    `;
   });
 
-  if (blockchainData.mempool.txids.length > 10) {
-    html += `<p class="more-info">And ${blockchainData.mempool.txids.length - 10} more transactions...</p>`;
+  if (txids.length > 10) {
+    html += `<p class="more-info">And ${txids.length - 10} more transactions...</p>`;
   }
 
-  mempoolContainer.innerHTML = html;
+  container.innerHTML = html;
 
-  // Add click listeners to transactions
-  document.querySelectorAll(".transaction").forEach((tx) => {
-    tx.addEventListener("click", () => {
+  container.querySelectorAll(".transaction").forEach((el) => {
+    el.addEventListener("click", () => {
       playSound("click");
-      const txid = tx.dataset.txid;
-      fetchTransactionDetails(txid);
+      fetchTransactionDetails(el.dataset.txid);
     });
   });
 }
 
-// Fetch block details
-function fetchBlockDetails(hash) {
-  const detailsElement = document.getElementById("transactionDetails");
-  if (!detailsElement) return;
-
-  detailsElement.innerHTML = `
-        <div class="loading">
-            <div class="spinner"></div>
-            <span>Loading block details...</span>
-        </div>
-    `;
-
-  document.getElementById("closeDetailsBtn").style.display = "block";
-
-  fetch(`/api/block/${hash}`)
-    .then((response) => response.json())
-    .then((block) => {
-      displayBlockDetails(block);
-    })
-    .catch((error) => {
-      console.error("Error fetching block details:", error);
-      detailsElement.innerHTML = `
-                <div class="error-message">
-                    <i class="fas fa-exclamation-triangle" style="color: var(--error-color); font-size: 2rem; margin-bottom: 1rem;"></i>
-                    <p>Error loading block details. Please try again.</p>
-                </div>
-            `;
-      playSound("error");
-    });
-}
-
-// Fetch transaction details
-function fetchTransactionDetails(txid) {
-  const detailsElement = document.getElementById("transactionDetails");
-  if (!detailsElement) return;
-
-  detailsElement.innerHTML = `
-        <div class="loading">
-            <div class="spinner"></div>
-            <span>Loading transaction details...</span>
-        </div>
-    `;
-
-  document.getElementById("closeDetailsBtn").style.display = "block";
-
-  fetch(`/api/tx/${txid}`)
-    .then((response) => response.json())
-    .then((tx) => {
-      displayTransactionDetails(tx);
-    })
-    .catch((error) => {
-      console.error("Error fetching transaction details:", error);
-      detailsElement.innerHTML = `
-                <div class="error-message">
-                    <i class="fas fa-exclamation-triangle" style="color: var(--error-color); font-size: 2rem; margin-bottom: 1rem;"></i>
-                    <p>Error loading transaction details. Please try again.</p>
-                </div>
-            `;
-      playSound("error");
-    });
-}
-
-// Display block details
+// ============================================
+// Display Block Details
+// ============================================
 function displayBlockDetails(block) {
   const detailsElement = document.getElementById("transactionDetails");
   if (!detailsElement) return;
 
+  const closeBtn = document.getElementById("closeDetailsBtn");
+  if (closeBtn) closeBtn.style.display = "block";
+
   const time = new Date(block.time * 1000).toLocaleString();
 
   let html = `
-        <div class="details-header">
-            <h3 style="color: var(--caravan-blue);">Block #${block.height}</h3>
+    <div class="details-header">
+      <h3 style="color:var(--caravan-blue);">Block #${block.height}</h3>
+    </div>
+    <div class="details-content">
+      <div class="details-section">
+        <h4>Block Information</h4>
+        <div class="detail-item">
+          <span class="detail-label">Hash:</span>
+          <span class="detail-value code">${block.hash}</span>
         </div>
-        <div class="details-content">
-            <div class="details-section">
-                <h4>Block Information</h4>
-                <div class="detail-item">
-                    <span class="detail-label">Hash:</span>
-                    <span class="detail-value code">${block.hash}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Previous Block:</span>
-                    <span class="detail-value code">${block.previousBlockHash || "Genesis"}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Time:</span>
-                    <span class="detail-value">${time}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Size:</span>
-                    <span class="detail-value">${(block.size / 1024).toFixed(2)} KB</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Weight:</span>
-                    <span class="detail-value">${block.weight}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Transactions:</span>
-                    <span class="detail-value">${block.tx?.length || 0}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Difficulty:</span>
-                    <span class="detail-value">${block.difficulty}</span>
-                </div>
-            </div>
-    `;
+        <div class="detail-item">
+          <span class="detail-label">Previous Block:</span>
+          <span class="detail-value code">${block.previousBlockHash || "Genesis"}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Time:</span>
+          <span class="detail-value">${time}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Size:</span>
+          <span class="detail-value">${(block.size / 1024).toFixed(2)} KB</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Weight:</span>
+          <span class="detail-value">${block.weight} WU</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Transactions:</span>
+          <span class="detail-value">${block.tx?.length || 0}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Difficulty:</span>
+          <span class="detail-value">${block.difficulty}</span>
+        </div>
+      </div>`;
 
   if (block.tx && block.tx.length > 0) {
     html += `
-            <div class="details-section">
-                <h4>Transactions</h4>
-                <div style="max-height: 300px; overflow-y: auto;">
-        `;
+      <div class="details-section">
+        <h4>Transactions</h4>
+        <div style="max-height:300px;overflow-y:auto;">`;
 
     block.tx.forEach((tx, index) => {
       const txid = typeof tx === "string" ? tx : tx.txid;
+      const isCoinbase =
+        typeof tx !== "string" &&
+        tx.vin &&
+        tx.vin.length > 0 &&
+        tx.vin[0].coinbase;
+
       html += `
-                <div class="detail-item" style="padding: 0.5rem 0;">
-                    <span class="detail-label">${index + 1}.</span>
-                    <span class="detail-value">
-                        <span class="code" style="font-size: 0.8rem;">${txid}</span>
-                        <button class="view-tx-btn action-button secondary" data-txid="${txid}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-left: 0.5rem;">
-                            <i class="fas fa-external-link-alt"></i> View
-                        </button>
-                    </span>
-                </div>
-            `;
+        <div class="detail-item" style="padding:0.5rem 0;">
+          <span class="detail-label">${index + 1}. ${isCoinbase ? '<i class="fas fa-coins" style="color:var(--caravan-yellow);"></i>' : ""}</span>
+          <span class="detail-value">
+            <span class="code" style="font-size:0.8rem;">${txid.substring(0, 40)}...</span>
+            <button class="view-tx-btn action-button secondary" data-txid="${txid}" style="padding:0.25rem 0.5rem;font-size:0.75rem;margin-left:0.5rem;">
+              <i class="fas fa-external-link-alt"></i> View
+            </button>
+          </span>
+        </div>`;
     });
 
-    html += `
-                </div>
-            </div>
-        `;
-  } else {
-    html +=
-      '<p style="color: var(--text-secondary);">No transactions in this block</p>';
+    html += `</div></div>`;
   }
 
   html += "</div>";
-
   detailsElement.innerHTML = html;
 
-  // Add event listeners to transaction view buttons
-  document.querySelectorAll(".view-tx-btn").forEach((btn) => {
+  // Attach tx view button listeners
+  detailsElement.querySelectorAll(".view-tx-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       playSound("click");
-      const txid = btn.dataset.txid;
-      fetchTransactionDetails(txid);
+      fetchTransactionDetails(btn.dataset.txid);
     });
   });
 }
 
-// Display transaction details
+// ============================================
+// Display Transaction Details
+// ============================================
 function displayTransactionDetails(tx) {
   const detailsElement = document.getElementById("transactionDetails");
   if (!detailsElement) return;
 
-  // Calculate total input and output values
-  let totalInput = 0;
+  const closeBtn = document.getElementById("closeDetailsBtn");
+  if (closeBtn) closeBtn.style.display = "block";
+
+  // Calculate values
   let totalOutput = 0;
-
-  if (tx.vin) {
-    tx.vin.forEach((input) => {
-      if (input.value) totalInput += input.value;
-    });
-  }
-
   if (tx.vout) {
-    tx.vout.forEach((output) => {
-      if (output.value) totalOutput += output.value;
+    tx.vout.forEach((out) => {
+      if (out.value) totalOutput += out.value;
     });
   }
 
-  const fee = totalInput - totalOutput;
+  const isCoinbase = tx.vin && tx.vin.length > 0 && tx.vin[0].coinbase;
 
   let html = `
-        <div class="details-header">
-            <h3 style="color: var(--caravan-yellow);">Transaction Details</h3>
+    <div class="details-header">
+      <h3 style="color:var(--caravan-yellow);">Transaction Details</h3>
+    </div>
+    <div class="details-content">
+      <div class="details-section">
+        <h4>Transaction Information</h4>
+        <div class="detail-item">
+          <span class="detail-label">TxID:</span>
+          <span class="detail-value code" style="word-break:break-all;">${tx.txid}</span>
         </div>
-        <div class="details-content">
-            <div class="details-section">
-                <h4>Transaction Information</h4>
-                <div class="detail-item">
-                    <span class="detail-label">TxID:</span>
-                    <span class="detail-value code">${tx.txid}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Size:</span>
-                    <span class="detail-value">${tx.size} bytes</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Virtual Size:</span>
-                    <span class="detail-value">${tx.vsize} vbytes</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Weight:</span>
-                    <span class="detail-value">${tx.weight}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Status:</span>
-                    <span class="detail-value">
-                        ${
-                          tx.confirmations
-                            ? `<span style="color: var(--success-color);"><i class="fas fa-check-circle"></i> Confirmed (${tx.confirmations} confirmations)</span>`
-                            : '<span style="color: var(--warning-color);"><i class="fas fa-clock"></i> Unconfirmed</span>'
-                        }
-                    </span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Fee:</span>
-                    <span class="detail-value">${fee > 0 ? fee.toFixed(8) + " BTC" : "N/A"}</span>
-                </div>
-            </div>
-    `;
+        <div class="detail-item">
+          <span class="detail-label">Size:</span>
+          <span class="detail-value">${tx.size || "?"} bytes (${tx.vsize || "?"} vbytes)</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Weight:</span>
+          <span class="detail-value">${tx.weight || "?"} WU</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Status:</span>
+          <span class="detail-value">
+            ${
+              tx.confirmations
+                ? `<span style="color:var(--success-color);"><i class="fas fa-check-circle"></i> Confirmed (${tx.confirmations})</span>`
+                : '<span style="color:var(--warning-color);"><i class="fas fa-clock"></i> Unconfirmed</span>'
+            }
+          </span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Total Output:</span>
+          <span class="detail-value">${totalOutput.toFixed(8)} BTC</span>
+        </div>
+        ${
+          isCoinbase
+            ? `<div class="detail-item">
+                <span class="detail-label">Type:</span>
+                <span class="detail-value" style="color:var(--caravan-yellow);"><i class="fas fa-coins"></i> Coinbase (Mining Reward)</span>
+              </div>`
+            : ""
+        }
+      </div>`;
 
+  // Inputs
   if (tx.vin && tx.vin.length > 0) {
-    html += `
-            <div class="details-section">
-                <h4>Inputs (${tx.vin.length})</h4>
-                <div style="max-height: 200px; overflow-y: auto;">
-        `;
-
-    tx.vin.forEach((input, index) => {
+    html += `<div class="details-section"><h4>Inputs (${tx.vin.length})</h4><div style="max-height:200px;overflow-y:auto;">`;
+    tx.vin.forEach((input, i) => {
       if (input.coinbase) {
-        html += `
-                    <div class="detail-item" style="padding: 0.5rem 0;">
-                        <span class="detail-label">Coinbase:</span>
-                        <span class="detail-value" style="color: var(--success-color);">
-                            <i class="fas fa-coins"></i> New Coins (Block Reward)
-                        </span>
-                    </div>
-                `;
+        html += `<div class="detail-item" style="padding:0.5rem 0;">
+          <span class="detail-label">Coinbase:</span>
+          <span class="detail-value" style="color:var(--success-color);"><i class="fas fa-coins"></i> New Coins (Block Reward)</span>
+        </div>`;
       } else {
-        html += `
-                    <div class="detail-item" style="padding: 0.5rem 0;">
-                        <span class="detail-label">${index + 1}.</span>
-                        <span class="detail-value">
-                            <div style="display: flex; justify-content: space-between; width: 100%;">
-                                <span class="code" style="font-size: 0.8rem;">${input.txid}:${input.vout}</span>
-                                ${input.value ? `<span style="margin-left: 0.5rem;">${input.value} BTC</span>` : ""}
-                            </div>
-                        </span>
-                    </div>
-                `;
+        html += `<div class="detail-item" style="padding:0.5rem 0;">
+          <span class="detail-label">${i + 1}.</span>
+          <span class="detail-value">
+            <span class="code" style="font-size:0.8rem;">${(input.txid || "?").substring(0, 24)}...:${input.vout ?? "?"}</span>
+          </span>
+        </div>`;
       }
     });
-
-    html += `
-                </div>
-            </div>
-        `;
+    html += `</div></div>`;
   }
 
+  // Outputs
   if (tx.vout && tx.vout.length > 0) {
-    html += `
-            <div class="details-section">
-                <h4>Outputs (${tx.vout.length})</h4>
-                <div style="max-height: 200px; overflow-y: auto;">
-        `;
-
-    tx.vout.forEach((output, index) => {
+    html += `<div class="details-section"><h4>Outputs (${tx.vout.length})</h4><div style="max-height:200px;overflow-y:auto;">`;
+    tx.vout.forEach((output, i) => {
       const address =
-        output.scriptPubKey &&
-        (output.scriptPubKey.address ||
-          (output.scriptPubKey.addresses
-            ? output.scriptPubKey.addresses[0]
-            : "No address"));
+        output.scriptPubKey?.address ||
+        (output.scriptPubKey?.addresses
+          ? output.scriptPubKey.addresses[0]
+          : null) ||
+        "Unknown";
+      const scriptType = output.scriptPubKey?.type || "unknown";
 
-      html += `
-                <div class="detail-item" style="padding: 0.5rem 0;">
-                    <span class="detail-label">${index + 1}.</span>
-                    <span class="detail-value">
-                        <div style="display: flex; justify-content: space-between; width: 100%;">
-                            <span>${output.scriptPubKey?.type || "Unknown"}</span>
-                            <span style="font-weight: 600;">${output.value} BTC</span>
-                        </div>
-                        <div style="font-size: 0.8rem; margin-top: 0.25rem;" class="code">
-                            ${address || "Unknown Address"}
-                        </div>
-                    </span>
-                </div>
-            `;
+      html += `<div class="detail-item" style="padding:0.5rem 0;">
+        <span class="detail-label">${i + 1}.</span>
+        <span class="detail-value">
+          <div style="display:flex;justify-content:space-between;width:100%;">
+            <span style="font-size:0.8rem;color:var(--text-secondary);">${scriptType}</span>
+            <span style="font-weight:600;">${(output.value || 0).toFixed(8)} BTC</span>
+          </div>
+          <div class="code" style="font-size:0.75rem;margin-top:0.25rem;word-break:break-all;">${address}</div>
+        </span>
+      </div>`;
     });
-
-    html += `
-                </div>
-            </div>
-        `;
+    html += `</div></div>`;
   }
 
   html += "</div>";
-
   detailsElement.innerHTML = html;
 }
 
-// Hide transaction details
-function hideTransactionDetails() {
+// Simulated tx detail (for network view nodes without real txids)
+function showSimulatedTxDetail(nodeId) {
   const detailsElement = document.getElementById("transactionDetails");
   if (!detailsElement) return;
 
-  const closeButton = document.getElementById("closeDetailsBtn");
-  if (closeButton) {
-    closeButton.style.display = "none";
+  const closeBtn = document.getElementById("closeDetailsBtn");
+  if (closeBtn) closeBtn.style.display = "block";
+
+  // Try to get the actual txid from block data
+  const parts = nodeId.split("_"); // tx_HEIGHT_INDEX
+  const blockHeight = parseInt(parts[1]);
+  const txIndex = parseInt(parts[2]);
+
+  const block = (blockchainData.blocks || []).find(
+    (b) => b.height === blockHeight,
+  );
+
+  // If block has full tx data, try to fetch the real tx
+  if (block && block.tx && block.tx[txIndex]) {
+    const realTx = block.tx[txIndex];
+    const txid = typeof realTx === "string" ? realTx : realTx.txid;
+    if (txid && !txid.startsWith("tx_")) {
+      fetchTransactionDetails(txid);
+      return;
+    }
   }
 
+  // Fallback: show what we know
   detailsElement.innerHTML = `
-        <p class="empty-details">
-            <i class="fas fa-hand-pointer"></i>
-            Select a transaction or block to view details
-        </p>
-    `;
+    <div class="details-header">
+      <h3 style="color:var(--caravan-blue);">Transaction</h3>
+    </div>
+    <div class="details-content">
+      <div class="details-section">
+        <h4>Transaction Info</h4>
+        <div class="detail-item">
+          <span class="detail-label">Node ID:</span>
+          <span class="detail-value code">${nodeId}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Block:</span>
+          <span class="detail-value">#${blockHeight}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Index:</span>
+          <span class="detail-value">${txIndex}${txIndex === 0 ? " (coinbase)" : ""}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Status:</span>
+          <span class="detail-value" style="color:var(--success-color);"><i class="fas fa-check-circle"></i> Confirmed</span>
+        </div>
+      </div>
+    </div>`;
 }
 
-// Show mining information
+function showMempoolDetail() {
+  const detailsElement = document.getElementById("transactionDetails");
+  if (!detailsElement) return;
+
+  const closeBtn = document.getElementById("closeDetailsBtn");
+  if (closeBtn) closeBtn.style.display = "block";
+
+  const mempool = blockchainData.mempool || {};
+  const mempoolInfo = blockchainData.mempoolInfo || {};
+
+  detailsElement.innerHTML = `
+    <div class="details-header">
+      <h3 style="color:var(--caravan-yellow);">Mempool Information</h3>
+    </div>
+    <div class="details-content">
+      <div class="details-section">
+        <h4>Overview</h4>
+        <div class="detail-item">
+          <span class="detail-label">Transactions:</span>
+          <span class="detail-value">${mempool.txCount || 0}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Size:</span>
+          <span class="detail-value">${((mempool.size || 0) / 1024).toFixed(2)} KB</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Memory Usage:</span>
+          <span class="detail-value">${((mempoolInfo.usage || 0) / 1024).toFixed(2)} KB</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Min Fee Rate:</span>
+          <span class="detail-value">${mempoolInfo.mempoolMinFee || 0} BTC/kB</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Min Relay Fee:</span>
+          <span class="detail-value">${mempoolInfo.minRelaytxFee || 0} BTC/kB</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================
+// Hide Transaction Details
+// ============================================
+function hideTransactionDetails() {
+  const detailsElement = document.getElementById("transactionDetails");
+  if (detailsElement) {
+    detailsElement.innerHTML = `
+      <p class="empty-details">
+        <i class="fas fa-hand-pointer"></i>
+        Select a transaction, block, or wallet to view details
+      </p>`;
+  }
+  const closeBtn = document.getElementById("closeDetailsBtn");
+  if (closeBtn) closeBtn.style.display = "none";
+}
+
+// ============================================
+// Mining Info Panel
+// ============================================
 function showMiningInfo(info) {
   const detailsElement = document.getElementById("transactionDetails");
   if (!detailsElement) return;
 
-  const closeButton = document.getElementById("closeDetailsBtn");
-  if (closeButton) {
-    closeButton.style.display = "block";
-  }
+  const closeBtn = document.getElementById("closeDetailsBtn");
+  if (closeBtn) closeBtn.style.display = "block";
 
-  let html = `
-        <div class="details-header">
-            <h3 style="color: var(--caravan-blue);">
-                <i class="fas fa-hammer"></i> Mining Information
-            </h3>
+  detailsElement.innerHTML = `
+    <div class="details-header">
+      <h3 style="color:var(--caravan-blue);"><i class="fas fa-hammer"></i> Mining Information</h3>
+    </div>
+    <div class="details-content">
+      <div class="details-section">
+        <h4>Network Status</h4>
+        <div class="detail-item">
+          <span class="detail-label">Chain:</span>
+          <span class="detail-value">${info.chain || "regtest"}</span>
         </div>
-        <div class="details-content">
-            <div class="details-section">
-                <h4>Network Status</h4>
-                <div class="detail-item">
-                    <span class="detail-label">Chain:</span>
-                    <span class="detail-value">Regtest</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Difficulty:</span>
-                    <span class="detail-value">${blockchainData.chainInfo?.difficulty || "N/A"}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Current Block Height:</span>
-                    <span class="detail-value">${blockchainData.chainInfo?.blocks || "N/A"}</span>
-                </div>
-            </div>
-
-            <div class="details-section">
-                <h4>Mining Controls</h4>
-                <p style="margin-bottom: 1rem; color: var(--text-secondary);">In regtest mode, you can generate blocks instantly:</p>
-                <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                    <button id="mine1BlockBtn" class="action-button">
-                        <i class="fas fa-plus-circle"></i> Mine 1 Block
-                    </button>
-                    <button id="mine6BlocksBtn" class="action-button">
-                        <i class="fas fa-cubes"></i> Mine 6 Blocks
-                    </button>
-                    <button id="clearMempoolBtn" class="action-button">
-                        <i class="fas fa-broom"></i> Clear Mempool
-                    </button>
-                </div>
-            </div>
-
-            <div class="details-section">
-                <h4>Mining Tips</h4>
-                <ul style="list-style-type: disc; padding-left: 1.5rem; color: var(--text-secondary);">
-                    <li>Mine a block to confirm transactions in the mempool</li>
-                    <li>Generate 6 blocks to make transactions fully confirmed</li>
-                    <li>In regtest, mining is instantaneous with no real proof-of-work</li>
-                    <li>The block reward goes to the address you specify</li>
-                </ul>
-            </div>
+        <div class="detail-item">
+          <span class="detail-label">Difficulty:</span>
+          <span class="detail-value">${info.difficulty || blockchainData.chainInfo?.difficulty || "N/A"}</span>
         </div>
-    `;
+        <div class="detail-item">
+          <span class="detail-label">Block Height:</span>
+          <span class="detail-value">${info.blocks || blockchainData.chainInfo?.blocks || "N/A"}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Size on Disk:</span>
+          <span class="detail-value">${info.sizeOnDisk ? (info.sizeOnDisk / 1024 / 1024).toFixed(2) + " MB" : "N/A"}</span>
+        </div>
+      </div>
 
-  detailsElement.innerHTML = html;
+      <div class="details-section">
+        <h4>Mining Controls</h4>
+        <p style="margin-bottom:1rem;color:var(--text-secondary);">In regtest mode, blocks are mined instantly:</p>
+        <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+          <button id="mine1BlockBtn" class="action-button"><i class="fas fa-plus-circle"></i> Mine 1 Block</button>
+          <button id="mine6BlocksBtn" class="action-button"><i class="fas fa-cubes"></i> Mine 6 Blocks</button>
+          <button id="mine100BlocksBtn" class="action-button secondary"><i class="fas fa-layer-group"></i> Mine 100 Blocks</button>
+        </div>
+      </div>
 
-  // Add event listeners to mining control buttons
+      <div class="details-section">
+        <h4>Tips</h4>
+        <ul style="list-style-type:disc;padding-left:1.5rem;color:var(--text-secondary);line-height:1.8;">
+          <li>Mine a block to confirm mempool transactions</li>
+          <li>Mine 6 blocks for full confirmation</li>
+          <li>Mine 100+ blocks to mature coinbase rewards (spendable)</li>
+        </ul>
+      </div>
+    </div>`;
+
+  // Attach mining button listeners
   document.getElementById("mine1BlockBtn").addEventListener("click", () => {
-    playSound("click");
-    triggerMineBlock();
+    mineBlocksWithButton("mine1BlockBtn", 1);
   });
-
   document.getElementById("mine6BlocksBtn").addEventListener("click", () => {
-    playSound("click");
-
-    // Mine 6 blocks in sequence
-    const mineButton = document.getElementById("mine6BlocksBtn");
-    mineButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mining...';
-    mineButton.disabled = true;
-
-    fetch("/api/mine-block", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ blocks: 6 }),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        console.log("Mining 6 blocks result:", data);
-        addMiningLog(
-          `Mined 6 new blocks starting at height ${blockchainData.chainInfo?.blocks + 1}`,
-        );
-        mineButton.innerHTML = '<i class="fas fa-cubes"></i> Mine 6 Blocks';
-        mineButton.disabled = false;
-        playSound("block-mined");
-      })
-      .catch((error) => {
-        console.error("Error mining blocks:", error);
-        mineButton.innerHTML = '<i class="fas fa-cubes"></i> Mine 6 Blocks';
-        mineButton.disabled = false;
-        addMiningLog(`Error mining blocks: ${error.message}`);
-        playSound("error");
-      });
+    mineBlocksWithButton("mine6BlocksBtn", 6);
   });
-
-  document.getElementById("clearMempoolBtn").addEventListener("click", () => {
-    playSound("click");
-
-    const clearButton = document.getElementById("clearMempoolBtn");
-    clearButton.innerHTML =
-      '<i class="fas fa-spinner fa-spin"></i> Clearing...';
-    clearButton.disabled = true;
-
-    // This would require a backend endpoint to clear the mempool
-    // For the demo, we'll just simulate it with a fetch call
-    setTimeout(() => {
-      addMiningLog("Mempool cleared");
-      clearButton.innerHTML = '<i class="fas fa-broom"></i> Clear Mempool';
-      clearButton.disabled = false;
-
-      // Clear mempool data
-      if (blockchainData.mempool) {
-        blockchainData.mempool.txids = [];
-        blockchainData.mempool.txCount = 0;
-      }
-
-      // Update UI
-      displayMempool();
-      updateDashboard();
-    }, 1000);
+  document.getElementById("mine100BlocksBtn").addEventListener("click", () => {
+    mineBlocksWithButton("mine100BlocksBtn", 100);
   });
 }
 
-// Update dashboard with latest blockchain data
+async function mineBlocksWithButton(btnId, count) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+
+  const originalHTML = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mining...';
+  btn.disabled = true;
+
+  const result = await postSafe("/api/mine-block", { blocks: count });
+  if (result) {
+    addMiningLog(`✅ Mined ${count} block(s)`, "success");
+    playSound("block-mined");
+  } else {
+    addMiningLog(`❌ Failed to mine ${count} block(s)`, "error");
+    playSound("error");
+  }
+
+  btn.innerHTML = originalHTML;
+  btn.disabled = false;
+}
+
+// ============================================
+// Update Dashboard Stats
+// ============================================
 function updateDashboard() {
-  const blockCount = document.getElementById("blockCount");
-  if (blockCount) {
-    blockCount.textContent = blockchainData.chainInfo?.blocks || 0;
-  }
-
-  const txCount = document.getElementById("txCount");
-  if (txCount) {
-    txCount.textContent = blockchainData.stats?.totalTxCount || 0;
-  }
-
-  const difficulty = document.getElementById("difficulty");
-  if (difficulty) {
-    difficulty.textContent =
-      blockchainData.chainInfo?.difficulty?.toFixed(2) || 0;
-  }
-
-  const mempoolSize = document.getElementById("mempoolSize");
-  if (mempoolSize) {
-    mempoolSize.textContent = blockchainData.mempool?.txCount || 0;
-  }
+  setText(
+    "blockCount",
+    blockchainData.chainInfo?.blocks || blockchainData.stats?.blockCount || 0,
+  );
+  setText("txCount", blockchainData.stats?.totalTxCount || 0);
+  setText(
+    "difficulty",
+    blockchainData.chainInfo?.difficulty !== undefined
+      ? Number(blockchainData.chainInfo.difficulty).toFixed(2)
+      : "0",
+  );
+  setText(
+    "mempoolSize",
+    blockchainData.mempool?.txCount || blockchainData.stats?.mempoolSize || 0,
+  );
 }
 
-// Add a new block to the UI
-function addNewBlock(block) {
-  // Add to blockchain data
-  blockchainData.blocks.unshift(block);
-  blockchainData.chainInfo.blocks = (blockchainData.chainInfo?.blocks || 0) + 1;
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
 
-  // Increment total transaction count
+// ============================================
+// Add/Update Blocks & Transactions
+// ============================================
+function addNewBlock(block) {
+  if (!blockchainData.blocks) blockchainData.blocks = [];
+  blockchainData.blocks.unshift(block);
+
+  if (blockchainData.chainInfo) {
+    blockchainData.chainInfo.blocks =
+      (blockchainData.chainInfo.blocks || 0) + 1;
+  }
+
   if (blockchainData.stats) {
     blockchainData.stats.totalTxCount =
       (blockchainData.stats.totalTxCount || 0) + (block.txCount || 0);
   }
 
-  // Update visualizations
-  updateVisualizations();
-  updateDashboard();
-
-  // Create a temporary element for animation
-  const blocksContainer = document.getElementById("blocksContainer");
-  if (!blocksContainer) return;
-
-  const tempBlock = document.createElement("div");
-  tempBlock.className = "block new-block";
-  tempBlock.dataset.hash = block.hash;
-
-  const time = new Date(block.time * 1000).toLocaleString();
-  tempBlock.innerHTML = `
-        <div class="block-header">
-            <div class="block-height">#${block.height}</div>
-            <div>${time}</div>
-        </div>
-        <div class="block-details">
-            <div><i class="fas fa-fingerprint"></i> ${block.hash.substring(0, 10)}...</div>
-            <div><i class="fas fa-file-alt"></i> ${(block.size / 1024).toFixed(2)} KB</div>
-            <div><i class="fas fa-exchange-alt"></i> ${block.txCount || 0}</div>
-        </div>
-    `;
-
-  // Insert at the top
-  if (blocksContainer.firstChild) {
-    blocksContainer.insertBefore(tempBlock, blocksContainer.firstChild);
-  } else {
-    blocksContainer.appendChild(tempBlock);
-  }
-
-  // Remove excess blocks
-  const blocks = blocksContainer.querySelectorAll(".block");
-  if (blocks.length > 10) {
-    blocks[blocks.length - 1].remove();
-  }
-
-  // Add click listener
-  tempBlock.addEventListener("click", () => {
-    playSound("click");
-    const hash = tempBlock.dataset.hash;
-    fetchBlockDetails(hash);
-  });
-
-  // Update mempool (clear confirmed transactions)
-  if (
-    blockchainData.mempool &&
-    blockchainData.mempool.txids &&
-    blockchainData.mempool.txids.length > 0
-  ) {
-    // In a real app, we would check which transactions are included in the block
-    // For this demo, we'll just clear a random subset of mempool transactions
+  // Remove confirmed txs from mempool display
+  if (blockchainData.mempool?.txids?.length > 0) {
     const toRemove = Math.min(
       block.txCount || 0,
       blockchainData.mempool.txids.length,
@@ -1836,400 +1720,372 @@ function addNewBlock(block) {
       blockchainData.mempool.txids =
         blockchainData.mempool.txids.slice(toRemove);
       blockchainData.mempool.txCount = blockchainData.mempool.txids.length;
-      displayMempool();
     }
   }
+
+  updateVisualizations();
+  updateDashboard();
 }
 
-// Add a new transaction to the UI
 function addNewTransaction(tx) {
-  // Add to mempool data
-  if (!blockchainData.mempool) blockchainData.mempool = { txids: [] };
+  if (!blockchainData.mempool)
+    blockchainData.mempool = { txids: [], txCount: 0 };
   if (!blockchainData.mempool.txids) blockchainData.mempool.txids = [];
 
-  // Add to the beginning of the array
   blockchainData.mempool.txids.unshift(tx.txid);
   blockchainData.mempool.txCount = blockchainData.mempool.txids.length;
 
-  // Update mempool visualization
   updateMempoolVisualization();
   updateDashboard();
+  displayMempool();
+}
 
-  // Create a temporary element for animation
-  const mempoolContainer = document.getElementById("mempoolContainer");
-  if (!mempoolContainer) return;
+// ============================================
+// Mine Block Action
+// ============================================
+async function triggerMineBlock() {
+  playSound("click");
 
-  // Check if the container shows "No transactions"
-  if (mempoolContainer.querySelector(".empty-message")) {
-    mempoolContainer.innerHTML = "";
+  const btn = document.getElementById("mineBlockBtn");
+  if (btn) {
+    btn.classList.add("mining-active");
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mining...';
+    btn.disabled = true;
   }
 
-  // Mock fee rate based on txid
-  const feeRate = (parseInt(tx.txid.substring(0, 8), 16) % 100) / 10;
+  const result = await postSafe("/api/mine-block", { blocks: 1 });
 
-  const tempTx = document.createElement("div");
-  tempTx.className = "transaction new-transaction";
-  tempTx.dataset.txid = tx.txid;
-  tempTx.innerHTML = `
-        <div class="txid">${tx.txid.substring(0, 16)}...</div>
-        <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <span style="color: var(--text-secondary); font-size: 0.8rem;">${feeRate.toFixed(1)} sat/vB</span>
-            <button class="action-button secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
-                <i class="fas fa-info-circle"></i>
-            </button>
-        </div>
-    `;
-
-  // Insert at the top
-  if (mempoolContainer.firstChild) {
-    mempoolContainer.insertBefore(tempTx, mempoolContainer.firstChild);
+  if (result) {
+    addMiningLog("⛏️ Mine block request sent", "info");
   } else {
-    mempoolContainer.appendChild(tempTx);
+    addMiningLog("❌ Error mining block", "error");
+    playSound("error");
   }
 
-  // Remove excess transactions
-  const txs = mempoolContainer.querySelectorAll(".transaction");
-  if (txs.length > 10) {
-    txs[txs.length - 1].remove();
-  }
-
-  // Update count of additional transactions
-  const txCount = blockchainData.mempool.txids.length;
-  if (txCount > 10) {
-    let moreText = mempoolContainer.querySelector(".more-info");
-    if (!moreText) {
-      moreText = document.createElement("p");
-      moreText.className = "more-info";
-      mempoolContainer.appendChild(moreText);
+  setTimeout(() => {
+    if (btn) {
+      btn.classList.remove("mining-active");
+      btn.innerHTML = '<i class="fas fa-hammer"></i> Mine Block';
+      btn.disabled = false;
     }
-    moreText.textContent = `And ${txCount - 10} more transactions...`;
-  }
-
-  // Add click listener
-  tempTx.addEventListener("click", () => {
-    playSound("click");
-    const txid = tempTx.dataset.txid;
-    fetchTransactionDetails(txid);
-  });
+  }, 2000);
 }
 
-// Trigger mining a new block
-function triggerMineBlock() {
+// ============================================
+// Create Transaction Action
+// ============================================
+async function triggerCreateTransaction() {
   playSound("click");
 
-  // Show mining button as active
-  const mineButton = document.getElementById("mineBlockBtn");
-  if (mineButton) {
-    mineButton.classList.add("mining-active");
-    mineButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mining...';
-    mineButton.disabled = true;
-  }
-
-  // Call the API to mine a new block
-  fetch("/api/mine-block", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ blocks: 1 }),
-  })
-    .then((response) => response.json())
-    .then((data) => {
-      console.log("Mining block result:", data);
-      addMiningLog(`Mining block request sent. Waiting for confirmation...`);
-
-      // Reset button after a delay
-      setTimeout(() => {
-        if (mineButton) {
-          mineButton.classList.remove("mining-active");
-          mineButton.innerHTML = '<i class="fas fa-hammer"></i> Mine Block';
-          mineButton.disabled = false;
-        }
-      }, 2000);
-    })
-    .catch((error) => {
-      console.error("Error mining block:", error);
-
-      // Reset button and show error
-      if (mineButton) {
-        mineButton.classList.remove("mining-active");
-        mineButton.innerHTML = '<i class="fas fa-hammer"></i> Mine Block';
-        mineButton.disabled = false;
-      }
-
-      addMiningLog(`Error mining block: ${error.message}`);
-      playSound("error");
-    });
-}
-
-// Trigger creating a new transaction
-function triggerCreateTransaction() {
-  playSound("click");
-
-  // Show creation button as active
   const createButton = document.getElementById("createTxBtn");
-  if (createButton) {
-    createButton.classList.add("mining-active");
-    createButton.innerHTML =
-      '<i class="fas fa-spinner fa-spin"></i> Creating...';
-    createButton.disabled = true;
+
+  // Fetch real wallet list for the dropdown
+  let walletOptions = "";
+  if (walletsCache.length > 0) {
+    walletOptions = walletsCache
+      .map(
+        (w) =>
+          `<option value="${w.name}">${w.name} (${(w.balance || 0).toFixed(4)} BTC)</option>`,
+      )
+      .join("");
+  } else {
+    // Try fetching
+    const data = await fetchSafe("/api/wallets");
+    if (data && data.wallets) {
+      walletOptions = data.wallets
+        .map((name) => `<option value="${name}">${name}</option>`)
+        .join("");
+    } else {
+      walletOptions = '<option value="">No wallets found</option>';
+    }
   }
 
-  // Show a modal dialog for transaction creation
-  const txModal = document.createElement("div");
-  txModal.className = "modal";
-  txModal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Create Transaction</h3>
-                <button class="close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="fromWallet">From Wallet:</label>
-                    <select id="fromWallet">
-                        <option value="wallet1">wallet1</option>
-                        <option value="wallet2">wallet2</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="toAddress">To Address:</label>
-                    <input type="text" id="toAddress" value="mxDuAYQUaT3ytdR5E7QKnKLPXXhhqPKTdZ">
-                </div>
-                <div class="form-group">
-                    <label for="amount">Amount (BTC):</label>
-                    <input type="number" id="amount" value="0.001" min="0.00001" step="0.00001">
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="createTxSubmitBtn" class="action-button">Create Transaction</button>
-                <button id="cancelTxBtn" class="action-button secondary">Cancel</button>
-            </div>
+  // Build modal
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.innerHTML = `
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fas fa-exchange-alt"></i> Create Transaction</h3>
+        <button class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="txFromWallet">From Wallet:</label>
+          <select id="txFromWallet">${walletOptions}</select>
         </div>
-    `;
-  document.body.appendChild(txModal);
+        <div class="form-group">
+          <label for="txToAddress">To Address:</label>
+          <input type="text" id="txToAddress" placeholder="Enter destination address or leave empty for new address">
+          <button id="generateAddrBtn" class="action-button secondary" style="margin-top:0.5rem;font-size:0.8rem;">
+            <i class="fas fa-magic"></i> Generate new address from another wallet
+          </button>
+        </div>
+        <div class="form-group">
+          <label for="txAmount">Amount (BTC):</label>
+          <input type="number" id="txAmount" value="0.001" min="0.00001" step="0.00001">
+        </div>
+        <div id="txModalError"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="txSubmitBtn" class="action-button"><i class="fas fa-paper-plane"></i> Send</button>
+        <button id="txCancelBtn" class="action-button secondary">Cancel</button>
+      </div>
+    </div>`;
 
-  // Add event listeners
-  txModal.querySelector(".close-btn").addEventListener("click", () => {
-    document.body.removeChild(txModal);
+  document.body.appendChild(modal);
+
+  // Ensure modal styles exist
+  ensureModalStyles();
+
+  const closeModal = () => {
+    if (document.body.contains(modal)) document.body.removeChild(modal);
     if (createButton) {
       createButton.classList.remove("mining-active");
       createButton.innerHTML =
         '<i class="fas fa-plus-circle"></i> Create Transaction';
       createButton.disabled = false;
     }
-  });
+  };
 
-  txModal.querySelector("#cancelTxBtn").addEventListener("click", () => {
-    document.body.removeChild(txModal);
-    if (createButton) {
-      createButton.classList.remove("mining-active");
-      createButton.innerHTML =
-        '<i class="fas fa-plus-circle"></i> Create Transaction';
-      createButton.disabled = false;
-    }
-  });
+  modal.querySelector(".close-btn").addEventListener("click", closeModal);
+  modal.querySelector("#txCancelBtn").addEventListener("click", closeModal);
 
-  txModal.querySelector("#createTxSubmitBtn").addEventListener("click", () => {
-    const fromWallet = document.getElementById("fromWallet").value;
-    const toAddress = document.getElementById("toAddress").value;
-    const amount = parseFloat(document.getElementById("amount").value);
+  // Generate address button
+  modal
+    .querySelector("#generateAddrBtn")
+    .addEventListener("click", async () => {
+      const fromWallet = modal.querySelector("#txFromWallet").value;
+      // Pick a different wallet for the destination
+      const otherWallets = walletsCache.filter((w) => w.name !== fromWallet);
+      const targetWallet =
+        otherWallets.length > 0 ? otherWallets[0].name : fromWallet;
 
-    // Submit the transaction
-    fetch("/api/create-transaction", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        fromWallet,
-        toAddress,
-        amount,
-      }),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        console.log("Create transaction result:", data);
+      const result = await fetchSafe(
+        `/api/new-address?wallet=${encodeURIComponent(targetWallet)}`,
+      );
+      if (result && result.address) {
+        modal.querySelector("#txToAddress").value = result.address;
         addMiningLog(
-          `Transaction created with ID: ${data.txid ? data.txid.substring(0, 8) + "..." : "unknown"}`,
+          `Generated address from ${targetWallet}: ${result.address.substring(0, 16)}...`,
+          "info",
         );
+      } else {
+        const errorDiv = modal.querySelector("#txModalError");
+        errorDiv.innerHTML =
+          '<p style="color:var(--error-color);margin-top:0.5rem;">Failed to generate address</p>';
+      }
+    });
 
-        // Close modal
-        document.body.removeChild(txModal);
+  // Submit button
+  modal.querySelector("#txSubmitBtn").addEventListener("click", async () => {
+    const fromWallet = modal.querySelector("#txFromWallet").value;
+    let toAddress = modal.querySelector("#txToAddress").value.trim();
+    const amount = parseFloat(modal.querySelector("#txAmount").value);
 
-        // Reset button
-        if (createButton) {
-          createButton.classList.remove("mining-active");
-          createButton.innerHTML =
-            '<i class="fas fa-plus-circle"></i> Create Transaction';
-          createButton.disabled = false;
-        }
-      })
-      .catch((error) => {
-        console.error("Error creating transaction:", error);
+    if (!fromWallet) {
+      modal.querySelector("#txModalError").innerHTML =
+        '<p style="color:var(--error-color);">Please select a wallet</p>';
+      return;
+    }
 
-        // Show error in modal
-        const modalBody = txModal.querySelector(".modal-body");
-        const errorMsg = document.createElement("div");
-        errorMsg.className = "error-message";
-        errorMsg.innerHTML = `<p style="color: var(--error-color);">Error: ${error.message}</p>`;
-        modalBody.appendChild(errorMsg);
+    if (!amount || amount <= 0) {
+      modal.querySelector("#txModalError").innerHTML =
+        '<p style="color:var(--error-color);">Invalid amount</p>';
+      return;
+    }
 
-        // Reset button
-        if (createButton) {
-          createButton.classList.remove("mining-active");
-          createButton.innerHTML =
-            '<i class="fas fa-plus-circle"></i> Create Transaction';
-          createButton.disabled = false;
-        }
+    // If no address, generate one
+    if (!toAddress) {
+      const otherWallets = walletsCache.filter((w) => w.name !== fromWallet);
+      const targetWallet =
+        otherWallets.length > 0 ? otherWallets[0].name : fromWallet;
+      const addrResult = await fetchSafe(
+        `/api/new-address?wallet=${encodeURIComponent(targetWallet)}`,
+      );
+      if (addrResult && addrResult.address) {
+        toAddress = addrResult.address;
+      } else {
+        modal.querySelector("#txModalError").innerHTML =
+          '<p style="color:var(--error-color);">Could not generate destination address</p>';
+        return;
+      }
+    }
 
-        playSound("error");
-      });
+    const submitBtn = modal.querySelector("#txSubmitBtn");
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+    submitBtn.disabled = true;
+
+    const result = await postSafe("/api/create-transaction", {
+      fromWallet,
+      toAddress,
+      amount,
+    });
+
+    if (result && result.txid) {
+      addMiningLog(
+        `💸 Transaction sent: ${result.txid.substring(0, 16)}...`,
+        "success",
+      );
+      closeModal();
+      fetchWalletDetails(); // Refresh balances
+    } else {
+      modal.querySelector("#txModalError").innerHTML =
+        '<p style="color:var(--error-color);">Transaction failed. Check wallet balance and address.</p>';
+      submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send';
+      submitBtn.disabled = false;
+      playSound("error");
+    }
   });
+}
 
-  // Style the modal
+function ensureModalStyles() {
+  if (document.getElementById("modal-styles")) return;
+
   const style = document.createElement("style");
+  style.id = "modal-styles";
   style.textContent = `
-        .modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
+    .modal {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6); display: flex;
+      align-items: center; justify-content: center; z-index: 1000;
+    }
+    .modal-content {
+      background: var(--card-bg); border-radius: 0.75rem;
+      width: 480px; max-width: 90%;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      border: 1px solid var(--border-color);
+    }
+    .modal-header {
+      padding: 1rem 1.5rem; border-bottom: 1px solid var(--border-color);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .modal-header h3 { margin: 0; color: var(--caravan-blue); }
+    .modal-body { padding: 1.5rem; }
+    .modal-footer {
+      padding: 1rem 1.5rem; border-top: 1px solid var(--border-color);
+      display: flex; justify-content: flex-end; gap: 0.75rem;
+    }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label {
+      display: block; margin-bottom: 0.5rem; color: var(--text-color);
+      font-weight: 500; font-size: 0.9rem;
+    }
+    .form-group input, .form-group select {
+      width: 100%; padding: 0.75rem;
+      border: 1px solid var(--border-color); border-radius: 0.375rem;
+      background: var(--highlight-bg); color: var(--text-color);
+      font-family: 'Roboto Mono', monospace; font-size: 0.875rem;
+    }
+    .form-group input:focus, .form-group select:focus {
+      outline: none; border-color: var(--caravan-blue);
+      box-shadow: 0 0 0 2px rgba(0,116,217,0.2);
+    }
+    .close-btn {
+      background: none; border: none; color: var(--text-secondary);
+      font-size: 1.5rem; cursor: pointer; padding: 0; line-height: 1;
+    }
+    .close-btn:hover { color: var(--text-color); }
 
-        .modal-content {
-            background-color: var(--card-bg);
-            border-radius: 0.75rem;
-            width: 450px;
-            max-width: 90%;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-            border: 1px solid var(--border-color);
-        }
-
-        .modal-header {
-            padding: 1rem 1.5rem;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .modal-header h3 {
-            margin: 0;
-            color: var(--caravan-blue);
-        }
-
-        .modal-body {
-            padding: 1.5rem;
-        }
-
-        .modal-footer {
-            padding: 1rem 1.5rem;
-            border-top: 1px solid var(--border-color);
-            display: flex;
-            justify-content: flex-end;
-            gap: 0.75rem;
-        }
-
-        .form-group {
-            margin-bottom: 1rem;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: var(--text-color);
-        }
-
-        .form-group input, .form-group select {
-            width: 100%;
-            padding: 0.75rem;
-            border: 1px solid var(--border-color);
-            border-radius: 0.375rem;
-            background-color: var(--highlight-bg);
-            color: var(--text-color);
-            font-family: 'Roboto Mono', monospace;
-            font-size: 0.875rem;
-        }
-
-        .error-message {
-            margin-top: 1rem;
-            padding: 0.75rem;
-            background-color: rgba(239, 68, 68, 0.1);
-            border-radius: 0.375rem;
-            border-left: 3px solid var(--error-color);
-        }
-    `;
+    /* Wallet panel styles */
+    .wallet-section-header {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);
+      padding: 0.75rem 0 0.25rem 0; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .wallet-card {
+      background: var(--highlight-bg); border: 1px solid var(--border-color);
+      border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 0.5rem;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .wallet-card:hover { border-color: var(--caravan-blue); background: var(--card-bg); }
+    .wallet-multisig { border-left: 3px solid var(--caravan-yellow); }
+    .wallet-card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+    .wallet-icon { font-size: 1rem; }
+    .wallet-name { font-weight: 600; font-size: 0.85rem; }
+    .wallet-error { color: var(--error-color); }
+    .wallet-balance {
+      font-family: 'Roboto Mono', monospace; font-size: 0.8rem;
+      color: var(--success-color); margin-bottom: 0.25rem;
+    }
+    .wallet-unconfirmed {
+      font-size: 0.75rem; color: var(--warning-color);
+    }
+    .wallet-meta {
+      display: flex; gap: 0.5rem; align-items: center; margin-top: 0.25rem;
+      font-size: 0.7rem; color: var(--text-secondary);
+    }
+    .badge {
+      padding: 1px 5px; border-radius: 3px; font-size: 0.65rem; font-weight: 600;
+    }
+    .badge-descriptor { background: rgba(0,116,217,0.15); color: var(--caravan-blue); }
+    .badge-multisig { background: rgba(255,215,0,0.15); color: var(--caravan-yellow); }
+  `;
   document.head.appendChild(style);
 }
 
-// Show/hide mining activity panel
+// ============================================
+// Mining Activity Log
+// ============================================
 function showMiningActivity(show = true) {
-  const miningActivity = document.getElementById("miningActivity");
-  if (!miningActivity) return;
+  const el = document.getElementById("miningActivity");
+  if (!el) return;
+  el.style.display = show ? "block" : "none";
+}
 
-  miningActivity.style.display = show ? "block" : "none";
+function addMiningLog(message, type = "info") {
+  const container = document.getElementById("miningLogs");
+  if (!container) return;
 
-  if (show) {
-    const miningLogs = document.getElementById("miningLogs");
-    if (miningLogs) {
-      miningLogs.innerHTML = "";
-    }
+  const entry = document.createElement("div");
+  entry.className = `mining-log mining-log-${type}`;
+  const timestamp = new Date().toLocaleTimeString();
+  entry.innerHTML = `<span style="opacity:0.5;margin-right:5px;">[${timestamp}]</span> ${message}`;
+
+  container.appendChild(entry);
+  container.scrollTop = container.scrollHeight;
+
+  showMiningActivity(true);
+
+  // Keep max 100 logs
+  while (container.children.length > 100) {
+    container.removeChild(container.firstChild);
   }
 }
 
-// Add a log to the mining activity panel
-function addMiningLog(message) {
-  const logsContainer = document.getElementById("miningLogs");
-  if (!logsContainer) return;
-
-  const log = document.createElement("div");
-  log.className = "mining-log";
-
-  // Add timestamp to the log
-  const timestamp = new Date().toLocaleTimeString();
-  log.innerHTML = `<span style="opacity: 0.7; margin-right: 5px;">[${timestamp}]</span> ${message}`;
-
-  logsContainer.appendChild(log);
-  logsContainer.scrollTop = logsContainer.scrollHeight;
-
-  // Make sure the mining activity panel is visible
-  showMiningActivity(true);
-}
-
-// Toggle dark/light theme
+// ============================================
+// Theme Toggle
+// ============================================
 function toggleTheme() {
   const body = document.body;
-  const themeIcon = document.getElementById("themeToggle").querySelector("i");
+  const themeIcon = document.querySelector("#themeToggle i");
 
   body.classList.toggle("light-theme");
+  const isLight = body.classList.contains("light-theme");
+  localStorage.setItem("theme", isLight ? "light" : "dark");
 
-  const isLightTheme = body.classList.contains("light-theme");
-  localStorage.setItem("theme", isLightTheme ? "light" : "dark");
+  if (themeIcon) themeIcon.className = isLight ? "fas fa-sun" : "fas fa-moon";
 
-  themeIcon.className = isLightTheme ? "fas fa-sun" : "fas fa-moon";
-
-  // Update chart colors
+  // Refresh charts with new theme colors
   if (blockchainChart) updateBlockchainVisualization();
   if (mempoolChart) updateMempoolVisualization();
-  if (transactionNetwork) updateNetworkVisualization();
+  // FIX: Don't call updateNetworkVisualization() without argument
+  if (transactionNetwork) initTransactionNetwork();
 
   playSound("click");
 }
 
-// Load theme preference from localStorage
 function loadThemePreference() {
   const theme = localStorage.getItem("theme") || "dark";
-  const themeIcon = document.getElementById("themeToggle").querySelector("i");
+  const themeIcon = document.querySelector("#themeToggle i");
 
   if (theme === "light") {
     document.body.classList.add("light-theme");
-    themeIcon.className = "fas fa-sun";
+    if (themeIcon) themeIcon.className = "fas fa-sun";
   }
 }
+
+// ============================================
+// Periodic wallet refresh
+// ============================================
+setInterval(fetchWalletDetails, 15000);

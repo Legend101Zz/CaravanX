@@ -12,9 +12,12 @@ import {
  * Service for fetching blockchain data for visualization
  */
 export class BlockchainDataService {
-  private readonly rpc: BitcoinRpcClient;
+  public readonly rpc: BitcoinRpcClient;
   private cachedTxCount: number = 0;
   private lastBlockHeight: number = 0;
+  private cachedUtxoStats: any = null;
+  private utxoStatsLastFetched: number = 0;
+  private static readonly UTXO_STATS_CACHE_MS = 30000; // Cache UTXO stats for 30s (it's expensive)
 
   constructor(rpc: BitcoinRpcClient) {
     this.rpc = rpc;
@@ -103,7 +106,7 @@ export class BlockchainDataService {
       version: block.version,
       versionHex: block.versionHex,
       merkleRoot: block.merkleroot,
-      tx: block.tx, // Array of transactions
+      tx: block.tx,
       time: block.time,
       medianTime: block.mediantime,
       nonce: block.nonce,
@@ -134,8 +137,16 @@ export class BlockchainDataService {
     const blocks: Block[] = [];
 
     for (let i = 0; i < count && blockCount - i >= 0; i++) {
-      const block = await this.getBlockByHeight(blockCount - i);
-      blocks.push(block);
+      try {
+        const block = await this.getBlockByHeight(blockCount - i);
+        blocks.push(block);
+      } catch (error) {
+        console.error(
+          `Error fetching block at height ${blockCount - i}:`,
+          error,
+        );
+        // Continue to next block instead of failing entirely
+      }
     }
 
     return blocks;
@@ -155,37 +166,11 @@ export class BlockchainDataService {
 
   /**
    * Get detailed transaction information
+   * FIX: Use getrawtransaction first (works for any tx), fall back to wallet gettransaction
    */
   async getTransaction(txid: string): Promise<Transaction> {
     try {
-      // First try to get from wallet (which has more info)
-      const wallets = await this.rpc.listWallets();
-
-      if (wallets.length > 0) {
-        try {
-          const tx = await this.rpc.getTransaction(wallets[0], txid);
-          return {
-            txid: tx.txid,
-            hash: tx.hash || tx.txid,
-            version: tx.version,
-            size: tx.size,
-            vsize: tx.vsize,
-            weight: tx.weight,
-            locktime: tx.locktime,
-            vin: tx.vin,
-            vout: tx.vout,
-            hex: tx.hex,
-            blockhash: tx.blockhash,
-            confirmations: tx.confirmations,
-            time: tx.time,
-            blocktime: tx.blocktime,
-          };
-        } catch (e) {
-          // Continue to try with getrawtransaction if wallet doesn't have this tx
-        }
-      }
-
-      // Fallback to getrawtransaction
+      // Primary: getrawtransaction with verbose=true works for any tx (mempool or confirmed)
       const tx = await this.rpc.callRpc<any>("getrawtransaction", [txid, true]);
       return {
         txid: tx.txid,
@@ -203,9 +188,64 @@ export class BlockchainDataService {
         time: tx.time,
         blocktime: tx.blocktime,
       };
-    } catch (error) {
-      console.error(`Error getting transaction ${txid}:`, error);
-      throw error;
+    } catch (rawError) {
+      // Fallback: try wallet-based gettransaction (has fee info etc.)
+      try {
+        const wallets = await this.rpc.listWallets();
+        for (const wallet of wallets) {
+          try {
+            const tx = await this.rpc.getTransaction(wallet, txid);
+            // gettransaction returns different format, need to decode
+            if (tx.hex) {
+              const decoded = await this.rpc.callRpc<any>(
+                "decoderawtransaction",
+                [tx.hex],
+              );
+              return {
+                txid: decoded.txid,
+                hash: decoded.hash || decoded.txid,
+                version: decoded.version,
+                size: decoded.size,
+                vsize: decoded.vsize,
+                weight: decoded.weight,
+                locktime: decoded.locktime,
+                vin: decoded.vin,
+                vout: decoded.vout,
+                hex: tx.hex,
+                blockhash: tx.blockhash,
+                confirmations: tx.confirmations,
+                time: tx.time,
+                blocktime: tx.blocktime,
+              };
+            }
+            // If no hex, return what we can
+            return {
+              txid: tx.txid || txid,
+              hash: tx.txid || txid,
+              version: 0,
+              size: 0,
+              vsize: 0,
+              weight: 0,
+              locktime: 0,
+              vin: [],
+              vout: [],
+              hex: "",
+              blockhash: tx.blockhash,
+              confirmations: tx.confirmations,
+              time: tx.time,
+              blocktime: tx.blocktime,
+            };
+          } catch (e) {
+            // This wallet doesn't know about this tx, try next
+            continue;
+          }
+        }
+      } catch (walletError) {
+        // No wallets available
+      }
+
+      console.error(`Error getting transaction ${txid}:`, rawError);
+      throw rawError;
     }
   }
 
@@ -224,10 +264,62 @@ export class BlockchainDataService {
   }
 
   /**
-   * Get UTXO set statistics
+   * Get wallet info for a specific wallet
+   */
+  async getWalletInfo(wallet: string): Promise<any> {
+    try {
+      return await this.rpc.callRpc<any>("getwalletinfo", [], wallet);
+    } catch (error) {
+      console.error(`Error getting wallet info for ${wallet}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Get balance for a specific wallet
+   */
+  async getWalletBalance(wallet: string): Promise<number> {
+    try {
+      const balance = await this.rpc.callRpc<number>("getbalance", [], wallet);
+      return balance;
+    } catch (error) {
+      console.error(`Error getting balance for ${wallet}:`, error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get UTXO set statistics - CACHED to avoid repeated expensive calls
+   * gettxoutsetinfo is very expensive and can take seconds on large chains
    */
   async getUTXOStats(): Promise<any> {
-    return this.rpc.callRpc<any>("gettxoutsetinfo");
+    const now = Date.now();
+    if (
+      this.cachedUtxoStats &&
+      now - this.utxoStatsLastFetched <
+        BlockchainDataService.UTXO_STATS_CACHE_MS
+    ) {
+      return this.cachedUtxoStats;
+    }
+
+    try {
+      const stats = await this.rpc.callRpc<any>("gettxoutsetinfo");
+      this.cachedUtxoStats = stats;
+      this.utxoStatsLastFetched = now;
+      return stats;
+    } catch (error) {
+      console.error("Error getting UTXO stats:", error);
+      // Return cached if available, otherwise return empty
+      return (
+        this.cachedUtxoStats || {
+          height: 0,
+          bestblock: "",
+          transactions: 0,
+          txouts: 0,
+          total_amount: 0,
+        }
+      );
+    }
   }
 
   /**
@@ -252,17 +344,14 @@ export class BlockchainDataService {
       this.getRecentBlocks(blockCount),
       this.getMempoolTransactions(),
       this.getMiningInfo(),
-      this.getUTXOStats(),
+      this.getUTXOStats(), // Now cached
     ]);
 
-    // Calculate total transaction count
+    // FIX: Calculate total tx count properly using block height tracking
     const totalTxCount = this.calculateTotalTxCount(
       recentBlocks,
-      this.cachedTxCount,
+      chainInfo.blocks,
     );
-
-    // Store for next time
-    this.cachedTxCount = totalTxCount;
 
     // Create blockchain visualization response with enhanced data
     return {
@@ -303,16 +392,23 @@ export class BlockchainDataService {
 
   /**
    * Extract miner information from coinbase transaction
+   * FIX: Handle both verbosity=1 (txids as strings) and verbosity=2 (full tx objects)
    */
   private extractMinerInfo(block: Block): string {
     try {
       if (!block.tx || block.tx.length === 0) return "Unknown";
 
       // Get coinbase transaction (first tx in block)
-      const coinbaseTx =
-        typeof block.tx[0] === "string"
-          ? null // Need to fetch transaction if only have txid
-          : block.tx[0];
+      const firstTx = block.tx[0];
+      let coinbaseTx: any;
+
+      if (typeof firstTx === "string") {
+        // verbosity=1: tx[0] is just a txid string, we don't have the full data
+        return `Miner-${block.height}`;
+      } else {
+        // verbosity=2: tx[0] is the full transaction object
+        coinbaseTx = firstTx;
+      }
 
       if (!coinbaseTx || !coinbaseTx.vin || coinbaseTx.vin.length === 0)
         return "Unknown";
@@ -324,16 +420,9 @@ export class BlockchainDataService {
       // Convert hex to ASCII and look for recognizable patterns
       const coinbaseAscii = Buffer.from(coinbaseData, "hex")
         .toString("ascii")
-        .replace(/[^\x20-\x7E]/g, ""); // Remove non-printable chars
+        .replace(/[^\x20-\x7E]/g, "");
 
-      // Look for common miner strings
-      if (coinbaseAscii.includes("Bitmain")) return "Bitmain";
-      if (coinbaseAscii.includes("AntPool")) return "AntPool";
-      if (coinbaseAscii.includes("F2Pool")) return "F2Pool";
-      if (coinbaseAscii.includes("ViaBTC")) return "ViaBTC";
-      if (coinbaseAscii.includes("SlushPool")) return "SlushPool";
-
-      // If nothing found, use a generic name with block height
+      // In regtest, just show block height
       return `Miner-${block.height}`;
     } catch (error) {
       console.error("Error extracting miner info:", error);
@@ -342,15 +431,30 @@ export class BlockchainDataService {
   }
 
   /**
-   * Calculate estimated block fee
+   * Calculate estimated block fee from coinbase output vs block subsidy
    */
   private calculateBlockFee(block: Block): number {
     try {
-      // Simple estimation based on block reward for regtest
-      // In a full implementation, you would calculate this from the transactions
-      return 0; // Placeholder
+      if (!block.tx || block.tx.length === 0) return 0;
+
+      const firstTx = block.tx[0];
+      if (typeof firstTx === "string") return 0;
+
+      // Coinbase output total
+      const coinbaseValue =
+        firstTx.vout?.reduce(
+          (sum: number, out: any) => sum + (out.value || 0),
+          0,
+        ) || 0;
+
+      // In regtest, subsidy is 50 BTC initially, halving every 150 blocks
+      const halvings = Math.floor(block.height / 150);
+      const subsidy = 50 / Math.pow(2, halvings);
+
+      // Fee = coinbase output - subsidy
+      const fee = coinbaseValue - subsidy;
+      return fee > 0 ? fee : 0;
     } catch (error) {
-      console.error("Error calculating block fee:", error);
       return 0;
     }
   }
@@ -359,32 +463,38 @@ export class BlockchainDataService {
    * Calculate mempool fees
    */
   private calculateMempoolFees(mempoolInfo: MempoolInfo): number {
-    // Simple estimate based on size and minimum fee rate
     return (mempoolInfo.bytes * mempoolInfo.mempoolMinFee) / 100000000;
   }
 
   /**
-   * Calculate total transaction count (approximate)
+   * Calculate total transaction count
+   * FIX: Use block height and average txs per block for estimation,
+   * don't accumulate infinitely
    */
-  private calculateTotalTxCount(blocks: Block[], cachedCount: number): number {
+  private calculateTotalTxCount(
+    blocks: Block[],
+    totalBlockCount: number,
+  ): number {
     try {
-      // Count transactions in provided blocks
-      const txCount = blocks.reduce(
+      if (blocks.length === 0) return this.cachedTxCount;
+
+      // Count transactions in the recent blocks we have
+      const recentTxCount = blocks.reduce(
         (sum, block) => sum + (block.tx?.length || 0),
         0,
       );
 
-      // If we already have a cached count, use it as a base
-      if (cachedCount > 0) {
-        return cachedCount + txCount;
-      }
+      // Average txs per block from our sample
+      const avgTxPerBlock = recentTxCount / blocks.length;
 
-      // Otherwise, estimate based on average transactions per block
-      const avgTxPerBlock = txCount / blocks.length;
-      return Math.round(avgTxPerBlock * blocks[0].height);
+      // Estimate total based on full chain height
+      const estimated = Math.round(avgTxPerBlock * totalBlockCount);
+
+      this.cachedTxCount = estimated;
+      return estimated;
     } catch (error) {
       console.error("Error calculating total tx count:", error);
-      return cachedCount;
+      return this.cachedTxCount;
     }
   }
 
@@ -393,24 +503,18 @@ export class BlockchainDataService {
    */
   async mineBlocks(numBlocks: number, address?: string): Promise<string[]> {
     try {
-      // Get an address if none provided
       if (!address) {
         const wallets = await this.rpc.listWallets();
         if (wallets.length === 0) {
           throw new Error("No wallets available for mining");
         }
-
-        // Use the first wallet to generate an address
         address = await this.rpc.callRpc<string>(
           "getnewaddress",
           [],
           wallets[0],
         );
       }
-
-      // Generate blocks
       const blockHashes = await this.rpc.generateToAddress(numBlocks, address);
-
       return blockHashes;
     } catch (error) {
       console.error("Error mining blocks:", error);
@@ -427,13 +531,11 @@ export class BlockchainDataService {
     amount: number,
   ): Promise<any> {
     try {
-      // Send to address
       const txid = await this.rpc.callRpc<string>(
         "sendtoaddress",
         [toAddress, amount],
         fromWallet,
       );
-
       return { txid, success: true };
     } catch (error) {
       console.error("Error creating transaction:", error);
@@ -443,19 +545,15 @@ export class BlockchainDataService {
 
   /**
    * Check for new blocks since last check
-   * Returns the new block if one was found
    */
   async checkForNewBlocks(): Promise<Block | null> {
     try {
       const currentHeight = await this.getBlockCount();
-
       if (currentHeight > this.lastBlockHeight) {
-        // New block found
         const newBlock = await this.getBlockByHeight(currentHeight);
         this.lastBlockHeight = currentHeight;
         return newBlock;
       }
-
       return null;
     } catch (error) {
       console.error("Error checking for new blocks:", error);
@@ -465,19 +563,15 @@ export class BlockchainDataService {
 
   /**
    * Check for new mempool transactions
-   * Returns an array of new transaction IDs
    */
   async checkForNewMempoolTransactions(
     previousTxids: string[],
   ): Promise<string[]> {
     try {
       const currentTxids = await this.getMempoolTransactions();
-
-      // Find transactions in current mempool that weren't in previous mempool
       const newTxids = currentTxids.filter(
         (txid) => !previousTxids.includes(txid),
       );
-
       return newTxids;
     } catch (error) {
       console.error("Error checking for new mempool transactions:", error);

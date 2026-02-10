@@ -228,6 +228,93 @@ export class VisualizationServer {
       }
     });
 
+    // Get detailed wallet info (including multisig detection)
+    this.app.get("/api/wallets/details", async (req, res) => {
+      try {
+        const wallets = await this.blockchainData.getWalletList();
+        const walletDetails = [];
+
+        for (const walletName of wallets) {
+          try {
+            const info = await this.blockchainData.getWalletInfo(walletName);
+            const balance =
+              await this.blockchainData.getWalletBalance(walletName);
+
+            // Detect if this is a multisig/descriptor wallet
+            let isMultisig = false;
+            let descriptorInfo: any = null;
+
+            if (info && info.descriptors) {
+              // Descriptor wallet - check if any descriptors are multisig
+              try {
+                const descriptors = await this.blockchainData.rpc.callRpc<any>(
+                  "listdescriptors",
+                  [],
+                  walletName,
+                );
+                if (descriptors && descriptors.descriptors) {
+                  isMultisig = descriptors.descriptors.some(
+                    (d: any) =>
+                      d.desc &&
+                      (d.desc.includes("multi") ||
+                        d.desc.includes("sortedmulti")),
+                  );
+                  if (isMultisig) {
+                    descriptorInfo = descriptors.descriptors
+                      .filter(
+                        (d: any) =>
+                          d.desc &&
+                          (d.desc.includes("multi") ||
+                            d.desc.includes("sortedmulti")),
+                      )
+                      .map((d: any) => ({
+                        desc: d.desc.substring(0, 80) + "...",
+                        active: d.active,
+                        internal: d.internal,
+                        range: d.range,
+                      }));
+                  }
+                }
+              } catch (e) {
+                // listdescriptors may not be available
+              }
+            }
+
+            walletDetails.push({
+              name: walletName,
+              balance: balance,
+              txCount: info?.txcount || 0,
+              isDescriptor: info?.descriptors || false,
+              isMultisig: isMultisig,
+              descriptorInfo: descriptorInfo,
+              keypoolSize: info?.keypoolsize || 0,
+              unconfirmedBalance: info?.unconfirmed_balance || 0,
+              immatureBalance: info?.immature_balance || 0,
+            });
+          } catch (walletError) {
+            // Wallet might be unloaded or inaccessible
+            walletDetails.push({
+              name: walletName,
+              balance: 0,
+              txCount: 0,
+              isDescriptor: false,
+              isMultisig: false,
+              descriptorInfo: null,
+              keypoolSize: 0,
+              unconfirmedBalance: 0,
+              immatureBalance: 0,
+              error: "Could not fetch wallet details",
+            });
+          }
+        }
+
+        res.json({ wallets: walletDetails });
+      } catch (error) {
+        console.error("API error:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
     // Get chain info
     this.app.get("/api/chain-info", async (req, res) => {
       try {
