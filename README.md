@@ -1,57 +1,187 @@
 # Caravan-X
 
-A terminal-based utility for Bitcoin developers who are tired of the "it works on my machine" problem. Caravan-X creates reproducible regtest environments, manages Caravan-compatible multisig wallets, and lets you share exact blockchain states with your team.
+> A terminal-based development toolkit for Bitcoin developers who are tired of the "it works on my machine" problem.
+
+Caravan-X creates reproducible Bitcoin regtest environments, manages Caravan-compatible multisig wallets, and lets you share exact blockchain states with your team — all from a beautiful terminal interface.
 
 ![Caravan-X](./assets/Caravan-X.png)
 
 ---
 
-### Video tutorial on how to use caravan-x along with caravan-coordinator :
+### 🎬 Video Tutorial
 
-### [demo](https://drive.google.com/file/d/1AMB_MrrsPz8UXJzlDaIeZdcf38sbBRFW/view?usp=sharing)
+> [Watch the full demo: Caravan-X with Caravan Coordinator](https://drive.google.com/file/d/1AMB_MrrsPz8UXJzlDaIeZdcf38sbBRFW/view?usp=sharing)
 
 ---
 
 ## Table of Contents
 
-- [What is Caravan-X](#what-is-caravan-x)
+- [What is Caravan?](#what-is-caravan)
+- [What is Caravan-X?](#what-is-caravan-x)
+- [Why Caravan-X Exists](#why-caravan-x-exists)
+- [Architecture Overview](#architecture-overview)
+- [Key Concepts](#key-concepts)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Modes of Operation](#modes-of-operation)
-  - [Docker Mode](#docker-mode)
-  - [Manual Mode](#manual-mode)
-  - [Switching Between Modes](#switching-between-modes)
-- [Using the TUI (Terminal User Interface)](#using-the-tui-terminal-user-interface)
-  - [Main Menu Categories](#main-menu-categories)
-  - [Bitcoin Wallets](#bitcoin-wallets)
-  - [Caravan Multisig](#caravan-multisig)
-  - [Transactions](#transactions)
-  - [Blockchain Scripts](#blockchain-scripts)
-  - [Docker Management](#docker-management)
-  - [Snapshots](#snapshots)
-  - [Test Scenarios](#test-scenarios)
-- [CLI Commands](#cli-commands)
+- [Documentation](#documentation)
+- [CLI Reference](#cli-reference)
 - [Configuration](#configuration)
-- [Pre-configured Test Scenarios](#pre-configured-test-scenarios)
-- [Scripting Engine](#scripting-engine)
-- [Working with Caravan](#working-with-caravan)
 - [Roadmap](#roadmap)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+- [License](#license)
 
 ---
 
+## What is Caravan?
+
+[Caravan](https://github.com/caravan-bitcoin/caravan) is a free, open-source Bitcoin ecosystem monorepo maintained by Unchained Capital. It provides tools for creating and managing multisig Bitcoin wallets — including a web-based coordinator for building transactions, collecting signatures from multiple hardware wallets, and broadcasting to the Bitcoin network.
+
+Caravan is powerful, but setting up a local development environment to test against it is complex. You need to manually install Bitcoin Core, configure a regtest network, set up nginx proxies for CORS, create descriptor wallets with the right format, and ensure every team member has an identical blockchain state. That's where Caravan-X comes in.
+
+
 ## What is Caravan-X
 
-Caravan-X solves a real pain point in Bitcoin development: environment consistency. When you're building Bitcoin applications, testing multisig setups, or debugging transaction issues, you need everyone on your team working with the same blockchain state. Caravan-X makes this possible by:
+Caravan-X is the **developer tooling layer** that sits underneath Caravan. Think of it as the "backend setup script" that handles everything Caravan needs to function in a development/testing context:
 
-- Spinning up identical regtest environments with Docker (or connecting to your existing node)
-- Creating Caravan-compatible multisig wallets that work seamlessly with the Caravan web interface
-- Packaging complete blockchain states into shareable archives
-- Providing pre-built test scenarios for common patterns like RBF and CPFP
-- Offering both an interactive TUI and direct CLI commands
+- **One-command regtest environments** — Docker spins up Bitcoin Core, nginx, and everything pre-configured
+- **Caravan-compatible wallets** — Generates `sortedmulti` descriptors with proper fingerprints and derivation paths that Caravan expects
+- **Shareable blockchain states** — Package your entire regtest environment (blockchain data, wallets, keys, transaction history) into a `.caravan-env` archive and hand it to a teammate
+- **Pre-built test scenarios** — RBF, CPFP, multisig signing flows, privacy analysis — all ready to run
+- **Scripting engine** — Automate complex Bitcoin scenarios with JavaScript or JSON scripts
+- **Profile isolation** — Run multiple independent regtest environments simultaneously with Docker
 
-Whether you're testing privacy analysis tools, simulating fee bumping scenarios, or just need a clean regtest environment, Caravan-X has you covered.
+### Where Caravan-X Fits
+
+![Caravan-X-flow](./assets/flow-caravan-x.png)
+
+
+## Why Caravan-X Exists
+
+If you've ever tried to test Bitcoin multisig workflows, you know the pain:
+
+1. **Setup hell** — Installing Bitcoin Core, writing `bitcoin.conf`, configuring RPC auth, setting up CORS proxies, generating initial blocks, creating descriptor wallets with the exact right format...
+2. **"Works on my machine"** — Your teammate's regtest has different wallets, different block heights, different UTXOs. Bug reproductions become impossible.
+3. **Descriptor nightmares** — Caravan expects `sortedmulti` descriptors with `[fingerprint/48'/1'/0'/2']xpub/0/*` format. One wrong character and nothing works.
+4. **No reproducibility** — You spend 30 minutes setting up the perfect test state, then need to recreate it from scratch the next day.
+
+Caravan-X eliminates all of this. One command, and you have a fully configured regtest environment that's identical every time and shareable with anyone on your team.
+
+---
+## Architecture Overview
+
+### Project Structure
+```
+src/
+├── cli.ts                  # CLI entry point (Commander.js commands)
+├── index.ts                # Main application class (CaravanRegtestManager)
+├── commands/               # User-facing command handlers
+│   ├── wallet.ts           # Bitcoin wallet operations
+│   ├── multisig.ts         # Caravan multisig wallet management
+│   ├── transaction.ts      # PSBT creation, signing, broadcasting
+│   ├── docker.ts           # Docker container management
+│   ├── snapshot.ts         # Blockchain state save/restore
+│   ├── scenario.ts         # Pre-built test scenario execution
+│   ├── environment.ts      # Environment export/import (.caravan-env)
+│   ├── settings.ts         # Configuration and profile management
+│   └── system.ts           # Mining, system info, data export/import
+├── core/                   # Business logic and service layer
+│   ├── rpc.ts              # Bitcoin Core RPC client
+│   ├── bitcoin.ts          # Bitcoin operations (wallet, address, tx)
+│   ├── caravan.ts          # Caravan-specific wallet/descriptor logic
+│   ├── docker.ts           # Docker container orchestration + nginx
+│   ├── profiles.ts         # Profile isolation system
+│   ├── snapshot.ts         # Snapshot create/restore/compare logic
+│   ├── environment.ts      # .caravan-env archive export/import
+│   └── transaction.ts      # Transaction building, PSBT handling
+├── scripting/              # Automation engine
+│   ├── ScriptEngine.ts     # JS + JSON script executor
+│   ├── cli-integration.ts  # Script commands for TUI/CLI
+│   ├── templates/          # Built-in scenario templates
+│   └── README.md           # Scripting documentation
+├── types/                  # TypeScript type definitions
+│   ├── config.ts           # Configuration, profile, docker types
+│   └── environment.ts      # Environment sharing types
+├── ui/                     # Terminal UI components
+│   ├── mainMenu.ts         # Interactive menu system
+│   └── setupWizard.ts      # First-run configuration wizard
+└── utils/                  # Shared utilities
+    ├── errors.ts           # Centralized error handling + categorization
+    ├── logger.ts           # Multi-level logging system
+    └── terminal.ts         # Terminal formatting helpers
+```
+
+### How Data Flows
+
+1. **User interacts** with the TUI (arrow keys + Enter) or CLI commands
+2. **Command handlers** (`src/commands/`) validate input and orchestrate operations
+3. **Core services** (`src/core/`) execute the actual logic (RPC calls, Docker commands, file operations)
+4. **Bitcoin Core** receives RPC commands through the nginx proxy (Docker) or directly (Manual)
+5. **Results** are formatted and displayed back to the user with progress indicators
+
+### Service Layer Pattern
+
+![Caravan-X-flow](./assets/service-layer.png)
+
+The command layer handles user-facing display, while the service layer uses `log.debug()` for internal tracing. Errors bubble up from services to commands, where they're transformed into user-friendly messages with specific troubleshooting suggestions.
+
+---
+
+
+## Key Concepts
+
+### Profiles
+
+Every Caravan-X configuration is a **profile** — an isolated directory containing everything for that specific setup:
+```
+~/.caravan-x/
+└── profiles/
+    ├── a1b2c3d4/                    # Docker Profile "My Test Setup"
+    │   ├── config.json              # Profile-scoped configuration
+    │   ├── docker-data/             # Bitcoin Core blockchain data
+    │   │   ├── bitcoin-data/
+    │   │   └── nginx/
+    │   ├── wallets/                 # Caravan wallet JSON configs
+    │   ├── keys/                    # Private key files
+    │   ├── snapshots/               # Saved blockchain states
+    │   ├── scenarios/               # Custom test scripts
+    │   └── logs/                    # Profile-specific logs
+    └── e5f6g7h8/                    # Docker Profile "Fee Bumping Tests"
+        └── ... (completely isolated)
+```
+
+**Why profiles matter:**
+
+- **No data leakage** — Wallets from Profile A never appear in Profile B's exports
+- **Simultaneous Docker profiles** — Each gets its own container with unique ports
+- **Manual mode limit** — Only one Manual profile is allowed (since all Manual profiles share the same `bitcoind` instance)
+- **Switch instantly** — Change between profiles in Settings without losing anything
+
+### Docker Mode vs Manual Mode
+
+| Feature | Docker Mode | Manual Mode |
+|---------|-------------|-------------|
+| Bitcoin Core setup | Automatic | You manage it |
+| nginx CORS proxy | Included | You configure it |
+| Multiple profiles | Yes (each gets own container) | One profile max |
+| Snapshots | Yes | Not available |
+| Environment sharing | Full support | Limited |
+| Port conflicts | Auto-resolved | Manual resolution |
+| Caravan integration | Pre-configured | Manual CORS setup |
+
+### Descriptors & Caravan Compatibility
+
+Caravan-X generates descriptors in the exact format Caravan expects:
+```
+wsh(sortedmulti(2,[fingerprint1/48'/1'/0'/2']xpub1/0/*,[fingerprint2/48'/1'/0'/2']xpub2/0/*))
+```
+
+Key requirements that Caravan-X handles automatically:
+- Uses `sortedmulti` instead of `multi` (Caravan requirement)
+- Includes full derivation paths with fingerprints: `[abcd1234/48'/1'/0'/2']`
+- Obtains checksums from Bitcoin Core via `getdescriptorinfo` before importing
+- Creates both receive (`/0/*`) and change (`/1/*`) descriptors
 
 ---
 
@@ -64,6 +194,20 @@ npm install -g caravan-x
 
 That's it. Run `caravan-x` and you're off to the races.
 
+### Install from source
+```bash
+git clone https://github.com/Legend101Zz/CaravanX.git
+cd CaravanX
+npm install
+npm run build
+npm link    # Makes 'caravan-x' available globally
+```
+
+### Verify installation
+```bash
+caravan-x --version
+```
+
 For development (if you want to contribute or modify):
 ```bash
 git clone https://github.com/Legend101Zz/CaravanX.git
@@ -74,33 +218,32 @@ npm link  # Makes caravan-x available globally
 ```
 
 ---
+---
 
 ## Quick Start
 
-### The Fast Track (Docker Mode)
-
-If you have Docker installed and just want to get going:
+### Docker Mode (Recommended)
 ```bash
 caravan-x
 ```
 
-1. Select "Docker Mode (Recommended)" when prompted
-2. Accept the default settings or customize as needed
-3. Wait for the Bitcoin Core container to spin up
-4. You're now running a fully configured regtest environment
+1. Select **"Docker Mode (Recommended)"**
+2. Accept defaults or customize RPC credentials, ports, container name
+3. Name your profile (e.g., "My Dev Setup")
+4. Wait ~30 seconds for Bitcoin Core + nginx to spin up
+5. You now have a running regtest with 101 blocks and spendable coins
 
-The setup wizard handles everything: creating the container, configuring RPC authentication, setting up nginx proxy, generating initial blocks, and creating a watch-only wallet.
-
-### Already Have Bitcoin Core Running (Manual Mode)
-
-If you prefer managing your own node:
+### Manual Mode
 ```bash
 caravan-x
 ```
 
-1. Select "Manual Mode"
-2. Enter your Bitcoin Core RPC connection details
-3. Start using all the wallet and transaction features immediately
+1. Select **"Manual Mode"**
+2. Enter your Bitcoin Core RPC connection details (host, port, user, pass)
+3. Point to your Bitcoin Core data directory
+4. Start using wallet and transaction features immediately
+
+> **Prerequisite for Manual Mode:** Bitcoin Core must already be running in regtest mode. See [Manual Mode Setup Guide](./docs/manual-mode.md).
 
 ---
 
@@ -108,258 +251,113 @@ caravan-x
 
 ### Docker Mode
 
-This is the recommended approach for most developers. Docker mode automatically:
+Docker mode is fully automated. When you create a Docker profile, Caravan-X:
 
-- Pulls and runs the official Bitcoin Core image (v27.0)
-- Creates a dedicated Docker network for Caravan-X
-- Sets up an nginx reverse proxy with CORS headers (so Caravan can talk to your node)
-- Configures RPC authentication
-- Generates 101 initial blocks (so you have spendable coins)
-- Creates a watch-only wallet for Caravan integration
-- Handles port conflicts automatically
+1. Checks Docker is installed and running
+2. Detects system architecture (handles ARM64/Apple Silicon with `--platform linux/amd64`)
+3. Creates a Docker network (`caravan-x-network`)
+4. Scans for port conflicts and auto-assigns alternatives if 18443/18444/8080 are busy
+5. Generates `bitcoin.conf` with your RPC credentials
+6. Starts the `bitcoin/bitcoin:27.0` container with proper volume mounts
+7. Waits for Bitcoin Core to be ready (with retry logic)
+8. Starts an nginx container with CORS headers for Caravan browser access
+9. Creates a `mining_wallet` and generates 101 blocks (coins become spendable)
+10. Creates a watch-only wallet for Caravan integration
+11. Tests the full RPC connection chain
 
-All data is stored in `~/.caravan-x` by default, but you can customize the location during setup.
-
-**What Gets Created:**
-```
-~/.caravan-x/
-├── config.json           # Main configuration
-├── docker-data/          # Bitcoin Core data directory
-├── wallets/              # Caravan wallet configurations
-├── keys/                 # Private key storage
-├── snapshots/            # Blockchain snapshots
-└── scenarios/            # Custom test scenarios
-```
-
-**Accessing Bitcoin Core:**
-
-Once Docker mode is running, your node is accessible at `http://localhost:8080` (via nginx proxy). This is the URL you'll use in Caravan's settings.
+Your node is then accessible at `http://localhost:8080` (or whichever port was assigned).
 
 ### Manual Mode
 
-For developers who want full control over their Bitcoin Core setup. You provide:
+For developers who want full control. You provide the RPC connection details and Caravan-X connects to your existing Bitcoin Core. You get all features except Docker management, snapshots, and environment sharing.
 
-- RPC host and port (default: 127.0.0.1:18443)
-- RPC username and password
-- Bitcoin data directory path
-
-Manual mode gives you access to all Caravan-X features except Docker management and nginx proxy (since you're handling that yourself).
-
-**Requirements for Manual Mode:**
-
-Your Bitcoin Core must be running in regtest mode. A minimal `bitcoin.conf`:
+**Minimal `bitcoin.conf` for Manual Mode:**
 ```ini
-# Global settings
+# Global settings (must be at root level)
 rpcuser=your_username
 rpcpassword=your_password
 server=1
 
-# Regtest-specific settings
+# Regtest-specific settings (must be in [regtest] section)
 [regtest]
 rpcport=18443
+rpcbind=0.0.0.0
+rpcallowip=0.0.0.0/0
 ```
 
-Start Bitcoin Core with:
-```bash
-bitcoind -regtest -daemon
-```
-
-### Switching Between Modes
-
-From the TUI, go to Settings and select "Switch Mode." This updates your configuration and restarts Caravan-X in the new mode. Your wallet configurations and snapshots are preserved.
+> ⚠️ Modern Bitcoin Core (v0.17+) requires network-specific settings like `rpcport` to be in the `[regtest]` section, while auth credentials remain global.
 
 ---
 
-## Using the TUI (Terminal User Interface)
+## Documentation
 
-Launch Caravan-X without arguments to enter the interactive interface:
-```bash
-caravan-x
-```
+Detailed user guides live in the [`docs/`](./docs/) folder:
 
-You'll see a nice ASCII banner and the main menu. Navigate with arrow keys and Enter.
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](./docs/getting-started.md) | First-time setup walkthrough |
+| [Docker Mode Guide](./docs/docker-mode.md) | Docker profiles, multiple environments, container management |
+| [Manual Mode Guide](./docs/manual-mode.md) | Connecting to your own Bitcoin Core |
+| [Basic Wallets](./docs/basic-wallets.md) | Creating, viewing, funding, and sending with basic wallets |
+| [Caravan Multisig](./docs/caravan-multisig.md) | Creating multisig wallets, funding, spending, signing PSBTs |
+| [Transactions](./docs/transactions.md) | PSBT creation, signing, finalizing, and broadcasting |
+| [Environment Sharing](./docs/environment-sharing.md) | Exporting and importing `.caravan-env` archives |
+| [Snapshots](./docs/snapshots.md) | Saving and restoring blockchain states |
+| [Scripting Engine](./docs/scripting.md) | Automating scenarios with JS/JSON scripts |
+| [Test Scenarios](./docs/test-scenarios.md) | Built-in RBF, CPFP, and multisig scenarios |
+| [Visualization](./docs/visualization.md) | Blockchain activity visualization (Manual mode) |
+| [Working with Caravan](./docs/caravan-integration.md) | Connecting Caravan-X to the Caravan web UI |
+| [Profiles & Settings](./docs/profiles-settings.md) | Managing multiple configurations |
+| [Troubleshooting](./docs/troubleshooting.md) | Common issues and solutions |
 
-### Main Menu Categories
-
-The menu adapts based on your mode. In Docker mode you'll see Docker Management and Snapshots. In Manual mode you'll see the Visualization option instead.
-
-**Available in Both Modes:**
-- Bitcoin Wallets
-- Caravan Multisig
-- Transactions
-- Blockchain Scripts
-- Test Scenarios
-- System
-- Settings
-- Help
-
-**Docker Mode Only:**
-- Docker Management
-- Snapshots
-
-**Manual Mode Only:**
-- Visualization
-
-### Bitcoin Wallets
-
-Everything you need for basic wallet operations:
-
-| Option | What It Does |
-|--------|--------------|
-| List all wallets | Shows every wallet in your node with type and balance |
-| Create new wallet | Makes a new wallet (regular, watch-only, or blank) |
-| View wallet details | Deep dive into a specific wallet's addresses and UTXOs |
-| Send funds between wallets | Move coins from one wallet to another |
-| Fund wallet with regtest coins | Mine blocks directly to a wallet's address |
-
-### Caravan Multisig
-
-The heart of Caravan-X. This is where you create and manage multisig setups:
-
-| Option | What It Does |
-|--------|--------------|
-| List Caravan wallets | Shows all your multisig configurations |
-| Create new Caravan multisig wallet | Interactive wizard for M-of-N setups |
-| Spend from Caravan multisig wallet | Create spending transactions |
-| Sign Caravan PSBT for import | Sign PSBTs and export signatures for Caravan |
-| Fund Caravan multisig wallet | Send regtest coins to your multisig |
-| View Caravan wallet details | See addresses, UTXOs, and configuration |
-| Create watch-only wallet for Caravan | Set up address monitoring |
-| Create test multisig wallets | Generate wallets with different privacy profiles |
-
-**Creating a Multisig Wallet:**
-
-The wizard walks you through:
-
-1. Choosing a name
-2. Selecting address type (P2WSH, P2SH-P2WSH, or P2SH)
-3. Setting required signatures (M) and total signers (N)
-4. Creating or importing signer wallets
-
-Caravan-X generates proper `sortedmulti` descriptors with fingerprints and derivation paths that Caravan expects. No more descriptor format headaches.
-
-### Transactions
-
-| Option | What It Does |
-|--------|--------------|
-| Create PSBT | Build a new Partially Signed Bitcoin Transaction |
-| Sign PSBT | Add signatures to an existing PSBT |
-| Finalize and broadcast PSBT | Complete signing and send to network |
-| View transaction | Decode and inspect any transaction |
-| Get raw transaction | Fetch hex for a transaction by txid |
-
-### Blockchain Scripts
-
-Caravan-X includes a scripting engine for automating complex scenarios:
-
-| Option | What It Does |
-|--------|--------------|
-| Browse templates | Pre-made scripts for common patterns |
-| Create new script | Start a fresh JavaScript or JSON script |
-| Run script | Execute a script file |
-| Manage saved scripts | View, edit, delete your scripts |
-
-### Docker Management
-
-(Docker mode only)
-
-| Option | What It Does |
-|--------|--------------|
-| View container status | See if Bitcoin Core is running |
-| Start container | Boot up the regtest environment |
-| Stop container | Gracefully shut down |
-| View logs | Check Bitcoin Core output |
-| Troubleshoot port issues | Diagnose networking problems |
-| Advanced options | Clean up containers, force restart |
-
-### Snapshots
-
-(Docker mode only)
-
-Save and restore complete blockchain states:
-
-| Option | What It Does |
-|--------|--------------|
-| Create Snapshot | Package current state with a name |
-| List Snapshots | See all saved states with block heights |
-| Restore Snapshot | Roll back to a previous state |
-| Compare Snapshots | Diff two snapshots to see changes |
-| Delete Snapshot | Remove old snapshots |
-
-### Test Scenarios
-
-Run pre-configured test setups:
-
-| Option | What It Does |
-|--------|--------------|
-| List scenarios | See built-in and custom scenarios |
-| Run scenario | Execute a scenario end-to-end |
-| Create scenario | Build your own test scenario |
+> 📹 Each guide includes video walkthroughs. Videos coming soon!
 
 ---
+## CLI Reference
 
-## CLI Commands
+Every TUI feature is also available as a direct command — useful for scripting and CI/CD.
 
-Every TUI feature is also available as a direct command. Useful for scripting and CI/CD.
-
-### Basic Commands
+### Wallet Commands
 ```bash
-# Start interactive mode (default)
-caravan-x start
-
-# List all wallets
-caravan-x list-wallets
-
-# Create a new wallet
-caravan-x create-wallet --name my_wallet
-caravan-x create-wallet --name my_watch --watch-only
-
-# Fund a wallet (mine blocks to it)
-caravan-x fund-wallet --name my_wallet --blocks 10
-
-# Send between wallets
+caravan-x list-wallets                          # List all wallets
+caravan-x create-wallet --name my_wallet        # Create a regular wallet
+caravan-x create-wallet --name my_watch --watch-only  # Watch-only wallet
+caravan-x fund-wallet --name my_wallet --blocks 10    # Mine blocks to fund
 caravan-x send --from wallet_a --to wallet_b --amount 1.5
-
-# Mine blocks
-caravan-x mine --blocks 6 --wallet my_wallet
 ```
 
 ### Multisig Commands
 ```bash
-# Create a multisig wallet (interactive)
-caravan-x create-caravan
-
-# List Caravan wallets
-caravan-x list-caravan
-
-# Sign a PSBT for Caravan import
+caravan-x create-caravan          # Interactive multisig creation wizard
+caravan-x list-caravan            # List all Caravan wallets
 caravan-x sign-caravan-psbt --file transaction.psbt --key
+caravan-x import-caravan --file wallet_config.json
+```
+
+### Transaction Commands
+```bash
+caravan-x create-psbt             # Create a new PSBT
+caravan-x mine --blocks 6 --wallet my_wallet
 ```
 
 ### Script Commands
 ```bash
-# Run a script
 caravan-x run-script --file my_scenario.js
-
-# Run with verbose output
 caravan-x run-script --file my_scenario.js --verbose
-
-# Dry run (preview without executing)
 caravan-x run-script --file my_scenario.js --dry-run
-
-# Create a new script
 caravan-x create-script --name "my_test" --type js
 ```
 
-### Other Useful Commands
+### Environment Commands
 ```bash
-# View system info
+caravan-x env export --name "team-setup" --output ./team-setup.caravan-env
+caravan-x env import ./team-setup.caravan-env
+caravan-x env inspect ./team-setup.caravan-env
+```
+
+### System Commands
+```bash
 caravan-x system-info
-
-# Import a Caravan wallet configuration
-caravan-x import-caravan --file wallet_config.json
-
-# Simulate blockchain activity
 caravan-x simulate --blocks 5 --transactions 3
 ```
 
@@ -367,7 +365,7 @@ caravan-x simulate --blocks 5 --transactions 3
 
 ## Configuration
 
-Configuration lives at `~/.caravan-x/config.json`. Here's what a Docker mode config looks like:
+Configuration is stored per-profile at `~/.caravan-x/profiles/<id>/config.json`:
 ```json
 {
   "mode": "docker",
@@ -377,130 +375,62 @@ Configuration lives at `~/.caravan-x/config.json`. Here's what a Docker mode con
     "port": 8080,
     "user": "caravan_user",
     "pass": "caravan_pass",
-    "dataDir": "~/.caravan-x/docker-data"
+    "dataDir": "~/.caravan-x/profiles/a1b2c3d4/docker-data/bitcoin-data"
   },
   "docker": {
     "enabled": true,
     "image": "bitcoin/bitcoin:27.0",
-    "containerName": "caravan-x-bitcoin",
-    "ports": {
-      "rpc": 18443,
-      "p2p": 18444,
-      "nginx": 8080
-    }
+    "containerName": "caravan-x-bitcoin-a1b2c3d4",
+    "ports": { "rpc": 18443, "p2p": 18444, "nginx": 8080 },
+    "network": "caravan-x-network"
   },
   "snapshots": {
     "enabled": true,
-    "directory": "~/.caravan-x/snapshots",
+    "directory": "~/.caravan-x/profiles/a1b2c3d4/snapshots",
     "autoSnapshot": false
   }
 }
 ```
 
-You can edit this file directly or use the Settings menu in the TUI.
+You can edit configuration through the TUI: **Settings → Edit Current Config**.
 
 ---
 
-## Pre-configured Test Scenarios
+## Roadmap
 
-Caravan-X ships with several built-in scenarios:
+### Phase 1: Core Testing Tool ✅
 
-### Basic RBF (Replace-By-Fee)
+- [x] Docker mode with automated Bitcoin Core setup
+- [x] Manual mode for existing installations
+- [x] nginx proxy with CORS for Caravan integration
+- [x] Pre-configured test scenarios (RBF, CPFP, Multisig)
+- [x] Snapshot and restore for blockchain states
+- [x] Caravan-compatible descriptors (`sortedmulti` with proper paths)
+- [x] Privacy profile testing (good/moderate/bad wallets)
+- [x] JavaScript and JSON scripting engine
+- [x] Profile isolation system
 
-Creates an unconfirmed transaction that can be replaced with a higher-fee version. Perfect for testing RBF handling in your application.
-```
-Wallets: alice (funded), bob (empty)
-Transaction: alice -> bob, 1 BTC, RBF enabled, low fee
-```
+### Phase 2: Terminal UI Improvements (In Progress)
 
-### CPFP (Child-Pays-For-Parent)
+- [x] Interactive setup wizard
+- [x] Mode-specific menus
+- [ ] Improved mempool.space-style visualization
+- [ ] Better transaction flow diagrams
+- [ ] Real-time UTXO updates
 
-Demonstrates fee bumping via a child transaction. Creates a stuck parent transaction and a child that pays enough fee to get both confirmed.
-```
-Wallets: alice (funded), bob (empty)
-Transactions:
-  1. alice -> bob, 5 BTC, very low fee (stuck)
-  2. bob -> alice, 1 BTC, high fee (bumps parent)
-```
+### Phase 3: Environment Sharing (In Progress)
 
-### Multisig 2-of-3 Setup
+- [x] Basic snapshot export
+- [x] `.caravan-env` archive format for complete environments
+- [x] One-command environment import into isolated profiles
+- [ ] Version-controlled environment definitions
 
-A ready-to-use 2-of-3 multisig configuration with initial funding.
-```
-Wallets: funder (100 BTC), multisig_2of3 (10 BTC)
-Configuration: 2 signatures required, 3 total signers
-```
+### Phase 4: AI Integration (Brainstorming)
 
-### Timelock Test
-
-For testing time-locked transactions with CSV and CLTV.
-
----
-
-## Scripting Engine
-
-For complex testing scenarios, write scripts in JavaScript or JSON.
-
-### JavaScript Example
-```javascript
-/**
- * @name Fee Escalation Test
- * @description Tests progressively increasing transaction fees
- * @version 1.0.0
- */
-
-async function runScript() {
-  // Create test wallets
-  await bitcoinService.createWallet('fee_sender', { disablePrivateKeys: false });
-  await bitcoinService.createWallet('fee_receiver', { disablePrivateKeys: false });
-
-  // Fund the sender
-  const address = await bitcoinService.getNewAddress('fee_sender');
-  await bitcoinService.generateToAddress(10, address);
-
-  // Create transactions at different fee rates
-  const feeRates = [1, 2, 5, 10, 20];
-
-  for (const rate of feeRates) {
-    const receiverAddr = await bitcoinService.getNewAddress('fee_receiver');
-    const txid = await bitcoinService.sendToAddress('fee_sender', receiverAddr, 0.1);
-    console.log(`Created tx at ${rate} sat/vB: ${txid}`);
-  }
-
-  return { success: true };
-}
-
-runScript();
-```
-
-### JSON Declarative Example
-```json
-{
-  "name": "Simple Wallet Test",
-  "description": "Creates wallets and moves funds",
-  "version": "1.0.0",
-  "variables": {
-    "walletName": "test_wallet",
-    "fundingBlocks": 5
-  },
-  "actions": [
-    {
-      "type": "CREATE_WALLET",
-      "params": {
-        "name": "${walletName}",
-        "options": { "disablePrivateKeys": false }
-      }
-    },
-    {
-      "type": "MINE_BLOCKS",
-      "params": {
-        "toWallet": "${walletName}",
-        "count": "${fundingBlocks}"
-      }
-    }
-  ]
-}
-```
+- [ ] Natural language commands via LLM integration
+- [ ] Support for OpenRouter, Claude, OpenAI, Ollama
+- [ ] Generate scripts from descriptions
+- [ ] Automated scenario creation
 
 ---
 
@@ -534,94 +464,22 @@ When you create a multisig wallet in Caravan-X:
 
 ---
 
-## Roadmap
-
-Here's where Caravan-X is headed. Check marks show what's already built.
-
-### Phase 1: Core Testing Tool (Current)
-
-- [x] Docker mode with automated Bitcoin Core setup
-- [x] Manual mode for existing installations
-- [x] Shared configuration format
-- [x] nginx proxy with CORS for Caravan integration
-- [x] Pre-configured test scenarios (RBF, CPFP, Multisig)
-- [x] Snapshot and restore for blockchain states
-- [x] Identical multisig wallet generation for team sharing
-- [x] Caravan-compatible descriptors (sortedmulti with proper paths)
-- [x] Privacy profile testing (good/moderate/bad wallets)
-- [x] JavaScript and JSON scripting engine
-
-### Phase 2: Terminal UI Improvements (In Progress)
-
-- [x] Interactive setup wizard
-- [x] Mode-specific menus
-- [ ] Improved mempool.space-style visualization
-- [ ] Better transaction flow diagrams
-- [ ] Real-time UTXO updates
-
-### Phase 3: Environment Sharing (Planned)
-
-- [x] Basic snapshot export
-- [ ] .caravan-env archive format for complete environments
-- [ ] One-command environment import
-- [ ] Version-controlled environment definitions
-
-### Phase 4: AI Integration (Brainstorming)
-
-- [ ] Natural language commands via LLM integration
-- [ ] Support for OpenRouter, Claude, OpenAI, Ollama
-- [ ] Generate scripts from descriptions
-- [ ] Automated scenario creation
-
-Example: "Create a sequence of CPFP transactions using my multisig wallet" and the system builds and executes it.
-
----
-
 ## Troubleshooting
 
-### Docker Container Won't Start
+See the full [Troubleshooting Guide](./docs/troubleshooting.md). Common issues:
 
-**Port Already in Use:**
+**Docker won't start:** Make sure Docker Desktop is running. Check `docker --version`.
 
-Caravan-X tries to handle this automatically, but if port 8080 is taken:
-```bash
-# Find what's using the port
-lsof -i :8080
+**Port already in use:** Caravan-X auto-detects and reassigns ports. If it persists: `lsof -i :8080` to find what's using the port.
 
-# Or let Caravan-X try a different port
-# Go to Docker Management > Troubleshoot Port Issues
-```
+**Can't connect to Bitcoin Core (Manual):** Verify `bitcoind -regtest` is running, check RPC credentials match `bitcoin.conf`, ensure `server=1` is set.
 
-**Docker Not Running:**
+**Caravan can't see wallets:** Use Docker mode (includes nginx CORS proxy), or manually configure CORS on your setup. Set Caravan's node URL to `http://localhost:8080`.
 
-Make sure Docker Desktop is running (macOS/Windows) or the Docker daemon is started (Linux).
-
-### Can't Connect to Bitcoin Core (Manual Mode)
-
-- Verify Bitcoin Core is running: `bitcoin-cli -regtest getblockchaininfo`
-- Check your RPC credentials match `bitcoin.conf`
-- Ensure `server=1` is set in your config
-- Check the port matches (default regtest RPC is 18443)
-
-### Caravan Can't See My Wallet
-
-- Make sure you're using Docker mode with nginx proxy, or have CORS configured manually
-- Verify the RPC URL in Caravan matches your Caravan-X setup
-- Check that the watch-only wallet was created successfully
-
-### Descriptors Not Importing
-
-- Caravan-X uses `sortedmulti` which requires Bitcoin Core v0.17+
-- Make sure you're using descriptor wallets (not legacy)
-- Check that fingerprints and derivation paths are correct
-
-### Snapshot Restore Failed
-
-- Stop Bitcoin Core before restoring
-- Ensure you have enough disk space
-- Try the restore again with Docker Management > Stop Container first
+**Descriptors not importing:** Ensure you're using Bitcoin Core v0.17+ with descriptor wallets. Caravan-X uses `sortedmulti` format automatically.
 
 ---
+
 
 ## Contributing
 
@@ -633,13 +491,10 @@ Caravan-X is open source and contributions are welcome. Here's how to get involv
 4. Run `npm run lint` and `npm test`
 5. Submit a pull request
 
-**Areas where help is appreciated:**
-- Additional test scenario templates
-- Improved mempool visualization
-- Documentation and examples
-- Bug fixes and edge case handling
+**Areas where help is appreciated:** test scenario templates, improved mempool visualization, documentation, bug fixes.
 
-Report issues at: https://github.com/Legend101Zz/CaravanX/issues
+Report issues: [GitHub Issues](https://github.com/Legend101Zz/CaravanX/issues)
+
 
 ---
 
@@ -649,4 +504,4 @@ MIT License - see LICENSE file for details.
 
 ---
 
-Built with care for the Bitcoin development community.
+Built with care for the Bitcoin development community by [Mrigesh Thakur](https://github.com/Legend101Zz).
